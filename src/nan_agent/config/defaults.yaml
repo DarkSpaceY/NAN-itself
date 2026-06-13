@@ -1,0 +1,77 @@
+agent:
+  name: "NAN-Agent"
+  version: "0.1.0"
+
+model:
+  provider: "ollama"
+  model_name: "gemma4:26b"
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  top_p: 0.9
+  stream: true
+  timeout: 120
+
+memory:
+  vector_store:
+    type: "chromadb"
+    persist_directory: "./data/chroma"
+    collection_name: "nan_memory"
+  graph_store:
+    type: "networkx"
+    persist_path: "./data/graph.json"
+  state_store:
+    type: "sqlite"
+    db_path: "./data/state.db"
+  blob_store:
+    type: "local"
+    base_path: "./data/blobs"
+
+storage:
+  data_dir: "./data"
+
+logging:
+  level: "INFO"
+  format: "console"
+  output: "console"
+  file:
+    enabled: false
+    path: "./logs/nan_agent.log"
+    rotation: "10 MB"
+  module_levels:
+    httpcore: "WARNING"
+    httpx: "WARNING"
+    chromadb: "WARNING"
+
+inference:
+  goto:
+    max_parallel: 3
+    max_iterations: 100
+    hot_temperature: 0.9
+    cold_temperature: 0.3
+    edge_cut_threshold: 0.3
+    max_branches: 5
+
+self_value:
+  mbti: "INTJ"
+  hormone_decay_rate: 0.01
+
+soft_memory:
+  enabled: false
+  lora:
+    model_id: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    rank: 8
+    alpha: 16
+    learning_rate: 1e-4
+    epochs: 3
+    batch_size: 4
+  triggers:
+    failure_threshold: 3
+    density_threshold: 100
+    timed_interval_hours: 24
+
+action_room:
+  workspace_dir: "./workspace"
+  skill_tree_path: "./data/skills.yaml"
+  simulation:
+    enabled: true
+  mcp_servers: []

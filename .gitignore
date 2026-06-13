@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+src/nan_agent/__pycache__/
+src/nan_agent/action_room/__pycache__/
+src/nan_agent/cli/__pycache__/
+src/nan_agent/config/__pycache__/
+src/nan_agent/hard_memory/__pycache__/
+src/nan_agent/inference/__pycache__/
+src/nan_agent/logging/__pycache__/
+src/nan_agent/model/__pycache__/
+src/nan_agent/self_value/__pycache__/
+src/nan_agent/soft_memory/__pycache__/
+src/nan_agent/storage/__pycache__/
+src/nan_agent/task_agent/__pycache__/
+src/nan_agent.egg-info/
+
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# 运行时数据
+data/chroma/
+data/sessions/
+data/repl_history.json
+data/graph_snapshots/
+data/*.db
+
+# 模型权重（由下载脚本获取）
+weights/
+
+# 环境
+.env
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时文件
+/tmp/
+*.tmp
+
+AGENTS.md
+CLAUDE.md
+
+tests/
+src/nan_agent/docs/
+logs/
+docs/
+.pytest_cache/
+scripts/
