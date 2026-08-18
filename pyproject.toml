@@ -1,0 +1,27 @@
+[project]
+name = "nan-itself"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "DarkSpaceY", email = "yif.chien.nolimit@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.122.0",
+    "easyocr>=1.7.2",
+    "faster-whisper>=1.2.1",
+    "loguru>=0.7.3",
+    "openai>=3.2.0",
+    "pywhispercpp>=1.5.0",
+    "setuptools>=84.0.0",
+    "sounddevice>=0.5.6",
+    "webrtcvad>=2.0.10",
+]
+
+[project.scripts]
+nan-itself = "nan_itself:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
