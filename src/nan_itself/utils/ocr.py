@@ -1,7 +1,9 @@
+from PIL import Image
 from loguru import logger
 from pathlib import Path
 from typing import List, Tuple
 from pydantic import BaseModel
+import numpy as np
 
 import cv2
 from easyocr import Reader
@@ -36,9 +38,9 @@ class OCRProvider:
         
         self._closed = False
     
-    def extract_text(
+    def parser(
         self,
-        image: Path,
+        image: Image.Image,
         detail: int,
         paragraph: bool = False,
         min_size: int = 10,
@@ -47,7 +49,7 @@ class OCRProvider:
         从图片中提取文字
         
         Args:
-            image: 图片路径
+            image: PIL Image 对象
             detail: 0=只返回文字, 1=返回文字+坐标, 2=返回更多细节
             paragraph: 是否合并为段落
             min_size: 最小文字尺寸
@@ -56,7 +58,7 @@ class OCRProvider:
             OCRResult 列表
         """
         # 转换为 numpy 数组
-        img = cv2.imread(str(image))
+        img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
         # EasyOCR 返回: list of [bbox, text, confidence]
         results = self.reader.readtext(
@@ -90,6 +92,7 @@ class OCRProvider:
     def close(self) -> None:
         if not self._closed:
             logger.info("Closing OCRProvider")
-            del self.reader
-            self.reader = None
+            if self.reader:
+                del self.reader
+                self.reader = None
             self._closed = True
