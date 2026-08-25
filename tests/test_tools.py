@@ -8,10 +8,10 @@ import pytest
 import yaml
 
 from src.nan_itself.tools.facade import (
-    AgentMCPView,
-    MCPProvider,
-    MCPProviderSpec,
-    MCPRuntime,
+    AgentToolView,
+    Provider,
+    ProviderSpec,
+    ProviderRuntime,
 )
 
 
@@ -64,7 +64,7 @@ def fake_tool(name: str):
 
 
 def install_fake_provider(
-    runtime: MCPRuntime,
+    runtime: ProviderRuntime,
     name: str,
     tools: list,
     *,
@@ -74,14 +74,14 @@ def install_fake_provider(
     session = FakeSession(tools)
     stack = FakeStack()
 
-    spec = MCPProviderSpec(
+    spec = ProviderSpec(
         name=name,
         command="fake",
         source=source,
         origin=origin,
     )
 
-    runtime.providers[name] = MCPProvider(
+    runtime.providers[name] = Provider(
         spec=spec,
         stack=stack,
         session=session,
@@ -95,8 +95,8 @@ def install_fake_provider(
 
 
 @pytest.mark.asyncio
-async def test_agent_view_has_only_route_mcp_without_active_provider():
-    runtime = MCPRuntime()
+async def test_agent_view_has_only_route_without_active_provider():
+    runtime = ProviderRuntime()
 
     install_fake_provider(
         runtime,
@@ -104,18 +104,18 @@ async def test_agent_view_has_only_route_mcp_without_active_provider():
         [fake_tool("read_file")],
     )
 
-    view = AgentMCPView(runtime)
+    view = AgentToolView(runtime)
 
     tools = await view.list_tools()
 
     assert [tool.name for tool in tools] == [
-        "route_mcp",
+        "route",
     ]
 
 
 @pytest.mark.asyncio
-async def test_route_mcp_exposes_only_active_provider_tools():
-    runtime = MCPRuntime()
+async def test_route_exposes_only_active_provider_tools():
+    runtime = ProviderRuntime()
 
     install_fake_provider(
         runtime,
@@ -134,17 +134,17 @@ async def test_route_mcp_exposes_only_active_provider_tools():
         ],
     )
 
-    view = AgentMCPView(runtime)
+    view = AgentToolView(runtime)
 
     result = await view.call_tool(
-        "route_mcp",
+        "route",
         {
-            "mcp_name": "files",
+            "provider_name": "files",
         },
     )
 
     assert not result.isError
-    assert view.active_mcp == "files"
+    assert view.active_provider == "files"
 
     tools = await view.list_tools()
 
@@ -152,15 +152,15 @@ async def test_route_mcp_exposes_only_active_provider_tools():
         tool.name
         for tool in tools
     } == {
-        "route_mcp",
+        "route",
         "read_file",
         "write_file",
     }
 
     await view.call_tool(
-        "route_mcp",
+        "route",
         {
-            "mcp_name": "playwright",
+            "provider_name": "playwright",
         },
     )
 
@@ -170,14 +170,14 @@ async def test_route_mcp_exposes_only_active_provider_tools():
         tool.name
         for tool in tools
     } == {
-        "route_mcp",
+        "route",
         "browser_open",
     }
 
 
 @pytest.mark.asyncio
-async def test_agent_views_have_independent_active_mcp():
-    runtime = MCPRuntime()
+async def test_agent_views_have_independent_active_provider():
+    runtime = ProviderRuntime()
 
     install_fake_provider(
         runtime,
@@ -195,17 +195,17 @@ async def test_agent_views_have_independent_active_mcp():
     subagent = runtime.create_agent_view()
 
     await main.call_tool(
-        "route_mcp",
-        {"mcp_name": "files"},
+        "route",
+        {"provider_name": "files"},
     )
 
     await subagent.call_tool(
-        "route_mcp",
-        {"mcp_name": "playwright"},
+        "route",
+        {"provider_name": "playwright"},
     )
 
-    assert main.active_mcp == "files"
-    assert subagent.active_mcp == "playwright"
+    assert main.active_provider == "files"
+    assert subagent.active_provider == "playwright"
 
     main_tools = await main.list_tools()
     subagent_tools = await subagent.list_tools()
@@ -214,7 +214,7 @@ async def test_agent_views_have_independent_active_mcp():
         tool.name
         for tool in main_tools
     } == {
-        "route_mcp",
+        "route",
         "read_file",
     }
 
@@ -222,14 +222,14 @@ async def test_agent_views_have_independent_active_mcp():
         tool.name
         for tool in subagent_tools
     } == {
-        "route_mcp",
+        "route",
         "browser_open",
     }
 
 
 @pytest.mark.asyncio
 async def test_agent_views_share_same_provider_connection():
-    runtime = MCPRuntime()
+    runtime = ProviderRuntime()
 
     session, _ = install_fake_provider(
         runtime,
@@ -241,20 +241,20 @@ async def test_agent_views_share_same_provider_connection():
     subagent = runtime.create_agent_view()
 
     await main.call_tool(
-        "route_mcp",
-        {"mcp_name": "files"},
+        "route",
+        {"provider_name": "files"},
     )
 
     await subagent.call_tool(
-        "route_mcp",
-        {"mcp_name": "files"},
+        "route",
+        {"provider_name": "files"},
     )
 
     provider = runtime.get_provider("files")
 
     assert provider is not None
-    assert main.active_mcp == "files"
-    assert subagent.active_mcp == "files"
+    assert main.active_provider == "files"
+    assert subagent.active_provider == "files"
 
     # Both views ultimately use the same MCP session.
     await main.call_tool(
@@ -281,22 +281,22 @@ async def test_agent_views_share_same_provider_connection():
 
 @pytest.mark.asyncio
 async def test_unknown_mcp_cannot_be_routed():
-    runtime = MCPRuntime()
+    runtime = ProviderRuntime()
 
     view = runtime.create_agent_view()
 
     result = await view.call_tool(
-        "route_mcp",
-        {"mcp_name": "missing"},
+        "route",
+        {"provider_name": "missing"},
     )
 
     assert result.isError
-    assert view.active_mcp is None
+    assert view.active_provider is None
 
 
 @pytest.mark.asyncio
-async def test_tool_call_without_active_mcp_is_rejected():
-    runtime = MCPRuntime()
+async def test_tool_call_without_active_provider_is_rejected():
+    runtime = ProviderRuntime()
 
     install_fake_provider(
         runtime,
@@ -312,12 +312,12 @@ async def test_tool_call_without_active_mcp_is_rejected():
     )
 
     assert result.isError
-    assert view.active_mcp is None
+    assert view.active_provider is None
 
 
 @pytest.mark.asyncio
 async def test_tool_call_is_forwarded_to_active_provider():
-    runtime = MCPRuntime()
+    runtime = ProviderRuntime()
 
     session, _ = install_fake_provider(
         runtime,
@@ -328,8 +328,8 @@ async def test_tool_call_is_forwarded_to_active_provider():
     view = runtime.create_agent_view()
 
     await view.call_tool(
-        "route_mcp",
-        {"mcp_name": "files"},
+        "route",
+        {"provider_name": "files"},
     )
 
     result = await view.call_tool(
@@ -384,7 +384,7 @@ mcp_servers:
         config.read_text(encoding="utf-8")
     )
 
-    specs = MCPRuntime._parse_builtin_config(
+    specs = ProviderRuntime._parse_builtin_config(
         raw,
         config,
     )
@@ -437,7 +437,7 @@ cwd: /tmp
         config.read_text(encoding="utf-8")
     )
 
-    specs = MCPRuntime._parse_workspace_config(
+    specs = ProviderRuntime._parse_workspace_config(
         raw,
         config,
     )
@@ -480,7 +480,7 @@ mcp_servers:
         config.read_text(encoding="utf-8")
     )
 
-    specs = MCPRuntime._parse_workspace_config(
+    specs = ProviderRuntime._parse_workspace_config(
         raw,
         config,
     )
@@ -515,15 +515,18 @@ mcp_servers:
         encoding="utf-8",
     )
 
-    runtime = MCPRuntime(
+    runtime = ProviderRuntime(
         workspace_mcp_dir=workspace,
+        workspace_local_dir=(
+            tmp_path / "workspace" / "tools" / "local"
+        ),
     )
 
     async def fake_connect(spec):
         if spec.name == "broken":
             raise RuntimeError("connection failed")
 
-        return MCPProvider(
+        return Provider(
             spec=spec,
             stack=FakeStack(),
             session=FakeSession(
@@ -586,12 +589,12 @@ async def test_workspace_provider_can_be_added_and_removed(
     )
     workspace.mkdir(parents=True)
 
-    runtime = MCPRuntime(
+    runtime = ProviderRuntime(
         workspace_mcp_dir=workspace,
     )
 
     async def fake_connect(spec):
-        return MCPProvider(
+        return Provider(
             spec=spec,
             stack=FakeStack(),
             session=FakeSession(
@@ -640,7 +643,7 @@ async def test_workspace_cannot_override_builtin(tmp_path):
     )
     workspace.mkdir(parents=True)
 
-    runtime = MCPRuntime(
+    runtime = ProviderRuntime(
         workspace_mcp_dir=workspace,
     )
 
@@ -685,7 +688,7 @@ async def test_workspace_scan_is_not_repeated_for_unchanged_file(
     )
     workspace.mkdir(parents=True)
 
-    runtime = MCPRuntime(
+    runtime = ProviderRuntime(
         workspace_mcp_dir=workspace,
     )
 
@@ -695,7 +698,7 @@ async def test_workspace_scan_is_not_repeated_for_unchanged_file(
         nonlocal count
         count += 1
 
-        return MCPProvider(
+        return Provider(
             spec=spec,
             stack=FakeStack(),
             session=FakeSession(
@@ -730,7 +733,7 @@ command: fake
 
 @pytest.mark.asyncio
 async def test_runtime_stop_closes_all_providers():
-    runtime = MCPRuntime()
+    runtime = ProviderRuntime()
 
     _, files_stack = install_fake_provider(
         runtime,

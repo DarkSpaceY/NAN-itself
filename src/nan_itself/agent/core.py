@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 import mcp.types as mcp_types
+from loguru import logger
 
 from src.nan_itself.agent.runtime import (
     AgentContext,
@@ -14,14 +16,13 @@ from src.nan_itself.agent.runtime import (
     SubagentHandle,
     SubagentLimitError,
 )
-from src.nan_itself.modules.facade import ModuleState
 from src.nan_itself.skills.facade import (
     Skill,
     SkillRuntime,
 )
 from src.nan_itself.tools.facade import (
-    AgentMCPView,
-    MCPRuntime,
+    AgentToolView,
+    ProviderRuntime,
 )
 from src.nan_itself.utils.llm import (
     LLMProvider,
@@ -33,11 +34,88 @@ from src.nan_itself.utils.llm import (
 )
 
 
-MAX_HISTORY_TURNS = 4
 DEFAULT_MAX_STEPS = 64
+DEFAULT_HISTORY_TOKEN_BUDGET = 2048
 
 SLEEP_TOOL_NAME = "sleep"
 DISPATCH_SUBAGENT_TOOL_NAME = "dispatch_subagent"
+AWAIT_SUBAGENTS_TOOL_NAME = "await_subagents"
+ACTIVATE_SKILL_TOOL_NAME = "activate_skill"
+
+_REPORT_PREFIX = "[Subagent Report]"
+_REPORT_TASK_PREVIEW_LIMIT = 200
+
+
+# ============================================================================
+# Token estimation
+# ============================================================================
+
+
+def _estimate_tokens(
+    text: str,
+) -> int:
+    """
+    Cheap heuristic token estimate.
+
+    CJK characters count roughly one token each; other text is
+    approximated at four characters per token. Good enough for
+    budgeting a deliberately small history window.
+    """
+    if not text:
+        return 0
+
+    cjk = 0
+
+    for character in text:
+        code = ord(character)
+
+        if (
+            0x3400 <= code <= 0x4DBF
+            or 0x4E00 <= code <= 0x9FFF
+            or 0x3000 <= code <= 0x303F
+            or 0xFF00 <= code <= 0xFFEF
+        ):
+            cjk += 1
+
+    other = len(text) - cjk
+
+    return cjk + (other + 3) // 4
+
+
+def _message_token_cost(
+    message: Message,
+) -> int:
+    cost = 4 + _estimate_tokens(
+        message.content or ""
+    )
+
+    for call in message.tool_calls:
+        cost += 4
+        cost += _estimate_tokens(call.name)
+        cost += _estimate_tokens(
+            json.dumps(
+                call.arguments,
+                ensure_ascii=False,
+            )
+        )
+
+    return cost
+
+
+@dataclass
+class _ChildSubagent:
+    """
+    Execution-local record of one dispatched child.
+
+    Handles are never exposed to the model. Reports are delivered
+    automatically at step boundaries, via the await_subagents
+    barrier, or into the next turn when they arrive late.
+    """
+
+    id: str
+    task: str
+    handle: SubagentHandle
+    reported: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,12 +165,25 @@ class CoreAgent:
     Core Agent runtime.
 
     Main Agent:
-        permanently uses core_skill.
+        permanently uses core_skill and never sees the
+        concept of Skills.
 
     Subagent:
-        may select another Skill, including core_skill.
+        inherits its parent's Skill at start and may switch
+        its own Skill via activate_skill.
 
     All descendants of one Core turn share the same world snapshot.
+
+    Subagent reports are pushed back automatically:
+        - finished children are injected at the next step boundary;
+        - await_subagents blocks until every outstanding child is
+          done and returns all reports at once;
+        - reports arriving after the turn ended are delivered at
+          the start of the next main turn.
+
+    History follows the "less history, more observation" philosophy:
+    durable state lives in Module observations, so the conversation
+    window is bounded by a small token budget instead of turn counts.
     """
 
     def __init__(
@@ -100,16 +191,16 @@ class CoreAgent:
         *,
         llm: LLMProvider,
         modules: Any,
-        mcp: MCPRuntime,
+        providers: ProviderRuntime,
         skills: SkillRuntime,
         core_skill: Skill,
         max_subagent_depth: int = 3,
-        history_turns: int = MAX_HISTORY_TURNS,
+        history_token_budget: int = DEFAULT_HISTORY_TOKEN_BUDGET,
         max_steps: int = DEFAULT_MAX_STEPS,
     ) -> None:
-        if history_turns < 1:
+        if history_token_budget < 1:
             raise ValueError(
-                "history_turns must be >= 1"
+                "history_token_budget must be >= 1"
             )
 
         if max_steps < 1:
@@ -119,7 +210,7 @@ class CoreAgent:
 
         self.llm = llm
         self.modules = modules
-        self.mcp = mcp
+        self.providers = providers
         self.skills = skills
         self.core_skill = core_skill
 
@@ -127,17 +218,16 @@ class CoreAgent:
             max_subagent_depth=max_subagent_depth,
         )
 
-        self.history_turns = history_turns
+        self.history_token_budget = history_token_budget
         self.max_steps = max_steps
 
         self._main_history: list[
             ConversationTurn
         ] = []
 
-        self._subagents: dict[
-            str,
-            SubagentHandle,
-        ] = {}
+        # Reports from children that finished after their parent's
+        # turn already ended. Delivered at the start of the next run().
+        self._late_reports: deque[str] = deque()
 
     # ==================================================================
     # Main Agent
@@ -151,6 +241,7 @@ class CoreAgent:
         Run one Main Agent turn.
 
         A new world snapshot is captured exactly once.
+        Late subagent reports are seeded into this turn.
         """
         world = self.modules.snapshot()
 
@@ -160,26 +251,35 @@ class CoreAgent:
             task=user_input,
         )
 
+        seed_reports = list(
+            self._late_reports
+        )
+
+        self._late_reports.clear()
+
         result = await self._run_agent(
             context=root,
             user_input=user_input,
-            skill=self.core_skill,
             history=self._main_history,
+            seed_reports=seed_reports,
         )
 
-        # Keep only the recent conversation window.
+        # Keep only what fits the token budget; the newest turn is
+        # always retained even when it alone exceeds the budget.
         self._main_history.append(
             ConversationTurn(
                 messages=result.messages,
             )
         )
 
-        if len(self._main_history) > self.history_turns:
-            self._main_history = (
-                self._main_history[
-                    -self.history_turns:
-                ]
+        while (
+            len(self._main_history) > 1
+            and self._history_cost(
+                self._main_history
             )
+            > self.history_token_budget
+        ):
+            self._main_history.pop(0)
 
         return result
 
@@ -192,9 +292,24 @@ class CoreAgent:
         *,
         context: AgentContext,
         user_input: str,
-        skill: Skill,
         history: list[ConversationTurn],
+        seed_reports: list[str] | None = None,
     ) -> AgentResult:
+        # The Skill is inherited through the AgentContext and may
+        # be switched mid-execution by activate_skill (Subagents
+        # only). The Main Agent stays pinned to core_skill.
+        active_skill: Skill = (
+            context.skill
+            if isinstance(context.skill, Skill)
+            else self.core_skill
+        )
+
+        skill_catalog = (
+            self._format_skill_catalog()
+            if context.depth > 0
+            else []
+        )
+
         turn = AgentTurn(
             turn_id=uuid.uuid4().hex,
             agent_hash=context.agent_hash,
@@ -209,94 +324,194 @@ class CoreAgent:
             context.world,
         )
 
-        mcp_view = self.mcp.create_agent_view()
+        provider_view = self.providers.create_agent_view()
+
+        children: list[_ChildSubagent] = []
+
+        corrected_empty = False
 
         current_messages: list[Message] = [
             Message(
                 role="user",
-                content=user_input,
-            ),
+                content=report,
+            )
+            for report in (seed_reports or [])
         ]
 
-        child_handles: dict[
-            str,
-            SubagentHandle,
-        ] = {}
-
-        last_response: LLMResponse | None = None
-
-        for _step in range(self.max_steps):
-            request_messages = (
-                self._build_messages(
-                    skill=skill,
-                    ambient_context=ambient_context,
-                    history=history,
-                    current=current_messages,
-                )
+        current_messages.append(
+            Message(
+                role="user",
+                content=user_input,
             )
+        )
 
-            tool_definitions = await self._tool_definitions(
-                mcp_view=mcp_view,
-                skill=skill,
-            )
+        try:
+            for _step in range(self.max_steps):
+                # Deliver reports from children that finished since
+                # the previous step.
+                for report in await self._collect_finished_reports(
+                    children,
+                ):
+                    current_messages.append(
+                        Message(
+                            role="user",
+                            content=report,
+                        )
+                    )
 
-            response = await self.llm.generate_complete(
-                LLMRequest(
-                    messages=request_messages,
-                    temperature=0.7,
-                    max_tokens=4096,
-                    tools=tool_definitions,
-                )
-            )
-
-            last_response = response
-
-            if not response.tool_calls:
-                assistant_message = Message(
-                    role="assistant",
-                    content=response.content or "",
-                )
-
-                current_messages.append(
-                    assistant_message
-                )
-
-                return AgentResult(
-                    content=response.content or "",
-                    messages=tuple(
-                        current_messages
-                    ),
-                    response=response,
-                )
-
-            current_messages.append(
-                Message(
-                    role="assistant",
-                    content=response.content,
-                    tool_calls=response.tool_calls,
-                )
-            )
-
-            for tool_call in response.tool_calls:
-                tool_result = await self._execute_tool(
-                    context=context,
-                    skill=skill,
-                    mcp_view=mcp_view,
-                    tool_call=tool_call,
-                    child_handles=child_handles,
-                )
-
-                current_messages.append(
-                    Message(
-                        role="tool",
-                        tool_call_id=tool_call.id,
-                        content=tool_result,
+                request_messages = (
+                    self._build_messages(
+                        skill=active_skill,
+                        ambient_context=ambient_context,
+                        history=history,
+                        current=current_messages,
+                        skill_catalog=skill_catalog,
                     )
                 )
 
-        raise RuntimeError(
-            f"Agent exceeded max_steps={self.max_steps}"
-        )
+                tool_definitions = await self._tool_definitions(
+                    provider_view=provider_view,
+                    depth=context.depth,
+                )
+
+                response = await self.llm.generate_complete(
+                    LLMRequest(
+                        messages=request_messages,
+                        temperature=0.7,
+                        max_tokens=4096,
+                        tools=tool_definitions,
+                    )
+                )
+
+                empty_reply = (
+                    not response.tool_calls
+                    and not (response.content or "").strip()
+                )
+
+                if empty_reply:
+                    # Some backends (e.g. Ollama) silently discard
+                    # unparseable tool-call output: empty content
+                    # while tokens were counted. Feed back a
+                    # corrective note once so the model re-aims at
+                    # the tools it actually has.
+                    logger.warning(
+                        "[turn:{}] empty reply "
+                        "(finish={}); possible silent "
+                        "tool-call parse drop or idle cycle",
+                        context.agent_hash[:8],
+                        response.finish_reason,
+                    )
+
+                    if not corrected_empty:
+                        corrected_empty = True
+
+                        tool_names = ", ".join(
+                            tool.name
+                            for tool in tool_definitions
+                        )
+
+                        current_messages.append(
+                            Message(
+                                role="assistant",
+                                content="",
+                            )
+                        )
+
+                        current_messages.append(
+                            Message(
+                                role="user",
+                                content=(
+                                    "[system] 你的上一条输出为空且无法解析。"
+                                    f"当前可用工具：{tool_names}。"
+                                    "若要使用未激活的工具组，先调用 route 激活；"
+                                    "然后调用合适的工具，或直接用文本回答。"
+                                    "不要调用不存在的工具。"
+                                ),
+                            )
+                        )
+
+                        continue
+
+                if not response.tool_calls:
+                    assistant_message = Message(
+                        role="assistant",
+                        content=response.content or "",
+                    )
+
+                    current_messages.append(
+                        assistant_message
+                    )
+
+                    return AgentResult(
+                        content=response.content or "",
+                        messages=tuple(
+                            current_messages
+                        ),
+                        response=response,
+                    )
+
+                current_messages.append(
+                    Message(
+                        role="assistant",
+                        content=response.content,
+                        tool_calls=response.tool_calls,
+                    )
+                )
+
+                for tool_call in response.tool_calls:
+                    if (
+                        context.depth > 0
+                        and tool_call.name
+                        == ACTIVATE_SKILL_TOOL_NAME
+                    ):
+                        # activate_skill mutates this execution's
+                        # active Skill, so it is handled here
+                        # instead of inside _execute_tool.
+                        result_text, activated = (
+                            await self._execute_activate_skill(
+                                tool_call.arguments,
+                            )
+                        )
+
+                        if activated is not None:
+                            active_skill = activated
+
+                        current_messages.append(
+                            Message(
+                                role="tool",
+                                tool_call_id=tool_call.id,
+                                content=result_text,
+                            )
+                        )
+
+                        continue
+
+                    tool_result = await self._execute_tool(
+                        context=context,
+                        provider_view=provider_view,
+                        tool_call=tool_call,
+                        children=children,
+                    )
+
+                    current_messages.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=tool_call.id,
+                            content=tool_result,
+                        )
+                    )
+
+            raise RuntimeError(
+                f"Agent exceeded max_steps={self.max_steps}"
+            )
+
+        finally:
+            # Children still running when this execution ends keep
+            # going; main-tree reports are queued for the next turn.
+            self._schedule_child_archive(
+                children,
+                context.depth,
+            )
 
     # ==================================================================
     # Prompt assembly
@@ -309,12 +524,23 @@ class CoreAgent:
         ambient_context: list[str],
         history: list[ConversationTurn],
         current: list[Message],
+        skill_catalog: list[str] | None = None,
     ) -> list[Message]:
         system_parts: list[str] = []
 
         system_parts.append(
             skill.instructions
         )
+
+        if skill_catalog:
+            system_parts.append(
+                "\n"
+                "[Available Skills]\n"
+                "You may switch your own Skill at any step "
+                "by calling activate_skill with one of "
+                "these names:\n"
+                + "\n".join(skill_catalog)
+            )
 
         if ambient_context:
             system_parts.append(
@@ -337,10 +563,8 @@ class CoreAgent:
             )
         ]
 
-        # Recent turns only.
-        for turn in history[
-            -self.history_turns:
-        ]:
+        # run() owns history trimming; pass through as-is.
+        for turn in history:
             messages.extend(
                 turn.messages
             )
@@ -349,6 +573,30 @@ class CoreAgent:
 
         return messages
 
+    def _history_cost(
+        self,
+        history: list[ConversationTurn],
+    ) -> int:
+        return sum(
+            _message_token_cost(message)
+            for turn in history
+            for message in turn.messages
+        )
+
+    def _format_skill_catalog(
+        self,
+    ) -> list[str]:
+        """
+        One-line catalog entries for Subagent skill switching.
+
+        The Main Agent never receives this catalog: Skills do not
+        exist in its world.
+        """
+        return [
+            f"- {metadata.name}: {metadata.description}"
+            for metadata in self.skills.catalog()
+        ]
+
     # ==================================================================
     # Tools
     # ==================================================================
@@ -356,10 +604,10 @@ class CoreAgent:
     async def _tool_definitions(
         self,
         *,
-        mcp_view: AgentMCPView,
-        skill: Skill,
+        provider_view: AgentToolView,
+        depth: int = 0,
     ) -> list[ToolDefinition]:
-        mcp_tools = await mcp_view.list_tools()
+        provider_tools = await provider_view.list_tools()
 
         result = [
             ToolDefinition(
@@ -367,30 +615,30 @@ class CoreAgent:
                 description=tool.description or "",
                 input_schema=tool.inputSchema,
             )
-            for tool in mcp_tools
+            for tool in provider_tools
         ]
 
         result.extend(
-            self._agent_tools(
-                allow_subagent=True,
-            )
+            self._agent_tools()
         )
+
+        if depth > 0:
+            # Only Subagents may switch their own Skill.
+            # The Main Agent never sees this tool.
+            result.append(
+                self._activate_skill_tool()
+            )
 
         return result
 
     @staticmethod
-    def _agent_tools(
-        *,
-        allow_subagent: bool,
-    ) -> list[ToolDefinition]:
-        tools = [
+    def _agent_tools() -> list[ToolDefinition]:
+        return [
             ToolDefinition(
                 name=SLEEP_TOOL_NAME,
                 description=(
-                    "Temporarily stop reasoning and wait. "
-                    "Use seconds for a time delay, or "
-                    "until_subagent to wait for a dispatched "
-                    "Subagent to finish."
+                    "Temporarily stop reasoning and wait "
+                    "for a number of seconds."
                 ),
                 input_schema={
                     "type": "object",
@@ -402,55 +650,79 @@ class CoreAgent:
                                 "Seconds to wait."
                             ),
                         },
-                        "until_subagent": {
+                    },
+                    "required": ["seconds"],
+                    "additionalProperties": False,
+                },
+            ),
+            ToolDefinition(
+                name=DISPATCH_SUBAGENT_TOOL_NAME,
+                description=(
+                    "Dispatch a parallel Subagent to work "
+                    "on a task. Dispatch several in the same "
+                    "response when tasks are independent. "
+                    "Each Subagent starts immediately and its "
+                    "final report is delivered to this agent's "
+                    "context automatically once it finishes."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "task": {
                             "type": "string",
                             "description": (
-                                "Subagent handle ID to wait for."
+                                "The task to delegate."
                             ),
                         },
                     },
+                    "required": [
+                        "task",
+                    ],
+                    "additionalProperties": False,
+                },
+            ),
+            ToolDefinition(
+                name=AWAIT_SUBAGENTS_TOOL_NAME,
+                description=(
+                    "Block until every subagent dispatched "
+                    "so far has finished, then receive all "
+                    "of their reports at once. Returns "
+                    "immediately when nothing is outstanding."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {},
                     "additionalProperties": False,
                 },
             ),
         ]
 
-        if allow_subagent:
-            tools.append(
-                ToolDefinition(
-                    name=DISPATCH_SUBAGENT_TOOL_NAME,
-                    description=(
-                        "Dispatch a parallel Subagent to work "
-                        "on a task. The Subagent starts immediately "
-                        "and this call returns a handle ID instead "
-                        "of waiting for completion."
-                    ),
-                    input_schema={
-                        "type": "object",
-                        "properties": {
-                            "task": {
-                                "type": "string",
-                                "description": (
-                                    "The task to delegate."
-                                ),
-                            },
-                            "skill": {
-                                "type": "string",
-                                "description": (
-                                    "Optional Skill to use. "
-                                    "The special value 'core' "
-                                    "selects Core Skill."
-                                ),
-                            },
-                        },
-                        "required": [
-                            "task",
-                        ],
-                        "additionalProperties": False,
+    @staticmethod
+    def _activate_skill_tool() -> ToolDefinition:
+        """
+        Subagent-only tool for switching its own Skill.
+        """
+        return ToolDefinition(
+            name=ACTIVATE_SKILL_TOOL_NAME,
+            description=(
+                "Switch this Subagent's own Skill. The new "
+                "Skill takes effect from the next step."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "The name of the Skill to "
+                            "activate."
+                        ),
                     },
-                )
-            )
-
-        return tools
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        )
 
     # ==================================================================
     # Tool execution
@@ -460,18 +732,31 @@ class CoreAgent:
         self,
         *,
         context: AgentContext,
-        skill: Skill,
-        mcp_view: AgentMCPView,
+        provider_view: AgentToolView,
         tool_call: ToolCall,
-        child_handles: dict[
-            str,
-            SubagentHandle,
-        ],
+        children: list[_ChildSubagent],
     ) -> str:
+        logger.info(
+            "[turn:{}] tool {} {}",
+            context.agent_hash[:8],
+            tool_call.name,
+            json.dumps(
+                tool_call.arguments,
+                ensure_ascii=False,
+            )[:160],
+        )
+
         if tool_call.name == SLEEP_TOOL_NAME:
             return await self._execute_sleep(
                 tool_call.arguments,
-                child_handles,
+            )
+
+        if tool_call.name == ACTIVATE_SKILL_TOOL_NAME:
+            # Reached only when the Main Agent (depth 0)
+            # hallucinates this Subagent-only tool.
+            return (
+                "activate_skill is only available "
+                "to Subagents."
             )
 
         if (
@@ -481,10 +766,18 @@ class CoreAgent:
             return await self._execute_dispatch(
                 context=context,
                 arguments=tool_call.arguments,
-                child_handles=child_handles,
+                children=children,
             )
 
-        result = await mcp_view.call_tool(
+        if (
+            tool_call.name
+            == AWAIT_SUBAGENTS_TOOL_NAME
+        ):
+            return await self._execute_await_subagents(
+                children,
+            )
+
+        result = await provider_view.call_tool(
             tool_call.name,
             tool_call.arguments,
         )
@@ -496,53 +789,12 @@ class CoreAgent:
     async def _execute_sleep(
         self,
         arguments: dict[str, Any],
-        child_handles: dict[
-            str,
-            SubagentHandle,
-        ],
     ) -> str:
-        until_subagent = arguments.get(
-            "until_subagent"
-        )
-
-        if until_subagent:
-            handle = child_handles.get(
-                until_subagent
-            )
-
-            if handle is None:
-                return (
-                    f"Unknown Subagent handle: "
-                    f"{until_subagent}"
-                )
-
-            try:
-                result = await handle.wait()
-
-            except asyncio.CancelledError:
-                raise
-
-            except Exception as exc:
-                return (
-                    "Subagent failed: "
-                    f"{exc}"
-                )
-
-            return (
-                "Subagent completed.\n"
-                + self._serialize_agent_result(
-                    result
-                )
-            )
-
-        seconds = arguments.get(
-            "seconds"
-        )
+        seconds = arguments.get("seconds")
 
         if seconds is None:
             return (
-                "sleep requires either "
-                "'seconds' or 'until_subagent'."
+                "sleep requires 'seconds'."
             )
 
         if not isinstance(
@@ -571,10 +823,7 @@ class CoreAgent:
         *,
         context: AgentContext,
         arguments: dict[str, Any],
-        child_handles: dict[
-            str,
-            SubagentHandle,
-        ],
+        children: list[_ChildSubagent],
     ) -> str:
         task = arguments.get("task")
 
@@ -584,26 +833,14 @@ class CoreAgent:
                 "a non-empty 'task'."
             )
 
-        skill_name = arguments.get(
-            "skill"
-        )
-
-        try:
-            selected_skill = (
-                self._resolve_skill(
-                    skill_name
-                )
-            )
-        except Exception as exc:
-            return str(exc)
-
         async def worker(
             child_context: AgentContext,
         ) -> AgentResult:
+            # The child inherits its parent's Skill through
+            # AgentContext and may switch it via activate_skill.
             return await self._run_agent(
                 context=child_context,
                 user_input=task,
-                skill=selected_skill,
                 history=[],
             )
 
@@ -611,50 +848,236 @@ class CoreAgent:
             handle = self.agent_runtime.dispatch(
                 context,
                 task=task,
-                skill=selected_skill,
                 worker=worker,
             )
 
         except SubagentLimitError as exc:
             return str(exc)
 
-        handle_id = handle.agent_hash
+        child = _ChildSubagent(
+            id=handle.agent_hash[:8],
+            task=task,
+            handle=handle,
+        )
 
-        child_handles[
-            handle_id
-        ] = handle
-
-        self._subagents[
-            handle_id
-        ] = handle
+        children.append(child)
 
         return (
             "Subagent dispatched.\n"
-            f"handle: {handle_id}\n"
+            f"id: {child.id}\n"
             f"depth: {handle.depth}\n"
-            "It is running in parallel."
+            "It runs in parallel; its report will be "
+            "delivered automatically."
         )
 
-    def _resolve_skill(
+    async def _execute_await_subagents(
         self,
-        name: str | None,
-    ) -> Skill:
-        if name is None or name == "core":
-            return self.core_skill
+        children: list[_ChildSubagent],
+    ) -> str:
+        outstanding = [
+            child
+            for child in children
+            if not child.reported
+        ]
+
+        if not outstanding:
+            return (
+                "No outstanding subagents."
+            )
+
+        # Concurrent barrier over the snapshot taken at call time.
+        # Individual failures are formatted as failed reports.
+        await asyncio.gather(
+            *(
+                child.handle.wait()
+                for child in outstanding
+            ),
+            return_exceptions=True,
+        )
+
+        reports: list[str] = []
+
+        for child in outstanding:
+            child.reported = True
+
+            reports.append(
+                await self._format_child_report(
+                    child
+                )
+            )
+
+        return (
+            f"{len(outstanding)} subagent(s) "
+            "finished.\n\n"
+            + "\n\n".join(reports)
+        )
+
+    async def _execute_activate_skill(
+        self,
+        arguments: dict[str, Any],
+    ) -> tuple[str, Skill | None]:
+        """
+        Switch this Subagent's own Skill.
+
+        Returns the tool-result text plus the newly activated
+        Skill; the second item is None when activation failed
+        and the current Skill should stay in effect.
+        """
+        name = arguments.get("name")
+
+        if not isinstance(name, str) or not name.strip():
+            return (
+                "activate_skill requires 'name'. "
+                f"Available Skills: "
+                f"{', '.join(self.skills.names())}",
+                None,
+            )
 
         try:
-            return self.skills.activate(
-                name
-            )
-        except KeyError as exc:
-            available = ", ".join(
-                self.skills.names()
+            skill = self.skills.activate(name)
+
+        except KeyError:
+            return (
+                f"Unknown Skill '{name}'. "
+                f"Available Skills: "
+                f"{', '.join(self.skills.names())}",
+                None,
             )
 
-            raise ValueError(
-                f"Unknown Skill '{name}'. "
-                f"Available Skills: {available}"
-            ) from exc
+        return (
+            f"Skill '{skill.name}' activated. It takes "
+            "effect from your next step.",
+            skill,
+        )
+
+    # ==================================================================
+    # Subagent report delivery
+    # ==================================================================
+
+    async def _collect_finished_reports(
+        self,
+        children: list[_ChildSubagent],
+    ) -> list[str]:
+        reports: list[str] = []
+
+        for child in children:
+            if child.reported:
+                continue
+
+            if not child.handle.done:
+                continue
+
+            child.reported = True
+
+            reports.append(
+                await self._format_child_report(
+                    child
+                )
+            )
+
+        return reports
+
+    async def _format_child_report(
+        self,
+        child: _ChildSubagent,
+    ) -> str:
+        try:
+            result = await child.handle.wait()
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception as exc:
+            body = (
+                "status: failed\n"
+                f"error: {exc}"
+            )
+
+        else:
+            body = (
+                "status: completed\n"
+                + (result.content or "")
+            )
+
+        task_preview = child.task
+
+        if len(task_preview) > _REPORT_TASK_PREVIEW_LIMIT:
+            task_preview = (
+                task_preview[
+                    :_REPORT_TASK_PREVIEW_LIMIT
+                ]
+                + "..."
+            )
+
+        return (
+            f"{_REPORT_PREFIX}\n"
+            f"id: {child.id}\n"
+            f"task: {task_preview}\n"
+            + body
+        )
+
+    def _schedule_child_archive(
+        self,
+        children: list[_ChildSubagent],
+        depth: int,
+    ) -> None:
+        pending = [
+            child
+            for child in children
+            if not child.reported
+        ]
+
+        if not pending:
+            return
+
+        asyncio.create_task(
+            self._archive_children(
+                pending,
+                depth,
+            ),
+            name="subagent-report-archive",
+        )
+
+    async def _archive_children(
+        self,
+        pending: list[_ChildSubagent],
+        depth: int,
+    ) -> None:
+        """
+        Park reports of children outliving their execution.
+
+        Only the main tree keeps them (delivered next turn);
+        deeper orphaned results are dropped.
+        """
+        for child in pending:
+            if depth != 0:
+                continue
+
+            try:
+                report = (
+                    await self._format_child_report(
+                        child
+                    )
+                )
+
+            except asyncio.CancelledError:
+                raise
+
+            except Exception:
+                continue
+
+            child.reported = True
+
+            self._late_reports.append(
+                report
+            )
+
+    def _drain_late_reports(self) -> list[str]:
+        reports = list(self._late_reports)
+
+        self._late_reports.clear()
+
+        return reports
 
     # ==================================================================
     # Serialization helpers
@@ -691,9 +1114,3 @@ class CoreAgent:
             )
         except Exception:
             return str(result)
-
-    @staticmethod
-    def _serialize_agent_result(
-        result: AgentResult,
-    ) -> str:
-        return result.content

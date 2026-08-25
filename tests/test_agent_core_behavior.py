@@ -14,9 +14,9 @@ from src.nan_itself.skills.facade import (
     SkillMetadata,
 )
 from src.nan_itself.tools.facade import (
-    MCPProvider,
-    MCPProviderSpec,
-    MCPRuntime,
+    Provider,
+    ProviderSpec,
+    ProviderRuntime,
 )
 from src.nan_itself.utils.llm import (
     LLMResponse,
@@ -75,6 +75,12 @@ class FakeSkills:
         name: str,
     ) -> Skill:
         return self._skills[name]
+
+    def catalog(self):
+        return [
+            self._skills[name].metadata
+            for name in sorted(self._skills)
+        ]
 
 
 class FakeModules:
@@ -177,7 +183,7 @@ class FakeStack:
 
 
 def install_fake_mcp(
-    runtime: MCPRuntime,
+    runtime: ProviderRuntime,
     name: str,
     tools: list[Tool],
     handler=None,
@@ -187,14 +193,14 @@ def install_fake_mcp(
         handler=handler,
     )
 
-    spec = MCPProviderSpec(
+    spec = ProviderSpec(
         name=name,
         command="fake",
         source="<test>",
         origin="builtin",
     )
 
-    runtime.providers[name] = MCPProvider(
+    runtime.providers[name] = Provider(
         spec=spec,
         stack=FakeStack(),
         session=session,
@@ -310,7 +316,7 @@ async def test_main_agent_uses_core_skill_only():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
             "research": make_skill(
@@ -360,7 +366,7 @@ async def test_main_agent_receives_ambient_module_context():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -385,7 +391,7 @@ async def test_main_agent_receives_ambient_module_context():
 
 
 @pytest.mark.asyncio
-async def test_main_agent_keeps_only_recent_turns():
+async def test_main_history_respects_token_budget():
     core = make_skill()
 
     llm = SequenceLLM([
@@ -400,12 +406,12 @@ async def test_main_agent_keeps_only_recent_turns():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
         core_skill=core,
-        history_turns=3,
+        history_token_budget=45,
     )
 
     for index in range(6):
@@ -416,7 +422,6 @@ async def test_main_agent_keeps_only_recent_turns():
     assert len(
         agent._main_history
     ) == 3
-
 
 # ============================================================================
 # World snapshot
@@ -453,7 +458,7 @@ async def test_main_and_subagent_share_exact_same_snapshot():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -535,7 +540,7 @@ async def test_module_can_distinguish_main_and_subagent():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -581,10 +586,10 @@ async def test_tool_call_round_trips_through_model():
             )
         }
 
-    mcp = MCPRuntime()
+    providers = ProviderRuntime()
 
     session = install_fake_mcp(
-        mcp,
+        providers,
         "test",
         [
             echo_tool(),
@@ -597,9 +602,9 @@ async def test_tool_call_round_trips_through_model():
             calls=[
                 tool_call(
                     call_id="route",
-                    name="route_mcp",
+                    name="route",
                     arguments={
-                        "mcp_name": "test",
+                        "provider_name": "test",
                     },
                 )
             ],
@@ -625,7 +630,7 @@ async def test_tool_call_round_trips_through_model():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=mcp,
+        providers=providers,
         skills=FakeSkills({
             "core": core,
         }),
@@ -657,297 +662,13 @@ async def test_tool_call_round_trips_through_model():
     )
 
 
-@pytest.mark.asyncio
-async def test_route_mcp_is_agent_local_during_core_loop():
-    core = make_skill()
-
-    mcp = MCPRuntime()
-
-    install_fake_mcp(
-        mcp,
-        "files",
-        [echo_tool()],
-    )
-
-    install_fake_mcp(
-        mcp,
-        "browser",
-        [complete_tool()],
-    )
-
-    llm = SequenceLLM([
-        response(
-            calls=[
-                tool_call(
-                    call_id="route-files",
-                    name="route_mcp",
-                    arguments={
-                        "mcp_name": "files",
-                    },
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        response(
-            text="done",
-        ),
-    ])
-
-    agent = CoreAgent(
-        llm=llm,
-        modules=FakeModules(),
-        mcp=mcp,
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-    )
-
-    await agent.run(
-        "files task",
-    )
-
-    first_request = llm.requests[0]
-
-    first_tool_names = {
-        tool.name
-        for tool in first_request.tools
-    }
-
-    assert (
-        "route_mcp"
-        in first_tool_names
-    )
-
-    assert (
-        "echo"
-        not in first_tool_names
-    )
-
-    # Route result is processed internally;
-    # the next model call receives the routed tool.
-    second_request = llm.requests[1]
-
-    second_tool_names = {
-        tool.name
-        for tool in second_request.tools
-    }
-
-    assert "echo" in second_tool_names
-    assert "complete" not in second_tool_names
-
-
-# ============================================================================
-# Subagent dispatch
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_subagent_dispatch_returns_immediately():
-    core = make_skill()
-
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    class SlowModules(FakeModules):
-        pass
-
-    class ControlledCore(
-        CoreAgent
-    ):
-        async def _run_agent(
-            self,
-            *,
-            context,
-            user_input,
-            skill,
-            history,
-        ):
-            if context.depth == 1:
-                started.set()
-                await release.wait()
-
-                return type(
-                    "Result",
-                    (),
-                    {
-                        "content": "sub done",
-                        "messages": (),
-                        "response": None,
-                    },
-                )()
-
-            return await super()._run_agent(
-                context=context,
-                user_input=user_input,
-                skill=skill,
-                history=history,
-            )
-
-    llm = SequenceLLM([
-        response(
-            calls=[
-                tool_call(
-                    call_id="dispatch",
-                    name="dispatch_subagent",
-                    arguments={
-                        "task": "slow work",
-                    },
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        response(
-            text="main continues",
-        ),
-    ])
-
-    agent = ControlledCore(
-        llm=llm,
-        modules=SlowModules(),
-        mcp=MCPRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-    )
-
-    result = await agent.run(
-        "parallel",
-    )
-
-    assert result.content == (
-        "main continues"
-    )
-
-    await asyncio.wait_for(
-        started.wait(),
-        timeout=1.0,
-    )
-
-    assert any(
-        not handle.done
-        for handle in agent._subagents.values()
-    )
-
-    release.set()
-
-    await asyncio.gather(
-        *(
-            handle.wait()
-            for handle in agent._subagents.values()
-        )
-    )
-
-
-@pytest.mark.asyncio
-async def test_main_can_wait_for_subagent():
-    core = make_skill()
-
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    class ControlledCore(
-        CoreAgent
-    ):
-        async def _run_agent(
-            self,
-            *,
-            context,
-            user_input,
-            skill,
-            history,
-        ):
-            if context.depth == 1:
-                started.set()
-                await release.wait()
-
-                return type(
-                    "Result",
-                    (),
-                    {
-                        "content": "subagent result",
-                        "messages": (),
-                        "response": None,
-                    },
-                )()
-
-            return await super()._run_agent(
-                context=context,
-                user_input=user_input,
-                skill=skill,
-                history=history,
-            )
-
-    # First dispatches.
-    # Second asks for a specific handle via sleep.
-    # But the model doesn't yet know the handle at authoring time,
-    # so this test focuses on the underlying handle plumbing by
-    # injecting it after dispatch.
-    llm = SequenceLLM([
-        response(
-            calls=[
-                tool_call(
-                    call_id="dispatch",
-                    name="dispatch_subagent",
-                    arguments={
-                        "task": "slow work",
-                    },
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        response(
-            text="main waiting",
-        ),
-    ])
-
-    agent = ControlledCore(
-        llm=llm,
-        modules=FakeModules(),
-        mcp=MCPRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-    )
-
-    result = await agent.run(
-        "dispatch and wait",
-    )
-
-    assert result.content == (
-        "main waiting"
-    )
-
-    await started.wait()
-
-    handles = list(
-        agent._subagents.values()
-    )
-
-    assert len(handles) == 1
-
-    handle = handles[0]
-
-    assert handle.done is False
-
-    release.set()
-
-    child_result = await handle.wait()
-
-    assert child_result.content == (
-        "subagent result"
-    )
-
-
 # ============================================================================
 # Skill switching
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_subagent_receives_selected_skill():
+async def test_subagent_activates_skill_itself():
     core = make_skill(
         "core",
         "CORE",
@@ -966,7 +687,6 @@ async def test_subagent_receives_selected_skill():
                     name="dispatch_subagent",
                     arguments={
                         "task": "research this",
-                        "skill": "research",
                     },
                 )
             ],
@@ -976,6 +696,18 @@ async def test_subagent_receives_selected_skill():
             text="main",
         ),
         response(
+            calls=[
+                tool_call(
+                    call_id="switch",
+                    name="activate_skill",
+                    arguments={
+                        "name": "research",
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
             text="sub",
         ),
     ])
@@ -983,7 +715,7 @@ async def test_subagent_receives_selected_skill():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
             "research": research,
@@ -996,30 +728,46 @@ async def test_subagent_receives_selected_skill():
     )
 
     for _ in range(100):
-        if len(llm.requests) >= 3:
+        if len(llm.requests) >= 4:
             break
 
         await asyncio.sleep(0.01)
 
-    assert len(llm.requests) >= 3
+    assert len(llm.requests) >= 4
 
-    subagent_request = (
+    first_child_request = (
         llm.requests[2]
     )
 
-    system = (
-        subagent_request
+    switched_request = (
+        llm.requests[3]
+    )
+
+    first_system = (
+        first_child_request
         .messages[0]
         .content
         or ""
     )
 
-    assert "RESEARCH" in system
-    assert "CORE" not in system
+    # The child starts on the inherited core skill and
+    # sees the catalog of switchable skills.
+    assert "CORE" in first_system
+    assert "RESEARCH" not in first_system
+    assert "[Available Skills]" in first_system
+
+    switched_system = (
+        switched_request
+        .messages[0]
+        .content
+        or ""
+    )
+
+    assert "RESEARCH" in switched_system
 
 
 @pytest.mark.asyncio
-async def test_subagent_can_explicitly_use_core_skill():
+async def test_subagent_inherits_parent_skill_by_default():
     core = make_skill(
         "core",
         "CORE",
@@ -1037,8 +785,7 @@ async def test_subagent_can_explicitly_use_core_skill():
                     call_id="dispatch",
                     name="dispatch_subagent",
                     arguments={
-                        "task": "switch to core",
-                        "skill": "core",
+                        "task": "plain task",
                     },
                 )
             ],
@@ -1055,7 +802,7 @@ async def test_subagent_can_explicitly_use_core_skill():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
             "research": research,
@@ -1082,6 +829,179 @@ async def test_subagent_can_explicitly_use_core_skill():
 
     assert "CORE" in subagent_system
     assert "RESEARCH" not in subagent_system
+
+
+@pytest.mark.asyncio
+async def test_main_agent_never_sees_activate_skill():
+    core = make_skill(
+        "core",
+        "CORE",
+    )
+
+    research = make_skill(
+        "research",
+        "RESEARCH",
+    )
+
+    llm = SequenceLLM([
+        # The Main Agent hallucinates the Subagent-only tool.
+        response(
+            calls=[
+                tool_call(
+                    call_id="switch",
+                    name="activate_skill",
+                    arguments={
+                        "name": "research",
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
+            text="done",
+        ),
+    ])
+
+    agent = CoreAgent(
+        llm=llm,
+        modules=FakeModules(),
+        providers=ProviderRuntime(),
+        skills=FakeSkills({
+            "core": core,
+            "research": research,
+        }),
+        core_skill=core,
+    )
+
+    await agent.run(
+        "try to switch",
+    )
+
+    assert len(llm.requests) == 2
+
+    first_request = llm.requests[0]
+
+    # The Main Agent never sees activate_skill.
+    assert not any(
+        tool.name == "activate_skill"
+        for tool in first_request.tools
+    )
+
+    second_request = llm.requests[1]
+
+    tool_messages = [
+        message
+        for message in second_request.messages
+        if message.role == "tool"
+    ]
+
+    assert any(
+        "only available to Subagents"
+        in (message.content or "")
+        for message in tool_messages
+    )
+
+    # The Main Agent is still pinned to the core skill.
+    system = (
+        second_request.messages[0].content
+        or ""
+    )
+
+    assert "CORE" in system
+    assert "RESEARCH" not in system
+
+
+@pytest.mark.asyncio
+async def test_activate_skill_unknown_name_returns_error():
+    core = make_skill(
+        "core",
+        "CORE",
+    )
+
+    llm = SequenceLLM([
+        response(
+            calls=[
+                tool_call(
+                    call_id="dispatch",
+                    name="dispatch_subagent",
+                    arguments={
+                        "task": "task",
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
+            text="main",
+        ),
+        response(
+            calls=[
+                tool_call(
+                    call_id="switch",
+                    name="activate_skill",
+                    arguments={
+                        "name": "missing",
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
+            text="child",
+        ),
+    ])
+
+    agent = CoreAgent(
+        llm=llm,
+        modules=FakeModules(),
+        providers=ProviderRuntime(),
+        skills=FakeSkills({
+            "core": core,
+        }),
+        core_skill=core,
+    )
+
+    await agent.run(
+        "delegate",
+    )
+
+    for _ in range(100):
+        if len(llm.requests) >= 4:
+            break
+
+        await asyncio.sleep(0.01)
+
+    assert len(llm.requests) >= 4
+
+    switched_request = (
+        llm.requests[3]
+    )
+
+    # The Subagent does see activate_skill.
+    assert any(
+        tool.name == "activate_skill"
+        for tool in switched_request.tools
+    )
+
+    tool_messages = [
+        message
+        for message in switched_request.messages
+        if message.role == "tool"
+    ]
+
+    assert any(
+        "Unknown Skill 'missing'" in (message.content or "")
+        and "Available Skills:" in (message.content or "")
+        for message in tool_messages
+    )
+
+    # The failed activation leaves the inherited skill active.
+    system = (
+        switched_request.messages[0].content
+        or ""
+    )
+
+    assert "CORE" in system
 
 
 # ============================================================================
@@ -1137,7 +1057,7 @@ async def test_subagent_can_dispatch_sub_subagent():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -1152,16 +1072,15 @@ async def test_subagent_can_dispatch_sub_subagent():
     assert result.content == "main"
 
     for _ in range(100):
-        if len(agent._subagents) >= 2:
+        if len(agent.agent_runtime.agents()) >= 3:
             break
 
         await asyncio.sleep(0.01)
 
-    assert len(agent._subagents) >= 2
-
     depths = sorted(
-        handle.depth
-        for handle in agent._subagents.values()
+        context.depth
+        for context in agent.agent_runtime.agents()
+        if context.depth > 0
     )
 
     assert depths == [
@@ -1212,7 +1131,7 @@ async def test_subagent_depth_limit_is_exposed_to_agent():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -1230,8 +1149,14 @@ async def test_subagent_depth_limit_is_exposed_to_agent():
 
         await asyncio.sleep(0.01)
 
+    created = [
+        context
+        for context in agent.agent_runtime.agents()
+        if context.depth > 0
+    ]
+
     # Grandchild was not actually created.
-    assert len(agent._subagents) == 1
+    assert len(created) == 1
 
     child_request = llm.requests[2]
 
@@ -1278,7 +1203,7 @@ async def test_agent_can_sleep_and_resume():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
@@ -1299,7 +1224,7 @@ async def test_agent_can_sleep_and_resume():
 
 
 @pytest.mark.asyncio
-async def test_changing_skill_does_not_remove_global_tools():
+async def test_routed_tools_do_not_leak_into_subagent_view():
     core = make_skill(
         "core",
         "CORE",
@@ -1310,10 +1235,10 @@ async def test_changing_skill_does_not_remove_global_tools():
         "RESEARCH",
     )
 
-    mcp = MCPRuntime()
+    providers = ProviderRuntime()
 
     install_fake_mcp(
-        mcp,
+        providers,
         "test",
         [echo_tool()],
     )
@@ -1323,9 +1248,9 @@ async def test_changing_skill_does_not_remove_global_tools():
             calls=[
                 tool_call(
                     call_id="route",
-                    name="route_mcp",
+                    name="route",
                     arguments={
-                        "mcp_name": "test",
+                        "provider_name": "test",
                     },
                 )
             ],
@@ -1338,7 +1263,6 @@ async def test_changing_skill_does_not_remove_global_tools():
                     name="dispatch_subagent",
                     arguments={
                         "task": "research",
-                        "skill": "research",
                     },
                 )
             ],
@@ -1355,7 +1279,7 @@ async def test_changing_skill_does_not_remove_global_tools():
     agent = CoreAgent(
         llm=llm,
         modules=FakeModules(),
-        mcp=mcp,
+        providers=providers,
         skills=FakeSkills({
             "core": core,
             "research": research,
@@ -1388,6 +1312,6 @@ async def test_changing_skill_does_not_remove_global_tools():
     subagent_request = llm.requests[3]
 
     assert any(
-        tool.name == "route_mcp"
+        tool.name == "route"
         for tool in subagent_request.tools
     )

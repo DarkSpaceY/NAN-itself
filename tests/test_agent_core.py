@@ -15,9 +15,9 @@ from src.nan_itself.skills.facade import (
     SkillMetadata,
 )
 from src.nan_itself.tools.facade import (
-    MCPRuntime,
-    MCPProvider,
-    MCPProviderSpec,
+    ProviderRuntime,
+    Provider,
+    ProviderSpec,
 )
 from src.nan_itself.utils.llm import (
     LLMResponse,
@@ -113,9 +113,15 @@ class FakeSkills:
     def activate(self, name):
         return self.skills[name]
 
+    def catalog(self):
+        return [
+            self.skills[name].metadata
+            for name in sorted(self.skills)
+        ]
 
-def make_mcp_runtime():
-    runtime = MCPRuntime()
+
+def make_provider_runtime():
+    runtime = ProviderRuntime()
 
     return runtime
 
@@ -134,14 +140,14 @@ async def test_core_agent_produces_final_response():
     ])
 
     modules = FakeModules()
-    mcp = make_mcp_runtime()
+    providers = make_provider_runtime()
 
     core_skill = make_skill()
 
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=mcp,
+        providers=providers,
         skills=FakeSkills({
             "core": core_skill,
         }),
@@ -208,16 +214,16 @@ async def test_core_agent_executes_mcp_tool_then_continues():
         async def aclose(self):
             pass
 
-    mcp = MCPRuntime()
+    runtime = ProviderRuntime()
 
-    spec = MCPProviderSpec(
+    spec = ProviderSpec(
         name="test",
         command="fake",
         origin="builtin",
         source="<test>",
     )
 
-    mcp.providers["test"] = MCPProvider(
+    runtime.providers["test"] = Provider(
         spec=spec,
         stack=FakeStack(),
         session=FakeSession(),
@@ -232,9 +238,9 @@ async def test_core_agent_executes_mcp_tool_then_continues():
             tool_calls=[
                 ToolCall(
                     id="call-1",
-                    name="route_mcp",
+                    name="route",
                     arguments={
-                        "mcp_name": "test",
+                        "provider_name": "test",
                     },
                 )
             ],
@@ -275,7 +281,7 @@ async def test_core_agent_executes_mcp_tool_then_continues():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=mcp,
+        providers=runtime,
         skills=FakeSkills({
             "core": core_skill,
         }),
@@ -338,7 +344,7 @@ async def test_subagent_is_parallel_and_shares_snapshot():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core_skill,
         }),
@@ -370,8 +376,9 @@ async def test_subagent_is_parallel_and_shares_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_subagent_can_use_different_skill():
+async def test_subagent_can_switch_its_own_skill():
     llm = FakeLLM([
+        # Main dispatches a child (no skill argument exists).
         LLMResponse(
             content=None,
             tool_calls=[
@@ -380,7 +387,6 @@ async def test_subagent_can_use_different_skill():
                     name="dispatch_subagent",
                     arguments={
                         "task": "research",
-                        "skill": "research",
                     },
                 )
             ],
@@ -396,6 +402,23 @@ async def test_subagent_can_use_different_skill():
             usage=Usage(),
             provider="openai",
             finish_reason="stop",
+        ),
+        # The child switches itself to the research skill.
+        LLMResponse(
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="switch",
+                    name="activate_skill",
+                    arguments={
+                        "name": "research",
+                    },
+                )
+            ],
+            model="fake",
+            usage=Usage(),
+            provider="openai",
+            finish_reason="tool_calls",
         ),
         LLMResponse(
             content="subagent",
@@ -414,7 +437,7 @@ async def test_subagent_can_use_different_skill():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
             "research": research,
@@ -429,19 +452,46 @@ async def test_subagent_can_use_different_skill():
     assert result.content == "main"
 
     for _ in range(100):
-        if len(llm.requests) >= 3:
+        if len(llm.requests) >= 4:
             break
 
         await asyncio.sleep(0.01)
 
-    sub_request = llm.requests[2]
+    first_child_request = llm.requests[2]
+    switched_request = llm.requests[3]
+
+    # The child starts on the inherited core skill...
+    first_system = (
+        first_child_request.messages[0].content
+        or ""
+    )
 
     assert (
-        "research skill"
-        in (
-            sub_request.messages[0].content
-            or ""
-        )
+        "You are using the research skill."
+        not in first_system
+    )
+
+    assert (
+        "You are using the core skill."
+        in first_system
+    )
+
+    # ...and sees the skill catalog for switching.
+    assert (
+        "[Available Skills]"
+        in first_system
+    )
+
+    # After its own activate_skill call, the research skill
+    # instructions take effect.
+    switched_system = (
+        switched_request.messages[0].content
+        or ""
+    )
+
+    assert (
+        "You are using the research skill."
+        in switched_system
     )
 
 
@@ -465,12 +515,12 @@ async def test_recent_history_is_bounded():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),
         core_skill=core,
-        history_turns=4,
+        history_token_budget=55,
     )
 
     for index in range(6):
@@ -516,7 +566,7 @@ async def test_sleep_tool_blocks_only_current_agent_execution():
     agent = CoreAgent(
         llm=llm,
         modules=modules,
-        mcp=MCPRuntime(),
+        providers=ProviderRuntime(),
         skills=FakeSkills({
             "core": core,
         }),

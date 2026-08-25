@@ -1,13 +1,16 @@
-from .runtime import (
+from .core import (
     AgentContext,
     AgentRuntime,
-    SubagentHandle,
+    CoreAgent,
+    AgentResult,
     SubagentLimitError,
 )
+
 
 __all__ = [
     "AgentContext",
     "AgentRuntime",
-    "SubagentHandle",
+    "CoreAgent",
+    "AgentResult",
     "SubagentLimitError",
 ]

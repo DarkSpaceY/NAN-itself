@@ -313,7 +313,7 @@ class Facade:
         project_root = (
             Path(__file__)
             .resolve()
-            .parents[2]
+            .parents[3]
         )
 
         self.workspace_modules = (

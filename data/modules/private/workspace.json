@@ -1,0 +1,249 @@
+{
+  "files": {
+    ".gitignore": {
+      "mtime_ns": 1787061626695374830,
+      "size": 116
+    },
+    ".python-version": {
+      "mtime_ns": 1787022641028551274,
+      "size": 5
+    },
+    "README.md": {
+      "mtime_ns": 1787022641029003695,
+      "size": 0
+    },
+    "models/.cache/huggingface/.gitignore": {
+      "mtime_ns": 1787141053307407389,
+      "size": 1
+    },
+    "models/.cache/huggingface/download/icon_detect/7LKmnjt53bdRhNP0DZo5ghr1Kmo=.dab3d4351ad00b035db829909a4db98354d5a90f6990e4ac00222a9a95d4bf57.incomplete": {
+      "mtime_ns": 1787141054603783020,
+      "size": 0
+    },
+    "models/.cache/huggingface/download/icon_detect/model.pt.lock": {
+      "mtime_ns": 1787141054214744831,
+      "size": 0
+    },
+    "models/easyocr/craft_mlt_25k.pth": {
+      "mtime_ns": 1787054041911903632,
+      "size": 83152330
+    },
+    "models/easyocr/english_g2.pth": {
+      "mtime_ns": 1787140612718438359,
+      "size": 15143997
+    },
+    "models/easyocr/zh_sim_g2.pth": {
+      "mtime_ns": 1787054052031022631,
+      "size": 21951421
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-base/7818adb6de9fa3064d3ff81226fdd675be1f6344.lock": {
+      "mtime_ns": 1787067797388072017,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-base/867cf1a0fece1394e01d55e287ba2f09a577c046.lock": {
+      "mtime_ns": 1787067795840536553,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-base/c9074644d9d1205686f16d411564729461324b75.lock": {
+      "mtime_ns": 1787067797029880052,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-base/d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9.lock": {
+      "mtime_ns": 1787115592807581650,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-tiny/3baa18e2b321a2f489614607852a729fcd516480.lock": {
+      "mtime_ns": 1787125718797701473,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-tiny/7818adb6de9fa3064d3ff81226fdd675be1f6344.lock": {
+      "mtime_ns": 1787125717568892127,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-tiny/c9074644d9d1205686f16d411564729461324b75.lock": {
+      "mtime_ns": 1787125719194857894,
+      "size": 0
+    },
+    "models/whisper/.locks/models--Systran--faster-whisper-tiny/dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1.lock": {
+      "mtime_ns": 1787125716992229020,
+      "size": 0
+    },
+    "models/whisper/CACHEDIR.TAG": {
+      "mtime_ns": 1787067795268438088,
+      "size": 191
+    },
+    "models/whisper/models--Systran--faster-whisper-base/blobs/7818adb6de9fa3064d3ff81226fdd675be1f6344": {
+      "mtime_ns": 1787067798649137685,
+      "size": 2203239
+    },
+    "models/whisper/models--Systran--faster-whisper-base/blobs/867cf1a0fece1394e01d55e287ba2f09a577c046": {
+      "mtime_ns": 1787067796561250881,
+      "size": 2309
+    },
+    "models/whisper/models--Systran--faster-whisper-base/blobs/c9074644d9d1205686f16d411564729461324b75": {
+      "mtime_ns": 1787067797840769562,
+      "size": 459861
+    },
+    "models/whisper/models--Systran--faster-whisper-base/blobs/d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9": {
+      "mtime_ns": 1787115592766841219,
+      "size": 145217532
+    },
+    "models/whisper/models--Systran--faster-whisper-base/refs/main": {
+      "mtime_ns": 1787127944510264937,
+      "size": 40
+    },
+    "models/whisper/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/config.json": {
+      "mtime_ns": 1787067796561250881,
+      "size": 2309
+    },
+    "models/whisper/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/model.bin": {
+      "mtime_ns": 1787115592766841219,
+      "size": 145217532
+    },
+    "models/whisper/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/tokenizer.json": {
+      "mtime_ns": 1787067798649137685,
+      "size": 2203239
+    },
+    "models/whisper/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/vocabulary.txt": {
+      "mtime_ns": 1787067797840769562,
+      "size": 459861
+    },
+    "models/whisper/models--Systran--faster-whisper-base/trees/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66.json": {
+      "mtime_ns": 1787067795258355160,
+      "size": 836
+    },
+    "pyproject.toml": {
+      "mtime_ns": 1787368521613732284,
+      "size": 943
+    },
+    "src/__init__.py": {
+      "mtime_ns": 1787368382337446567,
+      "size": 0
+    },
+    "src/nan_itself/__init__.py": {
+      "mtime_ns": 1787577766815970564,
+      "size": 139
+    },
+    "src/nan_itself/agent/__init__.py": {
+      "mtime_ns": 1787478912012538221,
+      "size": 231
+    },
+    "src/nan_itself/agent/core.py": {
+      "mtime_ns": 1787581995724844079,
+      "size": 27323
+    },
+    "src/nan_itself/agent/loop.py": {
+      "mtime_ns": 1787581071876791805,
+      "size": 9320
+    },
+    "src/nan_itself/agent/runtime.py": {
+      "mtime_ns": 1787479052145756522,
+      "size": 8373
+    },
+    "src/nan_itself/app.py": {
+      "mtime_ns": 1787579493710156983,
+      "size": 3738
+    },
+    "src/nan_itself/modules/__init__.py": {
+      "mtime_ns": 1787022951749303358,
+      "size": 0
+    },
+    "src/nan_itself/modules/facade.py": {
+      "mtime_ns": 1787578327161600366,
+      "size": 46527
+    },
+    "src/nan_itself/skills/facade.py": {
+      "mtime_ns": 1787578305080273422,
+      "size": 15962
+    },
+    "src/nan_itself/tools/__init__.py": {
+      "mtime_ns": 1787022951749303358,
+      "size": 0
+    },
+    "src/nan_itself/tools/facade.py": {
+      "mtime_ns": 1787587881445036821,
+      "size": 57979
+    },
+    "src/nan_itself/utils/__init__.py": {
+      "mtime_ns": 1787022951749303358,
+      "size": 0
+    },
+    "src/nan_itself/utils/face_detect.py": {
+      "mtime_ns": 1787146963605723377,
+      "size": 6259
+    },
+    "src/nan_itself/utils/listen.py": {
+      "mtime_ns": 1787135901957783972,
+      "size": 2425
+    },
+    "src/nan_itself/utils/llm.py": {
+      "mtime_ns": 1787581900456053790,
+      "size": 26365
+    },
+    "src/nan_itself/utils/ocr.py": {
+      "mtime_ns": 1787139008647653657,
+      "size": 2738
+    },
+    "tests/test_1.py": {
+      "mtime_ns": 1787578455704234236,
+      "size": 33657
+    },
+    "tests/test_agent_core.py": {
+      "mtime_ns": 1787567933725300115,
+      "size": 11262
+    },
+    "tests/test_agent_core_behavior.py": {
+      "mtime_ns": 1787573167995460500,
+      "size": 23278
+    },
+    "tests/test_agent_loop.py": {
+      "mtime_ns": 1787577815874690293,
+      "size": 5044
+    },
+    "tests/test_agent_runtime.py": {
+      "mtime_ns": 1787394963180693367,
+      "size": 7849
+    },
+    "tests/test_llm_adapter.py": {
+      "mtime_ns": 1787577847053676712,
+      "size": 3629
+    },
+    "tests/test_local_tools.py": {
+      "mtime_ns": 1787560318788014263,
+      "size": 19585
+    },
+    "tests/test_skills.py": {
+      "mtime_ns": 1787394159390721551,
+      "size": 14019
+    },
+    "tests/test_subagent_reports.py": {
+      "mtime_ns": 1787568444841554202,
+      "size": 15200
+    },
+    "tests/test_tool_timeout.py": {
+      "mtime_ns": 1787577834789312929,
+      "size": 1789
+    },
+    "tests/test_tools.py": {
+      "mtime_ns": 1787581213778973986,
+      "size": 13949
+    },
+    "uv.lock": {
+      "mtime_ns": 1787223216800050167,
+      "size": 509417
+    },
+    "workspace/modules/workspace.py": {
+      "mtime_ns": 1787372165410716904,
+      "size": 4217
+    },
+    "workspace/skills/core/SKILL.md": {
+      "mtime_ns": 1787577710943148254,
+      "size": 939
+    },
+    "workspace/tools/local/clock.py": {
+      "mtime_ns": 1787579291635138920,
+      "size": 599
+    }
+  },
+  "scan_count": 158
+}

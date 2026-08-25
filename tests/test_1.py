@@ -132,7 +132,7 @@ async def test_builtin_module_is_loaded_from_constructor(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_builtin_module_is_not_loaded_twice():
+async def test_builtin_module_is_not_loaded_twice(tmp_path):
     class BuiltinModule(Module):
         id = "builtin"
 
@@ -142,6 +142,8 @@ async def test_builtin_module_is_not_loaded_twice():
 
     facade = Facade(
         builtin_modules=(BuiltinModule,),
+        workspace_modules=tmp_path / "workspace" / "modules",
+        data_dir=tmp_path / "data" / "modules",
     )
 
     await facade.start()

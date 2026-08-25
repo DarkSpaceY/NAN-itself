@@ -115,7 +115,7 @@ class SkillRuntime:
         *,
         builtin_skills: Iterable[str | Path] = (),
     ) -> None:
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[3]
 
         self.workspace_skills = (
             Path(workspace_skills).resolve()

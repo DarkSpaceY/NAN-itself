@@ -275,8 +275,12 @@ class LLMProvider:
         request: LLMRequest,
     ) -> AsyncIterator[LLMStreamEvent]:
         messages = [
-            self._openai_message(message)
-            for message in request.messages
+            mapped
+            for mapped in (
+                self._openai_message(message)
+                for message in request.messages
+            )
+            if mapped is not None
         ]
 
         tools = (
@@ -416,12 +420,22 @@ class LLMProvider:
             }
 
         if message.role == "user":
+            text = message.content or ""
+
+            if not text:
+                # Empty inputs carry no information; local chat
+                # templates handle them poorly.
+                return None
+
             return {
                 "role": "user",
-                "content": message.content or "",
+                "content": text,
             }
 
         if message.role == "assistant":
+            if not message.content and not message.tool_calls:
+                return None
+
             result: dict[str, Any] = {
                 "role": "assistant",
             }
@@ -768,16 +782,53 @@ class LLMProvider:
                 continue
 
             if message.role == "user":
+                text = message.content or ""
+
+                if not text:
+                    # An empty input (e.g. a late-report-only
+                    # cycle) contributes nothing visible.
+                    continue
+
+                text_block = {
+                    "type": "text",
+                    "text": text,
+                }
+
+                # Anthropic requires strictly alternating roles.
+                # Injected subagent reports can produce consecutive
+                # user messages, so coalesce them into one message
+                # holding multiple text blocks.
+                previous = (
+                    result[-1]
+                    if result
+                    else None
+                )
+
+                if (
+                    previous is not None
+                    and previous.get("role")
+                    == "user"
+                ):
+                    previous["content"].append(
+                        text_block
+                    )
+
+                    continue
+
                 result.append({
                     "role": "user",
-                    "content": (
-                        message.content or ""
-                    ),
+                    "content": [text_block],
                 })
+
                 continue
 
             if message.role == "assistant":
                 blocks: list[dict[str, Any]] = []
+
+                if not message.content and not message.tool_calls:
+                    # Empty assistant placeholder (corrective-retry
+                    # marker): carries no information.
+                    continue
 
                 if message.content:
                     blocks.append({
