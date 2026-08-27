@@ -196,8 +196,13 @@ class AudioModule(Module):
 
         self._embedder_failed = False
 
+        # Default: in-thread. The subprocess proxy exists for
+        # hardened deployments, but macOS spawn re-imports the
+        # unguarded __main__ console script (recursive agent!);
+        # the ratio + hallucination gates already keep whisper
+        # away from pathological inputs.
         self.whisper_subprocess = (
-            os.getenv("NAN_AUDIO_WHISPER_SUBPROCESS", "1") == "1"
+            os.getenv("NAN_AUDIO_WHISPER_SUBPROCESS", "0") == "1"
         )
 
         self.whisper_worker_factory = lambda: WhisperWorkerProxy(

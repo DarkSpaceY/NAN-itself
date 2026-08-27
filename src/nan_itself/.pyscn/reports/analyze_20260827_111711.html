@@ -1,0 +1,3689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pyscn Analysis Report · NAN-itself</title>
+<style>/* pyscn unified report styles. Self-contained: no external fonts or scripts. */
+:root {
+  color-scheme: light;
+  --page: #f3f5f8;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --muted: #7c8797;
+  --line: #e3e8ef;
+  --line-2: #cbd3de;
+  --accent: #2563eb;
+  --accent-ink: #1d4ed8;
+  --violet: #7c3aed;
+  --teal: #0f766e;
+  --good: #15803d;
+  --good-soft: #e3f4e8;
+  --warn: #b45309;
+  --warn-soft: #fdf0dc;
+  --bad: #b91c1c;
+  --bad-soft: #fde8e8;
+  --info-soft: #e6eefc;
+  --track: #e6eaf0;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 1px 1px rgba(15, 23, 42, .03);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0e1218;
+    --surface: #161c25;
+    --surface-2: #1c232e;
+    --ink: #e8edf4;
+    --ink-2: #b1bccb;
+    --muted: #7f8ca0;
+    --line: #263040;
+    --line-2: #344255;
+    --accent: #6a9cf7;
+    --accent-ink: #8db2fa;
+    --violet: #a78bfa;
+    --teal: #2dd4bf;
+    --good: #4ade80;
+    --good-soft: #14301f;
+    --warn: #fbbf24;
+    --warn-soft: #3a2a0c;
+    --bad: #f87171;
+    --bad-soft: #3d1717;
+    --info-soft: #1b2a45;
+    --track: #263040;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0e1218;
+  --surface: #161c25;
+  --surface-2: #1c232e;
+  --ink: #e8edf4;
+  --ink-2: #b1bccb;
+  --muted: #7f8ca0;
+  --line: #263040;
+  --line-2: #344255;
+  --accent: #6a9cf7;
+  --accent-ink: #8db2fa;
+  --violet: #a78bfa;
+  --teal: #2dd4bf;
+  --good: #4ade80;
+  --good-soft: #14301f;
+  --warn: #fbbf24;
+  --warn-soft: #3a2a0c;
+  --bad: #f87171;
+  --bad-soft: #3d1717;
+  --info-soft: #1b2a45;
+  --track: #263040;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -.01em; }
+h3 { font-size: 14px; margin: 22px 0 10px; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.wrap { white-space: normal !important; word-break: break-word; }
+.good { color: var(--good); }
+.warn { color: var(--warn); }
+.bad  { color: var(--bad); }
+
+/* ---------- top bar ---------- */
+.topbar { background: var(--surface); border-bottom: 1px solid var(--line); }
+.topbar-inner {
+  max-width: 1200px; margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+.brand svg { width: 26px; height: 26px; }
+.brand .ver { font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 2px; }
+.project { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.project .name { font-weight: 600; font-size: 15px; }
+.project .path { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
+.meta { margin-left: auto; color: var(--muted); font-size: 12px; display: flex; gap: 14px; }
+
+/* ---------- tabs ---------- */
+.tabs { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+.tabs-inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; gap: 4px; overflow-x: auto; }
+.tab {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 12px 14px; font: inherit; font-weight: 500; color: var(--ink-2); cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: 8px;
+}
+.tab:hover { color: var(--ink); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+.tab.active { color: var(--accent-ink); border-bottom-color: var(--accent); }
+.tab .count {
+  font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+}
+.tab .count.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.tab .count.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
+main { max-width: 1200px; margin: 0 auto; padding: 24px 24px 40px; }
+.panel { display: none; }
+.panel.active { display: block; }
+.panel-h { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.panel-h h2 { font-size: 20px; }
+.scores { display: flex; gap: 8px; flex-wrap: wrap; }
+.score-pill { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); }
+.score-pill b { font-weight: 700; margin-left: 2px; }
+.score-pill.ok b { color: var(--good); }
+.score-pill.watch b { color: var(--warn); }
+.score-pill.poor b { color: var(--bad); }
+
+/* ---------- verdict ---------- */
+.verdict {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  padding: 24px 28px; display: grid; grid-template-columns: auto 1fr auto; gap: 28px; align-items: center;
+}
+.ring { position: relative; width: 132px; height: 132px; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring .track { stroke: var(--track); }
+.ring .fill { stroke: var(--good); stroke-linecap: round; }
+.ring.band-watch .fill { stroke: var(--warn); }
+.ring.band-poor .fill { stroke: var(--bad); }
+.ring .center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+.ring .score { font-size: 42px; font-weight: 700; letter-spacing: -.03em; }
+.ring .of { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.verdict h1 { margin: 0 0 6px; font-size: 22px; text-wrap: balance; display: flex; align-items: center; gap: 12px; }
+.grade {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; flex: none;
+  font-family: var(--mono); font-weight: 700; font-size: 18px; background: var(--good-soft); color: var(--good);
+}
+.grade.band-watch { background: var(--warn-soft); color: var(--warn); }
+.grade.band-poor { background: var(--bad-soft); color: var(--bad); }
+.verdict p { margin: 0; color: var(--ink-2); max-width: 62ch; }
+.verdict p strong { color: var(--ink); font-weight: 600; }
+.facts { display: grid; grid-template-columns: repeat(2, auto); gap: 6px 28px; text-align: right; }
+.fact .v { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
+.fact .l { font-size: 11.5px; color: var(--muted); }
+
+/* ---------- layout ---------- */
+.grid { display: grid; gap: 20px; margin-top: 20px; }
+.grid.two { grid-template-columns: 7fr 5fr; }
+.grid.three { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.col > .card:last-child { flex: 1; }
+@media (max-width: 900px) {
+  .grid.two { grid-template-columns: 1fr; }
+  .col > .card:last-child { flex: none; }
+  .verdict { grid-template-columns: 1fr; }
+  .facts { text-align: left; }
+}
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  padding: 18px 20px; min-width: 0;
+}
+.panel > .card, .panel > details.card { margin-bottom: 20px; }
+.card-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.card-h h2 { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+.card-h a { font-size: 12.5px; color: var(--accent-ink); text-decoration: none; }
+.card-h a:hover { text-decoration: underline; }
+.note { margin: 12px 0 0; }
+.ok-msg { color: var(--good); font-weight: 600; margin: 8px 0 0; }
+.callout { margin-top: 14px; padding: 12px 14px; border-radius: 8px; font-size: 13px; }
+.callout.warn { background: var(--warn-soft); color: var(--ink); }
+.callout.info { background: var(--info-soft); color: var(--ink); }
+.callout ul { margin: 6px 0 0; padding-left: 20px; }
+details.card > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary h2 { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+details.card > summary h2::before { content: "▸ "; color: var(--muted); }
+details.card[open] > summary h2::before { content: "▾ "; }
+details.card[open] > summary { margin-bottom: 14px; }
+
+/* ---------- dimension cards ---------- */
+.dims { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.dim {
+  display: block; text-decoration: none; color: inherit;
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--surface);
+  transition: border-color .15s, background .15s;
+}
+.dim:hover { border-color: var(--line-2); background: var(--surface-2); }
+.dim.static:hover { border-color: var(--line); background: var(--surface); }
+.dim:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dim-top { display: flex; justify-content: space-between; align-items: baseline; }
+.dim-name { font-weight: 600; font-size: 13.5px; }
+.dim-score { font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+.dim-score small { font-weight: 400; color: var(--muted); font-size: 11px; }
+.bar { height: 5px; background: var(--track); border-radius: 3px; margin: 8px 0 7px; overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 3px; background: var(--good); }
+.dim.ok .dim-score { color: var(--good); }
+.dim.watch .bar > i { background: var(--warn); } .dim.watch .dim-score { color: var(--warn); }
+.dim.poor .bar > i { background: var(--bad); }  .dim.poor .dim-score { color: var(--bad); }
+.dim-sub { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+
+/* ---------- fix list ---------- */
+.fixes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fix { display: grid; grid-template-columns: 4px 1fr auto; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); align-items: start; }
+.fix:first-child { border-top: 0; padding-top: 0; }
+.fix .stripe { width: 4px; border-radius: 2px; align-self: stretch; background: var(--line-2); }
+.fix.warning .stripe { background: var(--warn); }
+.fix.critical .stripe { background: var(--bad); }
+.fix .t { font-weight: 550; line-height: 1.35; }
+.fix .where { margin-top: 3px; font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+.fix .why { margin-top: 3px; font-size: 12.5px; color: var(--ink-2); }
+.fix .steps { margin: 4px 0 0; font-size: 12px; color: var(--ink-2); }
+.fix .steps > summary { cursor: pointer; color: var(--accent-ink); list-style: none; display: inline-block; }
+.fix .steps > summary::-webkit-details-marker { display: none; }
+.fix .steps > summary::before { content: "▸ "; color: var(--muted); }
+.fix .steps[open] > summary::before { content: "▾ "; }
+.fix .steps ol { margin: 4px 0 0; padding-left: 18px; }
+.fix .steps li { margin: 1px 0; }
+.more-fixes { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.more-fixes > summary { cursor: pointer; font-size: 12.5px; color: var(--accent-ink); list-style: none; }
+.more-fixes > summary::-webkit-details-marker { display: none; }
+.more-fixes > summary::before { content: "▸ "; color: var(--muted); }
+.more-fixes[open] > summary::before { content: "▾ "; }
+.more-fixes[open] > summary { margin-bottom: 10px; }
+.more-fixes .fixes .fix:first-child { border-top: 0; }
+.chips { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); white-space: nowrap; }
+.chip.sev-critical { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.chip.sev-warning { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.chip.effort-easy::before, .chip.effort-moderate::before, .chip.effort-hard::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; background: var(--good);
+}
+.chip.effort-moderate::before { background: var(--warn); }
+.chip.effort-hard::before { background: var(--bad); }
+
+/* ---------- tables ---------- */
+.tbl-wrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th { text-align: left; font-weight: 500; font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); padding: 0 10px 8px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbl th.r, .tbl td.r { text-align: right; }
+.tbl td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.tbl td.grow { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tbl td:last-child, .tbl th:last-child { padding-right: 0; }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl tbody tr:hover td { background: var(--surface-2); }
+.tbl.compact td { padding-top: 5px; padding-bottom: 5px; }
+.tbl tr.preview-row td { white-space: normal; padding-top: 0; }
+.tbl tr.preview-row:hover td { background: transparent; }
+.tbl .path { font-family: var(--mono); font-size: 12.5px; display: flex; min-width: 0; }
+.tbl .path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.tbl .path b { flex: none; font-weight: 600; color: var(--ink); }
+.table-sort { appearance: none; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; letter-spacing: inherit; text-transform: inherit; }
+.table-sort:hover { color: var(--ink); }
+th[aria-sort="ascending"] .table-sort::after { content: " ↑"; }
+th[aria-sort="descending"] .table-sort::after { content: " ↓"; }
+.cc { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.cc .mini { width: 48px; height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.cc .mini > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.cc.bad .mini > i { background: var(--bad); }
+.cc.warn .mini > i { background: var(--warn); }
+.pill { display: inline-block; min-width: 22px; text-align: center; font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.pill.bad, .pill.risk-high, .pill.sev-critical, .pill.sev-error { background: var(--bad-soft); color: var(--bad); }
+.pill.warn, .pill.risk-medium, .pill.sev-warning, .pill.sev-high, .pill.sev-medium { background: var(--warn-soft); color: var(--warn); }
+.pill.good, .pill.risk-low { background: var(--good-soft); color: var(--good); }
+.pill.sev-info, .pill.sev-low { background: var(--info-soft); color: var(--accent-ink); }
+.pill.type { color: var(--ink); }
+.pill.t1 { background: var(--good-soft); color: var(--good); }
+.pill.t2 { background: color-mix(in srgb, var(--violet) 15%, transparent); color: var(--violet); }
+.pill.t3 { background: var(--info-soft); color: var(--accent-ink); }
+.pill.t4 { background: color-mix(in srgb, var(--teal) 15%, transparent); color: var(--teal); }
+
+/* ---------- charts ---------- */
+.chart { width: 100%; max-width: 520px; height: auto; display: block; overflow: visible; }
+.chart text { font-family: var(--sans); fill: var(--muted); font-size: 11px; }
+.chart .lbl { fill: var(--ink-2); font-weight: 600; font-size: 11.5px; }
+.chart .lbl.warn { fill: var(--warn); }
+.chart .lbl.bad { fill: var(--bad); }
+.chart .grid line { stroke: var(--line); }
+.chart .b { fill: var(--accent); }
+.chart .b:hover { fill: var(--accent-ink); }
+.chart .b.warn { fill: var(--warn); }
+.chart .b.bad { fill: var(--bad); }
+.chart .thresh { stroke: var(--bad); stroke-dasharray: 3 3; }
+.chart .thresh-t { fill: var(--bad); font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--track); margin-top: 10px; }
+.stack > i { display: block; height: 100%; }
+.t1 { background: var(--good); }
+.t2 { background: var(--violet); }
+.t3 { background: var(--accent); }
+.t4 { background: var(--teal); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 13px; margin: 12px 0 0; }
+.kv dt { color: var(--ink-2); margin: 0; white-space: nowrap; }
+.kv dd { margin: 0; text-align: right; font-weight: 600; min-width: 0; }
+.kv dd.mono { font-weight: 500; font-size: 12px; white-space: nowrap; }
+.big { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.big small { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+
+/* ---------- metric strip (detail tabs) ---------- */
+.strip { display: flex; flex-wrap: wrap; gap: 8px 0; margin-bottom: 6px; }
+.strip .s { padding: 4px 20px; border-left: 1px solid var(--line); min-width: 120px; }
+.strip .s:first-child { padding-left: 0; border-left: 0; }
+.strip .v { font-size: 22px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
+.strip .v small { font-size: 13px; font-weight: 500; color: var(--muted); }
+.strip .l { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+/* ---------- clone groups & previews ---------- */
+.clone-group { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: var(--surface-2); }
+.clone-group-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.code-preview-card { margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.code-preview-title { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.code-preview { margin: 0; padding: 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow-x: auto; color: var(--ink); }
+
+/* ---------- community summary (rendered by community formatter) ---------- */
+.community-card .section-header { font-size: 14px; margin: 22px 0 10px; }
+.community-card > .section-header:first-child { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 14px; }
+.community-card .metric-grid { display: flex; flex-wrap: wrap; gap: 8px 0; margin-bottom: 6px; }
+.community-card .metric-card { padding: 4px 20px; border-left: 1px solid var(--line); min-width: 120px; }
+.community-card .metric-card:first-child { padding-left: 0; border-left: 0; }
+.community-card .metric-value { font-size: 22px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
+.community-card .metric-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.community-card .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.community-card .table th { text-align: left; font-weight: 500; font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); padding: 0 12px 8px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.community-card .table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.community-card .table tbody tr:last-child td { border-bottom: 0; }
+.community-card ul { margin: 0 0 12px; padding-left: 20px; }
+.community-card code { font-family: var(--mono); font-size: 12.5px; }
+.community-card .community-graph-help, .community-card .community-graph-controls, .community-card .community-graph-legend { color: var(--ink-2); }
+.community-card .community-graph-count { color: var(--muted); }
+.community-card #community-graph-canvas { border-color: var(--line); }
+
+footer { max-width: 1200px; margin: 0 auto; padding: 0 24px 40px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M7 9C7 7.34 8.34 6 10 6H14C15.66 6 17 7.34 17 9V13C17 14.66 15.66 16 14 16H10C8.34 16 7 17.34 7 19V20" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="17" cy="19" r="2" fill="#8b5cf6"/>
+      </svg>
+      pyscn <span class="ver">1.30.0</span>
+    </div>
+    
+    <div class="project">
+      <span class="name">NAN-itself</span>
+      <span class="path" title="~/Downloads/Projects/Cursor-test/NAN-itself">~/Downloads/Projects/Cursor-test/NAN-itself</span>
+    </div>
+    
+    <div class="meta">
+      <span>2026-08-27 11:17</span>
+      <span>45 files in 90ms</span>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs" aria-label="Report sections">
+  <div class="tabs-inner" role="tablist">
+    
+    <button class="tab active" role="tab" data-tab="overview">Overview</button>
+    
+    <button class="tab" role="tab" data-tab="functions">Functions <span class="count bad">10</span></button>
+    
+    <button class="tab" role="tab" data-tab="duplication">Duplication <span class="count warn">18</span></button>
+    
+    <button class="tab" role="tab" data-tab="classes">Classes <span class="count bad">5</span></button>
+    
+    <button class="tab" role="tab" data-tab="architecture">Architecture <span class="count warn">8</span></button>
+    
+  </div>
+</nav>
+
+<main>
+
+
+<section id="overview" class="panel active">
+
+  <div class="verdict">
+    <div class="ring band-ok" role="img" aria-label="Health score 77 out of 100">
+      <svg viewBox="0 0 132 132">
+        <circle class="track" cx="66" cy="66" r="56" fill="none" stroke-width="10"/>
+        <circle class="fill" cx="66" cy="66" r="56" fill="none" stroke-width="10" stroke-dasharray="351.86" stroke-dashoffset="80.9"/>
+      </svg>
+      <div class="center">
+        <div class="score num">77</div>
+        <div class="of">HEALTH SCORE</div>
+      </div>
+    </div>
+    <div>
+      <h1><span class="grade grade-b band-ok">B</span> Good shape overall</h1>
+      <p>Complexity, dead code, cohesion, and architecture are clean. Most of the remaining debt is in <strong>communities</strong> (15 communities, Q 0.58, 14 bridges) and <strong>coupling</strong> (avg CBO 2.8, 4 of 38 high).</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><div class="v num">13,151</div><div class="l">lines</div></div><div class="fact"><div class="v num">45</div><div class="l">files</div></div><div class="fact"><div class="v num">431</div><div class="l">functions</div></div><div class="fact"><div class="v num">70</div><div class="l">classes</div></div>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <div class="col">
+      
+      <div class="card">
+        <div class="card-h"><h2>Score breakdown</h2><span class="muted small">weighted into the health score</span></div>
+        <div class="dims">
+          
+          <a class="dim ok" href="#functions" data-goto="functions">
+            <div class="dim-top"><span class="dim-name">Complexity</span><span class="dim-score num">95<small>/100</small></span></div>
+            <div class="bar"><i style="width:95%"></i></div>
+            <div class="dim-sub"><span>avg CC 2.73</span><span>10 high-risk</span></div>
+          </a>
+          
+          <a class="dim ok" href="#functions" data-goto="functions">
+            <div class="dim-top"><span class="dim-name">Dead code</span><span class="dim-score num">100<small>/100</small></span></div>
+            <div class="bar"><i style="width:100%"></i></div>
+            <div class="dim-sub"><span>0 findings</span><span>0 critical</span></div>
+          </a>
+          
+          <a class="dim ok" href="#duplication" data-goto="duplication">
+            <div class="dim-top"><span class="dim-name">Duplication</span><span class="dim-score num">75<small>/100</small></span></div>
+            <div class="bar"><i style="width:75%"></i></div>
+            <div class="dim-sub"><span>7.8% of fragments</span><span>18 groups</span></div>
+          </a>
+          
+          <a class="dim watch" href="#classes" data-goto="classes">
+            <div class="dim-top"><span class="dim-name">Coupling</span><span class="dim-score num">65<small>/100</small></span></div>
+            <div class="bar"><i style="width:65%"></i></div>
+            <div class="dim-sub"><span>avg CBO 2.8</span><span>4 of 38 high</span></div>
+          </a>
+          
+          <a class="dim ok" href="#classes" data-goto="classes">
+            <div class="dim-top"><span class="dim-name">Cohesion</span><span class="dim-score num">90<small>/100</small></span></div>
+            <div class="bar"><i style="width:90%"></i></div>
+            <div class="dim-sub"><span>avg LCOM4 1.24</span><span>1 of 70 low</span></div>
+          </a>
+          
+          <a class="dim ok" href="#architecture" data-goto="architecture">
+            <div class="dim-top"><span class="dim-name">Dependencies</span><span class="dim-score num">85<small>/100</small></span></div>
+            <div class="bar"><i style="width:85%"></i></div>
+            <div class="dim-sub"><span>no cycles</span><span>depth 5</span></div>
+          </a>
+          
+          <a class="dim ok" href="#architecture" data-goto="architecture">
+            <div class="dim-top"><span class="dim-name">Architecture</span><span class="dim-score num">93<small>/100</small></span></div>
+            <div class="bar"><i style="width:93%"></i></div>
+            <div class="dim-sub"><span>93% compliant</span><span>8 violations</span></div>
+          </a>
+          
+          <a class="dim poor" href="#architecture" data-goto="architecture">
+            <div class="dim-top"><span class="dim-name">Communities</span><span class="dim-score num">48<small>/100</small></span></div>
+            <div class="bar"><i style="width:48%"></i></div>
+            <div class="dim-sub"><span>15 communities, Q 0.58</span><span>14 bridges</span></div>
+          </a>
+          
+        </div>
+      </div>
+      
+
+      
+
+      
+
+      
+      <div class="card">
+        <div class="card-h"><h2>Hotspot files</h2><a href="#functions" data-goto="functions">All 45 modules</a></div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr><th>Module</th><th class="r">Lines</th><th class="r">Funcs</th><th class="r">Max CC</th><th class="r">High risk</th><th class="r">Dead</th><th class="r">Clones</th></tr>
+            </thead>
+            <tbody>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>modules/builtin/</span><b>memory.py</b></div></td>
+                <td class="r num">1,590</td>
+                <td class="r num">44</td>
+                <td class="r"><span class="cc bad"><span class="mini"><i style="width:100%"></i></span><span class="num">24</span></span></td>
+                <td class="r"><span class="pill bad">4</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>utils/</span><b>llm.py</b></div></td>
+                <td class="r num">975</td>
+                <td class="r num">11</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:66%"></i></span><span class="num">16</span></span></td>
+                <td class="r"><span class="pill bad">3</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>modules/</span><b>reload.py</b></div></td>
+                <td class="r num">301</td>
+                <td class="r num">2</td>
+                <td class="r"><span class="cc bad"><span class="mini"><i style="width:83%"></i></span><span class="num">20</span></span></td>
+                <td class="r"><span class="pill bad">1</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill warn">4</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>utils/</span><b>face_detect.py</b></div></td>
+                <td class="r num">207</td>
+                <td class="r num">3</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:54%"></i></span><span class="num">13</span></span></td>
+                <td class="r"><span class="pill bad">1</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>agent/</span><b>loop.py</b></div></td>
+                <td class="r num">383</td>
+                <td class="r num">12</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:41%"></i></span><span class="num">10</span></span></td>
+                <td class="r"><span class="pill bad">1</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>tools/</span><b>runtime.py</b></div></td>
+                <td class="r num">793</td>
+                <td class="r num">20</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:58%"></i></span><span class="num">14</span></span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill warn">5</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>agent/</span><b>engine.py</b></div></td>
+                <td class="r num">415</td>
+                <td class="r num">10</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:54%"></i></span><span class="num">13</span></span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+              </tr>
+              
+              <tr>
+                <td class="grow"><div class="path"><span>modules/</span><b>runtime.py</b></div></td>
+                <td class="r num">1,139</td>
+                <td class="r num">39</td>
+                <td class="r"><span class="cc warn"><span class="mini"><i style="width:50%"></i></span><span class="num">12</span></span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill">0</span></td>
+                <td class="r"><span class="pill warn">5</span></td>
+              </tr>
+              
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small note">Ranked by high-risk functions, then max complexity. Clones counts fragments that belong to a clone group.</p>
+      </div>
+      
+    </div>
+
+    <div class="col">
+      
+      <div class="card">
+        <div class="card-h"><h2>Fix first</h2><span class="muted small">41 suggestions</span></div>
+        <ol class="fixes">
+          
+          <li class="fix critical">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;MemoryModule._load_entries&#39;</div>
+              <div class="where">modules/builtin/memory.py:483</div>
+              <div class="why">Function &#39;MemoryModule._load_entries&#39; has cyclomatic complexity of 24. Consider using early returns or guard clauses to reduce nesting depth.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Identify the deepest nested block at line 483</li><li>Convert nested conditions to early returns or guard clauses</li><li>Re-run: pyscn analyze modules/builtin/memory.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-critical">critical</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-1 exact, 2 fragments)</div>
+              <div class="where">modules/loading.py:147</div>
+              <div class="why">Identical code fragments found. Extract into a shared function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a shared function from the duplicated code</li><li>Replace all 2 occurrences with calls to the new function</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 3 fragments)</div>
+              <div class="where">agent/verbs.py:69</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 3 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">modules/loading.py:23</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">modules/loading.py:201</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+        </ol>
+        
+        <details class="more-fixes">
+          <summary>Show 25 more suggestions</summary>
+          <ol class="fixes" start="6">
+            
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">modules/reload.py:264</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">tools/mcp.py:172</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">tools/results.py:13</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">modules/loading.py:112</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Extract duplicated code (Type-2 renamed, 2 fragments)</div>
+              <div class="where">tools/runtime.py:375</div>
+              <div class="why">Syntactically identical code with different identifiers. Extract into a parameterized function.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Create a parameterized function, passing differing identifiers/literals as arguments</li><li>Replace all 2 occurrences with calls using appropriate arguments</li><li>Run tests to confirm no regressions</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-easy">easy</span><span class="chip">clone</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;hot_reload&#39;</div>
+              <div class="where">modules/reload.py:48</div>
+              <div class="why">Function &#39;hot_reload&#39; has cyclomatic complexity of 20. Consider using early returns or guard clauses to reduce nesting depth.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Identify the deepest nested block at line 48</li><li>Convert nested conditions to early returns or guard clauses</li><li>Re-run: pyscn analyze modules/reload.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;MemoryModule._merge_facts&#39;</div>
+              <div class="where">modules/builtin/memory.py:999</div>
+              <div class="why">Function &#39;MemoryModule._merge_facts&#39; has cyclomatic complexity of 18. Consider using early returns or guard clauses to reduce nesting depth.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Identify the deepest nested block at line 999</li><li>Convert nested conditions to early returns or guard clauses</li><li>Re-run: pyscn analyze modules/builtin/memory.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;LLMProvider._stream_openai&#39;</div>
+              <div class="where">utils/llm.py:278</div>
+              <div class="why">Function &#39;LLMProvider._stream_openai&#39; has cyclomatic complexity of 16. Consider extracting helper functions to reduce complexity.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Extract loop bodies into named helper functions</li><li>Consider using list comprehensions or map/filter for simple loops</li><li>Re-run: pyscn analyze utils/llm.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;LLMProvider._stream_anthropic&#39;</div>
+              <div class="where">utils/llm.py:502</div>
+              <div class="why">Function &#39;LLMProvider._stream_anthropic&#39; has cyclomatic complexity of 15. Consider using early returns or guard clauses to reduce nesting depth.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Identify the deepest nested block at line 502</li><li>Convert nested conditions to early returns or guard clauses</li><li>Re-run: pyscn analyze utils/llm.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;LLMProvider._anthropic_messages&#39;</div>
+              <div class="where">utils/llm.py:764</div>
+              <div class="why">Function &#39;LLMProvider._anthropic_messages&#39; has cyclomatic complexity of 15. Consider extracting helper functions to reduce complexity.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Split &#39;LLMProvider._anthropic_messages&#39; into smaller functions, each handling one responsibility</li><li>Extract blocks of 10&#43; lines into well-named helper functions</li><li>Re-run: pyscn analyze utils/llm.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;ProviderRuntime._reload_workspace_source&#39;</div>
+              <div class="where">tools/runtime.py:471</div>
+              <div class="why">Function &#39;ProviderRuntime._reload_workspace_source&#39; has cyclomatic complexity of 14. Consider extracting helper functions to reduce complexity.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Extract loop bodies into named helper functions</li><li>Consider using list comprehensions or map/filter for simple loops</li><li>Re-run: pyscn analyze tools/runtime.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;StepEngine.execute&#39;</div>
+              <div class="where">agent/engine.py:79</div>
+              <div class="why">Function &#39;StepEngine.execute&#39; has cyclomatic complexity of 13. Consider extracting helper functions to reduce complexity.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Extract loop bodies into named helper functions</li><li>Consider using list comprehensions or map/filter for simple loops</li><li>Re-run: pyscn analyze agent/engine.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;MemoryModule._apply_workstate_ops&#39;</div>
+              <div class="where">modules/builtin/memory.py:893</div>
+              <div class="why">Function &#39;MemoryModule._apply_workstate_ops&#39; has cyclomatic complexity of 13. Consider using early returns or guard clauses to reduce nesting depth.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Identify the deepest nested block at line 893</li><li>Convert nested conditions to early returns or guard clauses</li><li>Re-run: pyscn analyze modules/builtin/memory.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Refactor high-complexity function &#39;FaceRecognizer.detect&#39;</div>
+              <div class="where">utils/face_detect.py:20</div>
+              <div class="why">Function &#39;FaceRecognizer.detect&#39; has cyclomatic complexity of 13. Consider extracting helper functions to reduce complexity.</div>
+              <details class="steps"><summary>3 steps</summary><ol><li>Split &#39;FaceRecognizer.detect&#39; into smaller functions, each handling one responsibility</li><li>Extract blocks of 10&#43; lines into well-named helper functions</li><li>Re-run: pyscn analyze utils/face_detect.py</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">complexity</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Reduce coupling in class &#39;ProviderRuntime&#39;</div>
+              <div class="where">tools/runtime.py:50</div>
+              <div class="why">Class &#39;ProviderRuntime&#39; depends on 5 other classes (Path, SourceTracker, asyncio.CancelledError, asyncio.Event, asyncio.TimeoutError). Consider applying dependency inversion or splitting responsibilities.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 5 dependencies: Path, SourceTracker, asyncio.CancelledError, asyncio.Event, asyncio.TimeoutError</li><li>Look for dependencies that can be removed or replaced with interfaces</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">coupling</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Reduce coupling in class &#39;MCPFacade&#39;</div>
+              <div class="where">tools/server.py:39</div>
+              <div class="why">Class &#39;MCPFacade&#39; depends on 5 other classes (AgentToolView, InitializationOptions, NotificationOptions, ProviderRuntime, Server). Consider applying dependency inversion or splitting responsibilities.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 5 dependencies: AgentToolView, InitializationOptions, NotificationOptions, ProviderRuntime, Server</li><li>Look for dependencies that can be removed or replaced with interfaces</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">coupling</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Reduce coupling in class &#39;SkillRuntime&#39;</div>
+              <div class="where">skills/runtime.py:38</div>
+              <div class="why">Class &#39;SkillRuntime&#39; depends on 4 other classes (Path, Skill, SkillRegistry, UnknownSkillError). Consider applying dependency inversion or splitting responsibilities.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 4 dependencies: Path, Skill, SkillRegistry, UnknownSkillError</li><li>Look for dependencies that can be removed or replaced with interfaces</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">coupling</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Reduce coupling in class &#39;SoundDeviceMicSource&#39;</div>
+              <div class="where">utils/audio.py:753</div>
+              <div class="why">Class &#39;SoundDeviceMicSource&#39; depends on 4 other classes (queue.Empty, queue.Full, queue.Queue, sd). Consider applying dependency inversion or splitting responsibilities.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 4 dependencies: queue.Empty, queue.Full, queue.Queue, sd</li><li>Look for dependencies that can be removed or replaced with interfaces</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">coupling</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Split low-cohesion class &#39;SleepVerb&#39;</div>
+              <div class="where">agent/verbs.py:66</div>
+              <div class="why">Class &#39;SleepVerb&#39; has LCOM4=3, indicating 3 disconnected method groups. Method groups: [definition], [execute], [visible]. Consider splitting into separate classes.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 3 method groups for natural class boundaries</li><li>Consider extracting one group into a separate class</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">cohesion</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Split low-cohesion class &#39;DispatchVerb&#39;</div>
+              <div class="where">agent/verbs.py:126</div>
+              <div class="why">Class &#39;DispatchVerb&#39; has LCOM4=3, indicating 3 disconnected method groups. Method groups: [definition], [execute], [visible]. Consider splitting into separate classes.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 3 method groups for natural class boundaries</li><li>Consider extracting one group into a separate class</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">cohesion</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Split low-cohesion class &#39;ActivateSkillVerb&#39;</div>
+              <div class="where">agent/verbs.py:210</div>
+              <div class="why">Class &#39;ActivateSkillVerb&#39; has LCOM4=3, indicating 3 disconnected method groups. Method groups: [definition], [execute], [visible]. Consider splitting into separate classes.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 3 method groups for natural class boundaries</li><li>Consider extracting one group into a separate class</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">cohesion</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Split low-cohesion class &#39;Facade&#39;</div>
+              <div class="where">modules/runtime.py:40</div>
+              <div class="why">Class &#39;Facade&#39; has LCOM4=3, indicating 3 disconnected method groups. Method groups: [_atomic_write_json], [_bind_instance, _dataspace_path, _ensure_data_dirs, _find_record_by_source, _fingerprint, _import_workspace_class, _load_builtins, _load_dataspace_state, _load_or_reload_workspace_file, _load_private_state, _private_state_path, _query_record, _rebuild_dependency_graph, _reconcile, _register_module_class, _remove_workspace_record, _restore_record_state, _run_module, _safe_topological_order, _save_record_state, _scan_workspace_modules, _stop_record, _supervisor, _topological_order, _try_start, _validate_dependency_graph, _validate_module_class, deliver_turn, query, query_snapshot, save_state, snapshot, start, stop], [_read_json_file]. Consider splitting into separate classes.</div>
+              <details class="steps"><summary>2 steps</summary><ol><li>Review the 3 method groups for natural class boundaries</li><li>Consider extracting one group into a separate class</li></ol></details>
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">cohesion</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Fix architecture violation in &#39;src.nan_itself.agent.core&#39;</div>
+              <div class="where">/Users/darkspace/Downloads/Projects/Cursor-test/NAN-itself/src/nan_itself/agent/core.py:1</div>
+              <div class="why">Split &#39;src.nan_itself.agent.core&#39; by concern so each module owns one stable responsibility boundary</div>
+              
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">architecture</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Fix architecture violation in &#39;src.nan_itself.agent.engine&#39;</div>
+              <div class="where">/Users/darkspace/Downloads/Projects/Cursor-test/NAN-itself/src/nan_itself/agent/engine.py:1</div>
+              <div class="why">Split &#39;src.nan_itself.agent.engine&#39; by concern so each module owns one stable responsibility boundary</div>
+              
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">architecture</span></div>
+          </li>
+
+          <li class="fix warning">
+            <span class="stripe"></span>
+            <div>
+              <div class="t">Fix architecture violation in &#39;src.nan_itself.agent.verbs&#39;</div>
+              <div class="where">/Users/darkspace/Downloads/Projects/Cursor-test/NAN-itself/src/nan_itself/agent/verbs.py:1</div>
+              <div class="why">Split &#39;src.nan_itself.agent.verbs&#39; by concern so each module owns one stable responsibility boundary</div>
+              
+            </div>
+            <div class="chips"><span class="chip sev-warning">warning</span><span class="chip effort-moderate">moderate</span><span class="chip">architecture</span></div>
+          </li>
+
+          </ol>
+          <p class="muted small note">Showing 30 of 41 suggestions. The JSON report lists them all.</p>
+        </details>
+        
+      </div>
+      
+
+      
+      <div class="card">
+        <div class="card-h"><h2>Complexity distribution</h2><span class="muted small">431 functions</span></div>
+        <svg class="chart" viewBox="0 0 420 190" role="img" aria-label="Histogram of cyclomatic complexity">
+          <g class="grid"><line x1="44" y1="150" x2="412" y2="150"/><line x1="44" y1="110" x2="412" y2="110"/><line x1="44" y1="70" x2="412" y2="70"/><line x1="44" y1="30" x2="412" y2="30"/></g>
+          <text x="38" y="153.5" text-anchor="end">0</text><text x="38" y="113.5" text-anchor="end">100</text><text x="38" y="73.5" text-anchor="end">200</text><text x="38" y="33.5" text-anchor="end">300</text>
+          <rect class="b " x="54.3" y="62.8" width="53" height="87.2" rx="3"><title>CC 1: 218 functions</title></rect><rect class="b " x="127.9" y="86.4" width="53" height="63.6" rx="3"><title>CC 2–5: 159 functions</title></rect><rect class="b " x="201.5" y="134.4" width="53" height="15.6" rx="3"><title>CC 6–9: 39 functions</title></rect><rect class="b warn" x="275.1" y="144.8" width="53" height="5.2" rx="3"><title>CC 10–19: 13 functions</title></rect><rect class="b bad" x="348.7" y="149" width="53" height="1" rx="3"><title>CC 20&#43;: 2 functions</title></rect>
+          <text class="lbl " x="80.8" y="56.8" text-anchor="middle">218</text><text class="lbl " x="154.4" y="80.4" text-anchor="middle">159</text><text class="lbl " x="228.0" y="128.4" text-anchor="middle">39</text><text class="lbl warn" x="301.6" y="138.8" text-anchor="middle">13</text><text class="lbl bad" x="375.2" y="143.0" text-anchor="middle">2</text>
+          <line class="thresh" x1="261.8" y1="18" x2="261.8" y2="150"/><text class="thresh-t" x="265.8" y="14">risk from CC 10</text>
+          <text x="80.8" y="170" text-anchor="middle">1</text><text x="154.4" y="170" text-anchor="middle">2–5</text><text x="228.0" y="170" text-anchor="middle">6–9</text><text x="301.6" y="170" text-anchor="middle">10–19</text><text x="375.2" y="170" text-anchor="middle">20&#43;</text>
+          <text x="228" y="186" text-anchor="middle">cyclomatic complexity</text>
+        </svg>
+        <dl class="kv"><dt>Median function</dt><dd class="num ">CC 1, 13 SLOC</dd><dt>Deepest nesting</dt><dd class="num ">8 levels (MemoryModule._load_entries)</dd><dt>Longest function</dt><dd class="num ">226 SLOC (LLMProvider._stream_anthropic)</dd></dl>
+      </div>
+      
+    </div>
+  </div>
+
+  
+  <div class="grid three">
+    
+    <div class="card">
+      <div class="card-h"><h2>Duplication</h2><a href="#duplication" data-goto="duplication">Details</a></div>
+      <div class="big num">7.8%<small>of 497 fragments</small></div>
+      
+      <div class="stack" role="img" aria-label="Clone fragments by type"><i class="t1" style="width:5.1%" title="Type-1 identical · 2 fragments"></i><i class="t2" style="width:43.6%" title="Type-2 renamed · 17 fragments"></i><i class="t4" style="width:51.3%" title="Type-4 semantic · 20 fragments"></i></div>
+      <div class="legend"><span><i class="t1"></i>Type-1 identical · 2 fragments</span><span><i class="t2"></i>Type-2 renamed · 17 fragments</span><span><i class="t4"></i>Type-4 semantic · 20 fragments</span></div>
+      
+      <dl class="kv"><dt>Clone groups</dt><dd class="num ">18</dd><dt>Clone pairs</dt><dd class="num ">22</dd><dt>Avg similarity</dt><dd class="num ">0.87</dd><dt>Files with clones</dt><dd class="num ">12 of 45</dd></dl>
+    </div>
+    
+    
+    <div class="card">
+      <div class="card-h"><h2>Classes</h2><a href="#classes" data-goto="classes">Details</a></div>
+      <div class="big num">70<small>classes</small></div>
+      <dl class="kv"><dt>High coupling</dt><dd class="num warn">4</dd><dt>Medium coupling</dt><dd class="num ">4</dd><dt>Low cohesion</dt><dd class="num warn">1</dd><dt>Most coupled</dt><dd class="mono ">AudioModule (15)</dd><dt>Least cohesive</dt><dd class="mono ">Module (6)</dd></dl>
+    </div>
+    
+    
+    <div class="card">
+      <div class="card-h"><h2>Structure</h2><a href="#architecture" data-goto="architecture">Details</a></div>
+      <div class="big num">0<small>circular dependencies</small></div>
+      <dl class="kv"><dt>Modules / edges</dt><dd class="num ">45 / 66</dd><dt>Max dependency depth</dt><dd class="num ">5</dd><dt>Layer compliance</dt><dd class="num warn">93%</dd><dt>Communities (leiden)</dt><dd class="num ">15, Q 0.58</dd><dt>Bridge modules</dt><dd class="num ">14</dd></dl>
+    </div>
+    
+  </div>
+  
+</section>
+
+
+
+<section id="functions" class="panel">
+  <div class="panel-h">
+    <h2>Execution scopes</h2>
+    <div class="scores">
+      <span class="score-pill ok">Complexity <b class="num">95</b>/100</span>
+      <span class="score-pill ok">Dead code <b class="num">100</b>/100</span>
+    </div>
+  </div>
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Complexity</h2></div>
+    <div class="strip">
+      <div class="s"><div class="v num">431</div><div class="l">functions</div></div>
+      <div class="s"><div class="v num">2.73</div><div class="l">average CC</div></div>
+      <div class="s"><div class="v num">24</div><div class="l">max CC</div></div>
+      <div class="s"><div class="v num bad">10</div><div class="l">high risk</div></div>
+      <div class="s"><div class="v num warn">5</div><div class="l">medium risk</div></div>
+    </div>
+
+    <h3>Most complex functions</h3>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Function</th><th>File</th><th class="r">CC</th><th class="r">Cognitive</th><th class="r">Nesting</th><th class="r">SLOC</th><th>Risk</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono">MemoryModule._load_entries</td>
+            <td class="mono muted">modules/builtin/memory.py:483</td>
+            <td class="r num">24</td>
+            <td class="r num">60</td>
+            <td class="r num">8</td>
+            <td class="r num">85</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">hot_reload</td>
+            <td class="mono muted">modules/reload.py:48</td>
+            <td class="r num">20</td>
+            <td class="r num">41</td>
+            <td class="r num">5</td>
+            <td class="r num">181</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule._merge_facts</td>
+            <td class="mono muted">modules/builtin/memory.py:999</td>
+            <td class="r num">18</td>
+            <td class="r num">41</td>
+            <td class="r num">6</td>
+            <td class="r num">93</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._stream_openai</td>
+            <td class="mono muted">utils/llm.py:278</td>
+            <td class="r num">16</td>
+            <td class="r num">33</td>
+            <td class="r num">4</td>
+            <td class="r num">123</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._stream_anthropic</td>
+            <td class="mono muted">utils/llm.py:502</td>
+            <td class="r num">15</td>
+            <td class="r num">48</td>
+            <td class="r num">7</td>
+            <td class="r num">226</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._anthropic_messages</td>
+            <td class="mono muted">utils/llm.py:764</td>
+            <td class="r num">15</td>
+            <td class="r num">43</td>
+            <td class="r num">3</td>
+            <td class="r num">99</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ProviderRuntime._reload_workspace_source</td>
+            <td class="mono muted">tools/runtime.py:471</td>
+            <td class="r num">14</td>
+            <td class="r num">21</td>
+            <td class="r num">3</td>
+            <td class="r num">66</td>
+            <td><span class="pill risk-medium">medium</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">StepEngine.execute</td>
+            <td class="mono muted">agent/engine.py:79</td>
+            <td class="r num">13</td>
+            <td class="r num">23</td>
+            <td class="r num">4</td>
+            <td class="r num">172</td>
+            <td><span class="pill risk-medium">medium</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule._apply_workstate_ops</td>
+            <td class="mono muted">modules/builtin/memory.py:893</td>
+            <td class="r num">13</td>
+            <td class="r num">33</td>
+            <td class="r num">5</td>
+            <td class="r num">68</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">FaceRecognizer.detect</td>
+            <td class="mono muted">utils/face_detect.py:20</td>
+            <td class="r num">13</td>
+            <td class="r num">28</td>
+            <td class="r num">4</td>
+            <td class="r num">110</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule._load_workitems</td>
+            <td class="mono muted">modules/builtin/memory.py:368</td>
+            <td class="r num">12</td>
+            <td class="r num">27</td>
+            <td class="r num">4</td>
+            <td class="r num">49</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Facade._scan_workspace_modules</td>
+            <td class="mono muted">modules/runtime.py:487</td>
+            <td class="r num">12</td>
+            <td class="r num">19</td>
+            <td class="r num">3</td>
+            <td class="r num">95</td>
+            <td><span class="pill risk-medium">medium</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._openai_message</td>
+            <td class="mono muted">utils/llm.py:423</td>
+            <td class="r num">11</td>
+            <td class="r num">19</td>
+            <td class="r num">2</td>
+            <td class="r num">61</td>
+            <td><span class="pill risk-medium">medium</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentLoop.run_forever</td>
+            <td class="mono muted">agent/loop.py:137</td>
+            <td class="r num">10</td>
+            <td class="r num">33</td>
+            <td class="r num">6</td>
+            <td class="r num">102</td>
+            <td><span class="pill risk-high">high</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule._render_memory_body</td>
+            <td class="mono muted">modules/builtin/memory.py:1508</td>
+            <td class="r num">10</td>
+            <td class="r num">10</td>
+            <td class="r num">3</td>
+            <td class="r num">38</td>
+            <td><span class="pill risk-medium">medium</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">run_agent_process</td>
+            <td class="mono muted">app.py:61</td>
+            <td class="r num">9</td>
+            <td class="r num">9</td>
+            <td class="r num">3</td>
+            <td class="r num">109</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AudioModule.query</td>
+            <td class="mono muted">modules/builtin/audio.py:752</td>
+            <td class="r num">9</td>
+            <td class="r num">19</td>
+            <td class="r num">3</td>
+            <td class="r num">55</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">topological_order</td>
+            <td class="mono muted">modules/deps.py:89</td>
+            <td class="r num">9</td>
+            <td class="r num">14</td>
+            <td class="r num">3</td>
+            <td class="r num">68</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SkillRegistry.discover_workspace</td>
+            <td class="mono muted">skills/registry.py:112</td>
+            <td class="r num">9</td>
+            <td class="r num">15</td>
+            <td class="r num">3</td>
+            <td class="r num">46</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SpeakerMatcher.restore</td>
+            <td class="mono muted">utils/audio.py:1167</td>
+            <td class="r num">9</td>
+            <td class="r num">11</td>
+            <td class="r num">2</td>
+            <td class="r num">45</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small note">Showing top 20 of 431 functions</p>
+
+    
+    
+    <h3>Longest Functions</h3>
+    <p class="muted small">Functions longer than 50 source lines. Length is independent of cyclomatic complexity, so these may be absent from the table above.</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Function</th><th>File</th><th class="r">SLOC</th><th class="r">Lines</th><th class="r">CC</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono">LLMProvider._stream_anthropic</td>
+            <td class="mono muted">utils/llm.py</td>
+            <td class="r num">226</td>
+            <td class="r num">502-761</td>
+            <td class="r num">15</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">hot_reload</td>
+            <td class="mono muted">modules/reload.py</td>
+            <td class="r num">181</td>
+            <td class="r num">48-300</td>
+            <td class="r num">20</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">StepEngine.execute</td>
+            <td class="mono muted">agent/engine.py</td>
+            <td class="r num">172</td>
+            <td class="r num">79-291</td>
+            <td class="r num">13</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._stream_openai</td>
+            <td class="mono muted">utils/llm.py</td>
+            <td class="r num">123</td>
+            <td class="r num">278-420</td>
+            <td class="r num">16</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AudioModule.__init__</td>
+            <td class="mono muted">modules/builtin/audio.py</td>
+            <td class="r num">113</td>
+            <td class="r num">116-260</td>
+            <td class="r num">1</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">FaceRecognizer.detect</td>
+            <td class="mono muted">utils/face_detect.py</td>
+            <td class="r num">110</td>
+            <td class="r num">20-200</td>
+            <td class="r num">13</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">run_agent_process</td>
+            <td class="mono muted">app.py</td>
+            <td class="r num">109</td>
+            <td class="r num">61-221</td>
+            <td class="r num">9</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentLoop.run_forever</td>
+            <td class="mono muted">agent/loop.py</td>
+            <td class="r num">102</td>
+            <td class="r num">137-288</td>
+            <td class="r num">10</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LLMProvider._anthropic_messages</td>
+            <td class="mono muted">utils/llm.py</td>
+            <td class="r num">99</td>
+            <td class="r num">764-893</td>
+            <td class="r num">15</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Facade._scan_workspace_modules</td>
+            <td class="mono muted">modules/runtime.py</td>
+            <td class="r num">95</td>
+            <td class="r num">487-607</td>
+            <td class="r num">12</td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small note">Showing longest 10 of 35 long functions</p>
+    
+  </div>
+  
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Class execution scopes</h2></div>
+    <div class="strip">
+      <div class="s"><div class="v num">70</div><div class="l">class scopes</div></div>
+      <div class="s"><div class="v num">1</div><div class="l">max CC</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">max cognitive</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">max nesting</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">high risk</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Class suite</th><th>File</th><th class="r">CC</th><th class="r">Cognitive</th><th class="r">Nesting</th><th>Risk</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono">CoreAgent</td>
+            <td class="mono muted">agent/core.py:36</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">StepEngine</td>
+            <td class="mono muted">agent/engine.py:63</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Inbox</td>
+            <td class="mono muted">agent/loop.py:14</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentLoop</td>
+            <td class="mono muted">agent/loop.py:88</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">_StopRequested</td>
+            <td class="mono muted">agent/loop.py:381</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentTurn</td>
+            <td class="mono muted">agent/model.py:20</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentResult</td>
+            <td class="mono muted">agent/model.py:39</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ChildSubagent</td>
+            <td class="mono muted">agent/model.py:52</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LateReportBuffer</td>
+            <td class="mono muted">agent/reports.py:27</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">RolePolicy</td>
+            <td class="mono muted">agent/role.py:12</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SubagentLimitError</td>
+            <td class="mono muted">agent/runtime.py:16</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentContext</td>
+            <td class="mono muted">agent/runtime.py:21</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SubagentHandle</td>
+            <td class="mono muted">agent/runtime.py:46</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentRuntime</td>
+            <td class="mono muted">agent/runtime.py:92</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ExecutionState</td>
+            <td class="mono muted">agent/verbs.py:46</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SleepVerb</td>
+            <td class="mono muted">agent/verbs.py:66</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">DispatchVerb</td>
+            <td class="mono muted">agent/verbs.py:126</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ActivateSkillVerb</td>
+            <td class="mono muted">agent/verbs.py:210</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AudioModule</td>
+            <td class="mono muted">modules/builtin/audio.py:59</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+          <tr>
+            <td class="mono">_Entry</td>
+            <td class="mono muted">modules/builtin/memory.py:126</td>
+            <td class="r num">1</td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+            <td><span class="pill risk-low">low</span></td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small note">Showing top 20 of 70 class execution scopes</p>
+  </div>
+  
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Dead code</h2></div>
+    <div class="strip">
+      <div class="s"><div class="v num">0</div><div class="l">findings</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">critical</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">warnings</div></div>
+      <div class="s"><div class="v num">0</div><div class="l">files affected</div></div>
+    </div>
+    
+    <p class="ok-msg">No dead code detected</p>
+    
+  </div>
+  
+
+  
+  <details class="card">
+    <summary><h2>All modules</h2><span class="muted small">45 modules · click a column to sort</span></summary>
+    <div class="tbl-wrap">
+      <table id="module-quality-table" class="tbl">
+        <thead>
+          <tr>
+            <th><button type="button" class="table-sort" aria-label="Sort by module name" onclick="sortModuleQuality(0, false, this)">Module</button></th>
+            <th><button type="button" class="table-sort" aria-label="Sort by file path" onclick="sortModuleQuality(1, false, this)">File</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by lines of code" onclick="sortModuleQuality(2, true, this)">LOC</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by function count" onclick="sortModuleQuality(3, true, this)">Functions</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by analyzed function count" onclick="sortModuleQuality(4, true, this)">Analyzed</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by average complexity" onclick="sortModuleQuality(5, true, this)">Avg CC</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by average cognitive complexity" onclick="sortModuleQuality(6, true, this)">Avg Cognitive</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by maximum complexity" onclick="sortModuleQuality(7, true, this)">Max CC</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by high-risk function count" onclick="sortModuleQuality(8, true, this)">High Risk</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by exception handler count" onclick="sortModuleQuality(9, true, this)">Handlers</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by dead-code findings" onclick="sortModuleQuality(10, true, this)">Dead Findings</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by dead-code blocks" onclick="sortModuleQuality(11, true, this)">Dead Blocks</button></th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.builtin.memory">src.nan_itself.modules.builtin.memory</td>
+            <td class="mono muted" data-sort-value="modules/builtin/memory.py">modules/builtin/memory.py</td>
+            <td class="r num" data-sort-value="1590">1590</td>
+            <td class="r num" data-sort-value="44">44</td>
+            <td class="r num" data-sort-value="44">44</td>
+            <td class="r num" data-sort-value="4.340909090909091">4.34</td>
+            <td class="r num" data-sort-value="7.090909090909091">7.09</td>
+            <td class="r num" data-sort-value="24">24</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="21">21</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils.llm">src.nan_itself.utils.llm</td>
+            <td class="mono muted" data-sort-value="utils/llm.py">utils/llm.py</td>
+            <td class="r num" data-sort-value="975">975</td>
+            <td class="r num" data-sort-value="11">11</td>
+            <td class="r num" data-sort-value="11">11</td>
+            <td class="r num" data-sort-value="8.090909090909092">8.09</td>
+            <td class="r num" data-sort-value="16.818181818181817">16.82</td>
+            <td class="r num" data-sort-value="16">16</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.reload">src.nan_itself.modules.reload</td>
+            <td class="mono muted" data-sort-value="modules/reload.py">modules/reload.py</td>
+            <td class="r num" data-sort-value="301">301</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="10.5">10.50</td>
+            <td class="r num" data-sort-value="20.5">20.50</td>
+            <td class="r num" data-sort-value="20">20</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="12">12</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils.face_detect">src.nan_itself.utils.face_detect</td>
+            <td class="mono muted" data-sort-value="utils/face_detect.py">utils/face_detect.py</td>
+            <td class="r num" data-sort-value="207">207</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="5.333333333333333">5.33</td>
+            <td class="r num" data-sort-value="9.666666666666666">9.67</td>
+            <td class="r num" data-sort-value="13">13</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.loop">src.nan_itself.agent.loop</td>
+            <td class="mono muted" data-sort-value="agent/loop.py">agent/loop.py</td>
+            <td class="r num" data-sort-value="383">383</td>
+            <td class="r num" data-sort-value="12">12</td>
+            <td class="r num" data-sort-value="12">12</td>
+            <td class="r num" data-sort-value="3.0833333333333335">3.08</td>
+            <td class="r num" data-sort-value="5.166666666666667">5.17</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="8">8</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.runtime">src.nan_itself.tools.runtime</td>
+            <td class="mono muted" data-sort-value="tools/runtime.py">tools/runtime.py</td>
+            <td class="r num" data-sort-value="793">793</td>
+            <td class="r num" data-sort-value="20">20</td>
+            <td class="r num" data-sort-value="20">20</td>
+            <td class="r num" data-sort-value="4.2">4.20</td>
+            <td class="r num" data-sort-value="5.35">5.35</td>
+            <td class="r num" data-sort-value="14">14</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.engine">src.nan_itself.agent.engine</td>
+            <td class="mono muted" data-sort-value="agent/engine.py">agent/engine.py</td>
+            <td class="r num" data-sort-value="415">415</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="3.3">3.30</td>
+            <td class="r num" data-sort-value="3.7">3.70</td>
+            <td class="r num" data-sort-value="13">13</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.runtime">src.nan_itself.modules.runtime</td>
+            <td class="mono muted" data-sort-value="modules/runtime.py">modules/runtime.py</td>
+            <td class="r num" data-sort-value="1139">1139</td>
+            <td class="r num" data-sort-value="39">39</td>
+            <td class="r num" data-sort-value="39">39</td>
+            <td class="r num" data-sort-value="2.5641025641025643">2.56</td>
+            <td class="r num" data-sort-value="2.358974358974359">2.36</td>
+            <td class="r num" data-sort-value="12">12</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="15">15</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.deps">src.nan_itself.modules.deps</td>
+            <td class="mono muted" data-sort-value="modules/deps.py">modules/deps.py</td>
+            <td class="r num" data-sort-value="186">186</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="5">5.00</td>
+            <td class="r num" data-sort-value="6.25">6.25</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.skills.registry">src.nan_itself.skills.registry</td>
+            <td class="mono muted" data-sort-value="skills/registry.py">skills/registry.py</td>
+            <td class="r num" data-sort-value="270">270</td>
+            <td class="r num" data-sort-value="8">8</td>
+            <td class="r num" data-sort-value="8">8</td>
+            <td class="r num" data-sort-value="3.625">3.62</td>
+            <td class="r num" data-sort-value="5.5">5.50</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.builtin.audio">src.nan_itself.modules.builtin.audio</td>
+            <td class="mono muted" data-sort-value="modules/builtin/audio.py">modules/builtin/audio.py</td>
+            <td class="r num" data-sort-value="934">934</td>
+            <td class="r num" data-sort-value="25">25</td>
+            <td class="r num" data-sort-value="25">25</td>
+            <td class="r num" data-sort-value="3.4">3.40</td>
+            <td class="r num" data-sort-value="4.56">4.56</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.app">src.nan_itself.app</td>
+            <td class="mono muted" data-sort-value="app.py">app.py</td>
+            <td class="r num" data-sort-value="234">234</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="3">3.00</td>
+            <td class="r num" data-sort-value="2.6666666666666665">2.67</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils.audio">src.nan_itself.utils.audio</td>
+            <td class="mono muted" data-sort-value="utils/audio.py">utils/audio.py</td>
+            <td class="r num" data-sort-value="1296">1296</td>
+            <td class="r num" data-sort-value="47">47</td>
+            <td class="r num" data-sort-value="47">47</td>
+            <td class="r num" data-sort-value="2.3404255319148937">2.34</td>
+            <td class="r num" data-sort-value="2.1702127659574466">2.17</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="5">5</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.local">src.nan_itself.tools.local</td>
+            <td class="mono muted" data-sort-value="tools/local.py">tools/local.py</td>
+            <td class="r num" data-sort-value="566">566</td>
+            <td class="r num" data-sort-value="17">17</td>
+            <td class="r num" data-sort-value="17">17</td>
+            <td class="r num" data-sort-value="2.588235294117647">2.59</td>
+            <td class="r num" data-sort-value="2.6470588235294117">2.65</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.mcp">src.nan_itself.tools.mcp</td>
+            <td class="mono muted" data-sort-value="tools/mcp.py">tools/mcp.py</td>
+            <td class="r num" data-sort-value="316">316</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="4">4.00</td>
+            <td class="r num" data-sort-value="4.666666666666667">4.67</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.loading">src.nan_itself.modules.loading</td>
+            <td class="mono muted" data-sort-value="modules/loading.py">modules/loading.py</td>
+            <td class="r num" data-sort-value="218">218</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="3.75">3.75</td>
+            <td class="r num" data-sort-value="2.75">2.75</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.skills.parsing">src.nan_itself.skills.parsing</td>
+            <td class="mono muted" data-sort-value="skills/parsing.py">skills/parsing.py</td>
+            <td class="r num" data-sort-value="211">211</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="3">3.00</td>
+            <td class="r num" data-sort-value="2.7142857142857144">2.71</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.view">src.nan_itself.tools.view</td>
+            <td class="mono muted" data-sort-value="tools/view.py">tools/view.py</td>
+            <td class="r num" data-sort-value="221">221</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="2.8333333333333335">2.83</td>
+            <td class="r num" data-sort-value="2.5">2.50</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.prompts">src.nan_itself.agent.prompts</td>
+            <td class="mono muted" data-sort-value="agent/prompts.py">agent/prompts.py</td>
+            <td class="r num" data-sort-value="173">173</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="3">3.00</td>
+            <td class="r num" data-sort-value="3">3.00</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.reports">src.nan_itself.agent.reports</td>
+            <td class="mono muted" data-sort-value="agent/reports.py">agent/reports.py</td>
+            <td class="r num" data-sort-value="110">110</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="2">2.00</td>
+            <td class="r num" data-sort-value="1.8333333333333333">1.83</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.provider">src.nan_itself.tools.provider</td>
+            <td class="mono muted" data-sort-value="tools/provider.py">tools/provider.py</td>
+            <td class="r num" data-sort-value="140">140</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="2">2.00</td>
+            <td class="r num" data-sort-value="1.5">1.50</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.results">src.nan_itself.tools.results</td>
+            <td class="mono muted" data-sort-value="tools/results.py">tools/results.py</td>
+            <td class="r num" data-sort-value="58">58</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="2">2.00</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils.listen">src.nan_itself.utils.listen</td>
+            <td class="mono muted" data-sort-value="utils/listen.py">utils/listen.py</td>
+            <td class="r num" data-sort-value="82">82</td>
+            <td class="r num" data-sort-value="5">5</td>
+            <td class="r num" data-sort-value="5">5</td>
+            <td class="r num" data-sort-value="2">2.00</td>
+            <td class="r num" data-sort-value="1.6">1.60</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.persistence">src.nan_itself.modules.persistence</td>
+            <td class="mono muted" data-sort-value="modules/persistence.py">modules/persistence.py</td>
+            <td class="r num" data-sort-value="199">199</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="1.6666666666666667">1.67</td>
+            <td class="r num" data-sort-value="0.6666666666666666">0.67</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.verbs">src.nan_itself.agent.verbs</td>
+            <td class="mono muted" data-sort-value="agent/verbs.py">agent/verbs.py</td>
+            <td class="r num" data-sort-value="279">279</td>
+            <td class="r num" data-sort-value="11">11</td>
+            <td class="r num" data-sort-value="11">11</td>
+            <td class="r num" data-sort-value="1.6363636363636365">1.64</td>
+            <td class="r num" data-sort-value="0.8181818181818182">0.82</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils.ocr">src.nan_itself.utils.ocr</td>
+            <td class="mono muted" data-sort-value="utils/ocr.py">utils/ocr.py</td>
+            <td class="r num" data-sort-value="98">98</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="2.3333333333333335">2.33</td>
+            <td class="r num" data-sort-value="2.3333333333333335">2.33</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.server">src.nan_itself.tools.server</td>
+            <td class="mono muted" data-sort-value="tools/server.py">tools/server.py</td>
+            <td class="r num" data-sort-value="174">174</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="10">10</td>
+            <td class="r num" data-sort-value="1.5">1.50</td>
+            <td class="r num" data-sort-value="0.2">0.20</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.watcher">src.nan_itself.tools.watcher</td>
+            <td class="mono muted" data-sort-value="tools/watcher.py">tools/watcher.py</td>
+            <td class="r num" data-sort-value="98">98</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="1.2857142857142858">1.29</td>
+            <td class="r num" data-sort-value="0.2857142857142857">0.29</td>
+            <td class="r num" data-sort-value="3">3</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.skills.runtime">src.nan_itself.skills.runtime</td>
+            <td class="mono muted" data-sort-value="skills/runtime.py">skills/runtime.py</td>
+            <td class="r num" data-sort-value="182">182</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="1.2857142857142858">1.29</td>
+            <td class="r num" data-sort-value="0.42857142857142855">0.43</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.runtime">src.nan_itself.agent.runtime</td>
+            <td class="mono muted" data-sort-value="agent/runtime.py">agent/runtime.py</td>
+            <td class="r num" data-sort-value="300">300</td>
+            <td class="r num" data-sort-value="17">17</td>
+            <td class="r num" data-sort-value="17">17</td>
+            <td class="r num" data-sort-value="1.1764705882352942">1.18</td>
+            <td class="r num" data-sort-value="0.4117647058823529">0.41</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.model">src.nan_itself.modules.model</td>
+            <td class="mono muted" data-sort-value="modules/model.py">modules/model.py</td>
+            <td class="r num" data-sort-value="311">311</td>
+            <td class="r num" data-sort-value="15">15</td>
+            <td class="r num" data-sort-value="15">15</td>
+            <td class="r num" data-sort-value="1.0666666666666667">1.07</td>
+            <td class="r num" data-sort-value="0.13333333333333333">0.13</td>
+            <td class="r num" data-sort-value="2">2</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself">src.nan_itself</td>
+            <td class="mono muted" data-sort-value="__init__.py">__init__.py</td>
+            <td class="r num" data-sort-value="6">6</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.core">src.nan_itself.agent.core</td>
+            <td class="mono muted" data-sort-value="agent/core.py">agent/core.py</td>
+            <td class="r num" data-sort-value="121">121</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.role">src.nan_itself.agent.role</td>
+            <td class="mono muted" data-sort-value="agent/role.py">agent/role.py</td>
+            <td class="r num" data-sort-value="43">43</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.skills.model">src.nan_itself.skills.model</td>
+            <td class="mono muted" data-sort-value="skills/model.py">skills/model.py</td>
+            <td class="r num" data-sort-value="99">99</td>
+            <td class="r num" data-sort-value="5">5</td>
+            <td class="r num" data-sort-value="5">5</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent">src.nan_itself.agent</td>
+            <td class="mono muted" data-sort-value="agent/__init__.py">agent/__init__.py</td>
+            <td class="r num" data-sort-value="59">59</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.agent.model">src.nan_itself.agent.model</td>
+            <td class="mono muted" data-sort-value="agent/model.py">agent/model.py</td>
+            <td class="r num" data-sort-value="65">65</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules">src.nan_itself.modules</td>
+            <td class="mono muted" data-sort-value="modules/__init__.py">modules/__init__.py</td>
+            <td class="r num" data-sort-value="43">43</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.modules.builtin">src.nan_itself.modules.builtin</td>
+            <td class="mono muted" data-sort-value="modules/builtin/__init__.py">modules/builtin/__init__.py</td>
+            <td class="r num" data-sort-value="37">37</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.skills">src.nan_itself.skills</td>
+            <td class="mono muted" data-sort-value="skills/__init__.py">skills/__init__.py</td>
+            <td class="r num" data-sort-value="34">34</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools">src.nan_itself.tools</td>
+            <td class="mono muted" data-sort-value="tools/__init__.py">tools/__init__.py</td>
+            <td class="r num" data-sort-value="73">73</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.builtin">src.nan_itself.tools.builtin</td>
+            <td class="mono muted" data-sort-value="tools/builtin/__init__.py">tools/builtin/__init__.py</td>
+            <td class="r num" data-sort-value="39">39</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.builtin.local">src.nan_itself.tools.builtin.local</td>
+            <td class="mono muted" data-sort-value="tools/builtin/local/__init__.py">tools/builtin/local/__init__.py</td>
+            <td class="r num" data-sort-value="7">7</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.tools.spec">src.nan_itself.tools.spec</td>
+            <td class="mono muted" data-sort-value="tools/spec.py">tools/spec.py</td>
+            <td class="r num" data-sort-value="65">65</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="src.nan_itself.utils">src.nan_itself.utils</td>
+            <td class="mono muted" data-sort-value="utils/__init__.py">utils/__init__.py</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+  </details>
+  
+
+  
+  <details class="card">
+    <summary><h2>Directory Complexity</h2><span class="muted small">9 directories · click a column to sort</span></summary>
+    <div class="tbl-wrap">
+      <table id="directory-complexity-table" class="tbl">
+        <thead>
+          <tr>
+            <th><button type="button" class="table-sort" aria-label="Sort by directory path" onclick="sortDirectoryComplexity(0, false, this)">Directory</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by function count" onclick="sortDirectoryComplexity(1, true, this)">Functions</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by average complexity" onclick="sortDirectoryComplexity(2, true, this)">Avg CC</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by maximum complexity" onclick="sortDirectoryComplexity(3, true, this)">Max CC</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by high-risk function count" onclick="sortDirectoryComplexity(4, true, this)">High Risk</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by average nesting depth" onclick="sortDirectoryComplexity(5, true, this)">Avg Nesting</button></th>
+            <th class="r"><button type="button" class="table-sort" aria-label="Sort by maximum nesting depth" onclick="sortDirectoryComplexity(6, true, this)">Max Nesting</button></th>
+          </tr>
+        </thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono" data-sort-value="modules/builtin">modules/builtin</td>
+            <td class="r num" data-sort-value="72">72</td>
+            <td class="r num" data-sort-value="3.875">3.88</td>
+            <td class="r num" data-sort-value="24">24</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="1.7361111111111112">1.74</td>
+            <td class="r num" data-sort-value="8">8</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="utils">utils</td>
+            <td class="r num" data-sort-value="75">75</td>
+            <td class="r num" data-sort-value="3.1733333333333333">3.17</td>
+            <td class="r num" data-sort-value="16">16</td>
+            <td class="r num" data-sort-value="4">4</td>
+            <td class="r num" data-sort-value="1.1066666666666667">1.11</td>
+            <td class="r num" data-sort-value="7">7</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="modules">modules</td>
+            <td class="r num" data-sort-value="80">80</td>
+            <td class="r num" data-sort-value="2.425">2.42</td>
+            <td class="r num" data-sort-value="20">20</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0.825">0.82</td>
+            <td class="r num" data-sort-value="5">5</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="agent">agent</td>
+            <td class="r num" data-sort-value="78">78</td>
+            <td class="r num" data-sort-value="1.9615384615384615">1.96</td>
+            <td class="r num" data-sort-value="13">13</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0.6923076923076923">0.69</td>
+            <td class="r num" data-sort-value="6">6</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="tools">tools</td>
+            <td class="r num" data-sort-value="83">83</td>
+            <td class="r num" data-sort-value="2.63855421686747">2.64</td>
+            <td class="r num" data-sort-value="14">14</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0.9156626506024096">0.92</td>
+            <td class="r num" data-sort-value="3">3</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value=".">.</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="2.4444444444444446">2.44</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0.8888888888888888">0.89</td>
+            <td class="r num" data-sort-value="3">3</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="skills">skills</td>
+            <td class="r num" data-sort-value="32">32</td>
+            <td class="r num" data-sort-value="2.15625">2.16</td>
+            <td class="r num" data-sort-value="9">9</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0.59375">0.59</td>
+            <td class="r num" data-sort-value="3">3</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="tools/builtin">tools/builtin</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono" data-sort-value="tools/builtin/local">tools/builtin/local</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="1">1.00</td>
+            <td class="r num" data-sort-value="1">1</td>
+            <td class="r num" data-sort-value="0">0</td>
+            <td class="r num" data-sort-value="0">0.00</td>
+            <td class="r num" data-sort-value="0">0</td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+  </details>
+  
+</section>
+
+
+
+
+<section id="duplication" class="panel">
+  <div class="panel-h">
+    <h2>Duplication</h2>
+    <div class="scores"><span class="score-pill ok">Duplication <b class="num">75</b>/100</span></div>
+  </div>
+  
+  <div class="card">
+    <div class="strip">
+      <div class="s"><div class="v num">39<small> / 497</small></div><div class="l">fragments cloned</div></div>
+      <div class="s"><div class="v num">18</div><div class="l">clone groups</div></div>
+      <div class="s"><div class="v num">22</div><div class="l">clone pairs</div></div>
+      <div class="s"><div class="v num">0.87</div><div class="l">avg similarity</div></div>
+      <div class="s"><div class="v num">45</div><div class="l">files scanned</div></div>
+    </div>
+  </div>
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Clone groups</h2><span class="muted small">fragments grouped by similarity</span></div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t1">Type-1</span>
+        <b>Group 1</b>
+        <span class="muted">2 fragments · similarity 1.00</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/loading.py</td>
+              <td class="r num">147-163</td>
+              <td class="r num">17 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/local.py</td>
+              <td class="r num">447-463</td>
+              <td class="r num">17 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 2</b>
+        <span class="muted">2 fragments · similarity 0.98</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/deps.py</td>
+              <td class="r num">35-48</td>
+              <td class="r num">14 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">modules/deps.py</td>
+              <td class="r num">99-112</td>
+              <td class="r num">14 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 4</b>
+        <span class="muted">2 fragments · similarity 0.96</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/runtime.py</td>
+              <td class="r num">988-1002</td>
+              <td class="r num">15 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">modules/runtime.py</td>
+              <td class="r num">1081-1093</td>
+              <td class="r num">13 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 5</b>
+        <span class="muted">3 fragments · similarity 0.90</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/runtime.py</td>
+              <td class="r num">279-299</td>
+              <td class="r num">21 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/server.py</td>
+              <td class="r num">71-82</td>
+              <td class="r num">12 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/server.py</td>
+              <td class="r num">85-95</td>
+              <td class="r num">11 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 6</b>
+        <span class="muted">2 fragments · similarity 0.88</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/runtime.py</td>
+              <td class="r num">241-273</td>
+              <td class="r num">33 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/runtime.py</td>
+              <td class="r num">148-173</td>
+              <td class="r num">26 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 7</b>
+        <span class="muted">2 fragments · similarity 0.87</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">tools/local.py</td>
+              <td class="r num">78-93</td>
+              <td class="r num">16 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/provider.py</td>
+              <td class="r num">76-93</td>
+              <td class="r num">18 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t4">Type-4</span>
+        <b>Group 8</b>
+        <span class="muted">2 fragments · similarity 0.86</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">skills/parsing.py</td>
+              <td class="r num">128-151</td>
+              <td class="r num">24 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">skills/parsing.py</td>
+              <td class="r num">154-172</td>
+              <td class="r num">19 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t2">Type-2</span>
+        <b>Group 9</b>
+        <span class="muted">3 fragments · similarity 0.85</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">agent/verbs.py</td>
+              <td class="r num">69-88</td>
+              <td class="r num">20 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">agent/verbs.py</td>
+              <td class="r num">129-153</td>
+              <td class="r num">25 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">agent/verbs.py</td>
+              <td class="r num">213-234</td>
+              <td class="r num">22 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t2">Type-2</span>
+        <b>Group 10</b>
+        <span class="muted">2 fragments · similarity 0.85</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/loading.py</td>
+              <td class="r num">23-37</td>
+              <td class="r num">15 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/local.py</td>
+              <td class="r num">392-408</td>
+              <td class="r num">17 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="clone-group">
+      <div class="clone-group-h">
+        <span class="pill type t2">Type-2</span>
+        <b>Group 13</b>
+        <span class="muted">2 fragments · similarity 0.85</span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl compact">
+          <thead><tr><th>File</th><th class="r">Lines</th><th class="r">Size</th></tr></thead>
+          <tbody>
+            
+            <tr>
+              <td class="mono">modules/loading.py</td>
+              <td class="r num">201-211</td>
+              <td class="r num">11 lines</td>
+            </tr>
+            
+            
+            <tr>
+              <td class="mono">tools/local.py</td>
+              <td class="r num">506-516</td>
+              <td class="r num">11 lines</td>
+            </tr>
+            
+            
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+    
+    <p class="muted small note">Showing top 10 of 18 clone groups</p>
+  </div>
+  
+  
+</section>
+
+
+
+
+<section id="classes" class="panel">
+  <div class="panel-h">
+    <h2>Classes</h2>
+    <div class="scores">
+      <span class="score-pill watch">Coupling <b class="num">65</b>/100</span>
+      <span class="score-pill ok">Cohesion <b class="num">90</b>/100</span>
+    </div>
+  </div>
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Coupling</h2><span class="muted small">Coupling Between Objects (CBO)</span></div>
+    <div class="strip">
+      <div class="s"><div class="v num">38</div><div class="l">classes</div></div>
+      <div class="s"><div class="v num bad">4</div><div class="l">high coupling</div></div>
+      <div class="s"><div class="v num warn">4</div><div class="l">medium coupling</div></div>
+      <div class="s"><div class="v num">2.84</div><div class="l">average CBO</div></div>
+      <div class="s"><div class="v num">15</div><div class="l">max CBO</div></div>
+    </div>
+    <h3>Most coupled classes</h3>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Class</th><th>File</th><th class="r">CBO</th><th>Risk</th><th>Depends on</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono">AudioModule</td>
+            <td class="mono muted">modules/builtin/audio.py:59</td>
+            <td class="r num">15</td>
+            <td><span class="pill risk-high">high</span></td>
+            <td class="mono small wrap">AudioPipeline, Module, Path, SherpaSpeakerEmbedder, SoundDeviceMicSource, SpeakerMatcher, WhisperTranscriber, datetime, deque, queue.Empty, queue.Full, queue.Queue, threading.Event, threading.Lock, threading.Thread</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">StepEngine</td>
+            <td class="mono muted">agent/engine.py:63</td>
+            <td class="r num">10</td>
+            <td><span class="pill risk-high">high</span></td>
+            <td class="mono small wrap">AgentResult, AgentToolView, AgentTurn, ExecutionState, LLMRequest, RolePolicy, ToolDefinition, TurnRecord, VERBS, asyncio.CancelledError</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule</td>
+            <td class="mono muted">modules/builtin/memory.py:189</td>
+            <td class="r num">10</td>
+            <td><span class="pill risk-high">high</span></td>
+            <td class="mono small wrap">Counter, LLMRequest, Message, Module, Path, asyncio.CancelledError, asyncio.TimeoutError, datetime, json.JSONDecodeError, timezone</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Facade</td>
+            <td class="mono muted">modules/runtime.py:40</td>
+            <td class="r num">10</td>
+            <td><span class="pill risk-high">high</span></td>
+            <td class="mono small wrap">DataSpace, DuplicateModuleError, MappingProxyType, ModuleRecord, ModuleState, ModuleTurn, Path, asyncio.CancelledError, asyncio.Event, asyncio.TimeoutError</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ProviderRuntime</td>
+            <td class="mono muted">tools/runtime.py:50</td>
+            <td class="r num">5</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="mono small wrap">Path, SourceTracker, asyncio.CancelledError, asyncio.Event, asyncio.TimeoutError</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MCPFacade</td>
+            <td class="mono muted">tools/server.py:39</td>
+            <td class="r num">5</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="mono small wrap">AgentToolView, InitializationOptions, NotificationOptions, ProviderRuntime, Server</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SkillRuntime</td>
+            <td class="mono muted">skills/runtime.py:38</td>
+            <td class="r num">4</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="mono small wrap">Path, Skill, SkillRegistry, UnknownSkillError</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SoundDeviceMicSource</td>
+            <td class="mono muted">utils/audio.py:753</td>
+            <td class="r num">4</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="mono small wrap">queue.Empty, queue.Full, queue.Queue, sd</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">CoreAgent</td>
+            <td class="mono muted">agent/core.py:36</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">AgentRuntime, LateReportBuffer, StepEngine</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentLoop</td>
+            <td class="mono muted">agent/loop.py:88</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">asyncio.CancelledError, asyncio.Event, asyncio.TimeoutError</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Inbox</td>
+            <td class="mono muted">agent/loop.py:14</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">asyncio.Event, deque</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">DispatchVerb</td>
+            <td class="mono muted">agent/verbs.py:126</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">ChildSubagent, ToolDefinition</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LocalToolProvider</td>
+            <td class="mono muted">tools/local.py:142</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">inspect.Parameter, types</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SherpaSpeakerEmbedder</td>
+            <td class="mono muted">utils/audio.py:1228</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">sherpa_onnx.SpeakerEmbeddingExtractor, sherpa_onnx.SpeakerEmbeddingExtractorConfig</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">FaceRecognizer</td>
+            <td class="mono muted">utils/face_detect.py:13</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="mono small wrap">Path, cv2.VideoCapture</td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small note">Showing top 15 of 38 classes</p>
+  </div>
+  
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Cohesion</h2><span class="muted small">Lack of Cohesion of Methods (LCOM4)</span></div>
+    <div class="strip">
+      <div class="s"><div class="v num">70</div><div class="l">classes</div></div>
+      <div class="s"><div class="v num bad">1</div><div class="l">low cohesion</div></div>
+      <div class="s"><div class="v num warn">4</div><div class="l">medium</div></div>
+      <div class="s"><div class="v num">1.24</div><div class="l">average LCOM4</div></div>
+      <div class="s"><div class="v num">6</div><div class="l">max LCOM4</div></div>
+    </div>
+    <h3>Least cohesive classes</h3>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Class</th><th>File</th><th class="r">LCOM4</th><th>Risk</th><th class="r">Methods</th><th class="r">Instance vars</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="mono">Module</td>
+            <td class="mono muted">modules/model.py:170</td>
+            <td class="r num">6</td>
+            <td><span class="pill risk-high">high</span></td>
+            <td class="r num">6</td>
+            <td class="r num">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">SleepVerb</td>
+            <td class="mono muted">agent/verbs.py:66</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="r num">3</td>
+            <td class="r num">1</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">DispatchVerb</td>
+            <td class="mono muted">agent/verbs.py:126</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="r num">3</td>
+            <td class="r num">1</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">ActivateSkillVerb</td>
+            <td class="mono muted">agent/verbs.py:210</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="r num">3</td>
+            <td class="r num">1</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Facade</td>
+            <td class="mono muted">modules/runtime.py:40</td>
+            <td class="r num">3</td>
+            <td><span class="pill risk-medium">medium</span></td>
+            <td class="r num">36</td>
+            <td class="r num">46</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">_Entry</td>
+            <td class="mono muted">modules/builtin/memory.py:126</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">2</td>
+            <td class="r num">4</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">MemoryModule</td>
+            <td class="mono muted">modules/builtin/memory.py:189</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">32</td>
+            <td class="r num">54</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">LocalToolProvider</td>
+            <td class="mono muted">tools/local.py:142</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">7</td>
+            <td class="r num">4</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">EchoTranscriber</td>
+            <td class="mono muted">utils/audio.py:834</td>
+            <td class="r num">2</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">2</td>
+            <td class="r num">3</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">CoreAgent</td>
+            <td class="mono muted">agent/core.py:36</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">3</td>
+            <td class="r num">9</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">StepEngine</td>
+            <td class="mono muted">agent/engine.py:63</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">4</td>
+            <td class="r num">8</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">Inbox</td>
+            <td class="mono muted">agent/loop.py:14</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">5</td>
+            <td class="r num">3</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentLoop</td>
+            <td class="mono muted">agent/loop.py:88</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">5</td>
+            <td class="r num">10</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">_StopRequested</td>
+            <td class="mono muted">agent/loop.py:381</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+          </tr>
+          
+          <tr>
+            <td class="mono">AgentTurn</td>
+            <td class="mono muted">agent/model.py:20</td>
+            <td class="r num">1</td>
+            <td><span class="pill risk-low">low</span></td>
+            <td class="r num">0</td>
+            <td class="r num">0</td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small note">Showing top 15 of 70 classes</p>
+  </div>
+  
+</section>
+
+
+
+
+<section id="architecture" class="panel">
+  <div class="panel-h">
+    <h2>Architecture</h2>
+    <div class="scores">
+      <span class="score-pill ok">Dependencies <b class="num">85</b>/100</span>
+      <span class="score-pill ok">Architecture <b class="num">93</b>/100</span>
+      <span class="score-pill poor">Communities <b class="num">48</b>/100</span>
+    </div>
+  </div>
+
+  
+  
+  <div class="card">
+    <div class="card-h"><h2>Module dependencies</h2></div>
+    <div class="strip">
+      <div class="s"><div class="v num">45</div><div class="l">modules</div></div>
+      <div class="s"><div class="v num">66</div><div class="l">dependencies</div></div>
+      <div class="s"><div class="v num">5</div><div class="l">max depth</div></div>
+      <div class="s"><div class="v num good">0</div><div class="l">circular dependencies</div></div>
+      
+      <div class="s"><div class="v num">0.32</div><div class="l">avg instability</div></div>
+      <div class="s"><div class="v num">0.68</div><div class="l">main sequence deviation</div></div>
+      
+    </div>
+
+    
+    
+    <h3>Main sequence</h3>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Zone</th><th>Modules</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill bad">Zone of pain</span></td><td class="mono small wrap">src.nan_itself.agent.model, src.nan_itself.agent.runtime, src.nan_itself.modules.model, src.nan_itself.skills.model, src.nan_itself.tools.results, src.nan_itself.tools.spec, src.nan_itself.utils.llm</td></tr>
+          
+          <tr><td><span class="pill good">Main sequence</span></td><td class="mono small wrap">src.nan_itself.agent.core, src.nan_itself.agent.engine, src.nan_itself.agent.verbs, src.nan_itself.app, src.nan_itself.modules.runtime, src.nan_itself.tools.server</td></tr>
+        </tbody>
+      </table>
+    </div>
+    
+    
+
+    
+    <h3>Circular dependencies</h3>
+    
+    <p class="ok-msg">No circular dependencies detected. All modules have acyclic dependency relationships.</p>
+    
+    
+
+    
+    <h3>Longest dependency chains</h3>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th class="r">#</th><th class="r">Depth</th><th>Path</th></tr></thead>
+        <tbody>
+          
+          <tr><td class="r num">1</td><td class="r num">6</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.tools.runtime → src.nan_itself.tools.builtin → src.nan_itself.tools.local → src.nan_itself.tools.provider → src.nan_itself.tools.results</td></tr>
+          
+          <tr><td class="r num">2</td><td class="r num">6</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.tools.runtime → src.nan_itself.tools.builtin → src.nan_itself.tools.local → src.nan_itself.tools.provider → src.nan_itself.tools.spec</td></tr>
+          
+          <tr><td class="r num">3</td><td class="r num">6</td><td class="mono small wrap">src.nan_itself.tools.server → src.nan_itself.tools.runtime → src.nan_itself.tools.builtin → src.nan_itself.tools.local → src.nan_itself.tools.provider → src.nan_itself.tools.results</td></tr>
+          
+          <tr><td class="r num">4</td><td class="r num">6</td><td class="mono small wrap">src.nan_itself.tools.server → src.nan_itself.tools.runtime → src.nan_itself.tools.builtin → src.nan_itself.tools.local → src.nan_itself.tools.provider → src.nan_itself.tools.spec</td></tr>
+          
+          <tr><td class="r num">5</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.prompts → src.nan_itself.utils.llm</td></tr>
+          
+          <tr><td class="r num">6</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.reports → src.nan_itself.agent.model</td></tr>
+          
+          <tr><td class="r num">7</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.verbs → src.nan_itself.agent.model</td></tr>
+          
+          <tr><td class="r num">8</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.verbs → src.nan_itself.agent.runtime</td></tr>
+          
+          <tr><td class="r num">9</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.verbs → src.nan_itself.skills.model</td></tr>
+          
+          <tr><td class="r num">10</td><td class="r num">5</td><td class="mono small wrap">src.nan_itself.app → src.nan_itself.agent.core → src.nan_itself.agent.engine → src.nan_itself.agent.verbs → src.nan_itself.utils.llm</td></tr>
+          
+        </tbody>
+      </table>
+    </div>
+    
+  </div>
+  
+
+  
+  <div class="card">
+    <div class="card-h"><h2>Layer rules</h2></div>
+    <div class="strip">
+      <div class="s"><div class="v num">1</div><div class="l">layers analyzed</div></div>
+      <div class="s"><div class="v num">120</div><div class="l">rules checked</div></div>
+      <div class="s"><div class="v num warn">8</div><div class="l">violations</div></div>
+      <div class="s"><div class="v num">93.3%</div><div class="l">compliance</div></div>
+    </div>
+    
+    <p class="ok-msg">No architecture violations</p>
+    
+  </div>
+  
+  
+
+  
+  <div class="card community-card">
+    
+        <h2 class="section-header">Module Communities</h2><div class="metric-grid">
+        <div class="metric-card">
+            <div class="metric-value">15</div>
+            <div class="metric-label">Communities</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">0.583</div>
+            <div class="metric-label">Modularity (Q)</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">leiden</div>
+            <div class="metric-label">Algorithm</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">14</div>
+            <div class="metric-label">Bridge Modules</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">0.000</div>
+            <div class="metric-label">Package Alignment</div>
+        </div></div>
+        <h2 class="section-header">Macro Architecture</h2><p class="community-graph-help">Module dependency graph colored by community. Bridge modules are outlined in <span style="color:#d9534f;font-weight:600;">red</span>; red edges cross community boundaries. Hover a node for details; click to highlight its neighbors.</p>
+        <div id="community-graph" class="community-graph">
+            <div class="community-graph-controls">
+                <label>Community
+                    <select id="community-graph-filter"><option value="">All</option></select>
+                </label>
+                <label><input type="checkbox" id="community-graph-bridges"> Bridges only</label>
+                <label><input type="checkbox" id="community-graph-isolated"> Hide isolated</label>
+                <span id="community-graph-count" class="community-graph-count"></span>
+            </div>
+            <div class="community-graph-canvas-wrap">
+                <canvas id="community-graph-canvas" width="800" height="480" role="img"
+                    aria-label="Module community dependency graph"></canvas>
+                <div id="community-graph-tooltip" class="community-graph-tooltip" hidden></div>
+            </div>
+            <div id="community-graph-legend" class="community-graph-legend"></div>
+        </div><script type="application/json" id="community-graph-data">{"nodes":[{"id":"src.nan_itself","label":"src.nan_itself","community":"community_1","color":"lightblue","dominantPackage":"src"},{"id":"src.nan_itself.tools.builtin","label":"src.nan_itself.tools.builtin","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.local","label":"src.nan_itself.tools.local","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.mcp","label":"src.nan_itself.tools.mcp","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.provider","label":"src.nan_itself.tools.provider","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.results","label":"src.nan_itself.tools.results","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.runtime","label":"src.nan_itself.tools.runtime","community":"community_10","color":"lightgreen","bridge":true,"crossEdges":1,"targets":["community_4"],"dominantPackage":"src"},{"id":"src.nan_itself.tools.server","label":"src.nan_itself.tools.server","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.spec","label":"src.nan_itself.tools.spec","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.view","label":"src.nan_itself.tools.view","community":"community_10","color":"lightgreen","bridge":true,"crossEdges":1,"targets":["community_3"],"dominantPackage":"src"},{"id":"src.nan_itself.tools.watcher","label":"src.nan_itself.tools.watcher","community":"community_10","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.tools.builtin.local","label":"src.nan_itself.tools.builtin.local","community":"community_11","color":"lightyellow","dominantPackage":"src"},{"id":"src.nan_itself.utils","label":"src.nan_itself.utils","community":"community_12","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.utils.face_detect","label":"src.nan_itself.utils.face_detect","community":"community_13","color":"lavender","dominantPackage":"src"},{"id":"src.nan_itself.utils.listen","label":"src.nan_itself.utils.listen","community":"community_14","color":"peachpuff","dominantPackage":"src"},{"id":"src.nan_itself.utils.ocr","label":"src.nan_itself.utils.ocr","community":"community_15","color":"lightgray","dominantPackage":"src"},{"id":"src.nan_itself.agent","label":"src.nan_itself.agent","community":"community_2","color":"honeydew","dominantPackage":"src"},{"id":"src.nan_itself.agent.core","label":"src.nan_itself.agent.core","community":"community_3","color":"lightblue","bridge":true,"crossEdges":1,"targets":["community_4"],"dominantPackage":"src"},{"id":"src.nan_itself.agent.engine","label":"src.nan_itself.agent.engine","community":"community_3","color":"lightblue","bridge":true,"crossEdges":5,"targets":["community_10","community_4","community_6","community_8"],"dominantPackage":"src"},{"id":"src.nan_itself.agent.model","label":"src.nan_itself.agent.model","community":"community_3","color":"lightblue","dominantPackage":"src"},{"id":"src.nan_itself.agent.reports","label":"src.nan_itself.agent.reports","community":"community_3","color":"lightblue","dominantPackage":"src"},{"id":"src.nan_itself.agent.role","label":"src.nan_itself.agent.role","community":"community_3","color":"lightblue","dominantPackage":"src"},{"id":"src.nan_itself.agent.runtime","label":"src.nan_itself.agent.runtime","community":"community_3","color":"lightblue","dominantPackage":"src"},{"id":"src.nan_itself.agent.verbs","label":"src.nan_itself.agent.verbs","community":"community_3","color":"lightblue","bridge":true,"crossEdges":2,"targets":["community_4","community_8"],"dominantPackage":"src"},{"id":"src.nan_itself.agent.loop","label":"src.nan_itself.agent.loop","community":"community_4","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.agent.prompts","label":"src.nan_itself.agent.prompts","community":"community_4","color":"lightgreen","bridge":true,"crossEdges":1,"targets":["community_3"],"dominantPackage":"src"},{"id":"src.nan_itself.app","label":"src.nan_itself.app","community":"community_4","color":"lightgreen","bridge":true,"crossEdges":4,"targets":["community_10","community_3","community_6","community_8"],"dominantPackage":"src"},{"id":"src.nan_itself.modules.builtin.audio","label":"src.nan_itself.modules.builtin.audio","community":"community_4","color":"lightgreen","bridge":true,"crossEdges":1,"targets":["community_6"],"dominantPackage":"src"},{"id":"src.nan_itself.modules.builtin.memory","label":"src.nan_itself.modules.builtin.memory","community":"community_4","color":"lightgreen","bridge":true,"crossEdges":1,"targets":["community_6"],"dominantPackage":"src"},{"id":"src.nan_itself.utils.audio","label":"src.nan_itself.utils.audio","community":"community_4","color":"lightgreen","dominantPackage":"src"},{"id":"src.nan_itself.utils.llm","label":"src.nan_itself.utils.llm","community":"community_4","color":"lightgreen","bridge":true,"crossEdges":2,"targets":["community_3"],"dominantPackage":"src"},{"id":"src.nan_itself.modules","label":"src.nan_itself.modules","community":"community_5","color":"lightyellow","dominantPackage":"src"},{"id":"src.nan_itself.modules.builtin","label":"src.nan_itself.modules.builtin","community":"community_6","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.modules.deps","label":"src.nan_itself.modules.deps","community":"community_6","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.modules.loading","label":"src.nan_itself.modules.loading","community":"community_6","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.modules.model","label":"src.nan_itself.modules.model","community":"community_6","color":"lightpink","bridge":true,"crossEdges":3,"targets":["community_3","community_4"],"dominantPackage":"src"},{"id":"src.nan_itself.modules.persistence","label":"src.nan_itself.modules.persistence","community":"community_6","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.modules.reload","label":"src.nan_itself.modules.reload","community":"community_6","color":"lightpink","dominantPackage":"src"},{"id":"src.nan_itself.modules.runtime","label":"src.nan_itself.modules.runtime","community":"community_6","color":"lightpink","bridge":true,"crossEdges":1,"targets":["community_4"],"dominantPackage":"src"},{"id":"src.nan_itself.skills","label":"src.nan_itself.skills","community":"community_7","color":"lavender","dominantPackage":"src"},{"id":"src.nan_itself.skills.model","label":"src.nan_itself.skills.model","community":"community_8","color":"peachpuff","bridge":true,"crossEdges":2,"targets":["community_3"],"dominantPackage":"src"},{"id":"src.nan_itself.skills.parsing","label":"src.nan_itself.skills.parsing","community":"community_8","color":"peachpuff","dominantPackage":"src"},{"id":"src.nan_itself.skills.registry","label":"src.nan_itself.skills.registry","community":"community_8","color":"peachpuff","dominantPackage":"src"},{"id":"src.nan_itself.skills.runtime","label":"src.nan_itself.skills.runtime","community":"community_8","color":"peachpuff","bridge":true,"crossEdges":1,"targets":["community_4"],"dominantPackage":"src"},{"id":"src.nan_itself.tools","label":"src.nan_itself.tools","community":"community_9","color":"lightgray","dominantPackage":"src"}],"edges":[{"from":"src.nan_itself.agent.core","to":"src.nan_itself.agent.engine"},{"from":"src.nan_itself.agent.core","to":"src.nan_itself.agent.model"},{"from":"src.nan_itself.agent.core","to":"src.nan_itself.agent.reports"},{"from":"src.nan_itself.agent.core","to":"src.nan_itself.agent.runtime"},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.agent.model"},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.agent.prompts","cross":true},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.agent.reports"},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.agent.role"},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.agent.verbs"},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.modules.model","cross":true},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.skills.model","cross":true},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.tools.view","cross":true},{"from":"src.nan_itself.agent.engine","to":"src.nan_itself.utils.llm","cross":true},{"from":"src.nan_itself.agent.prompts","to":"src.nan_itself.utils.llm"},{"from":"src.nan_itself.agent.reports","to":"src.nan_itself.agent.model"},{"from":"src.nan_itself.agent.verbs","to":"src.nan_itself.agent.model"},{"from":"src.nan_itself.agent.verbs","to":"src.nan_itself.agent.runtime"},{"from":"src.nan_itself.agent.verbs","to":"src.nan_itself.skills.model","cross":true},{"from":"src.nan_itself.agent.verbs","to":"src.nan_itself.utils.llm","cross":true},{"from":"src.nan_itself.app","to":"src.nan_itself.agent.core","cross":true},{"from":"src.nan_itself.app","to":"src.nan_itself.agent.loop"},{"from":"src.nan_itself.app","to":"src.nan_itself.modules.builtin.audio"},{"from":"src.nan_itself.app","to":"src.nan_itself.modules.builtin.memory"},{"from":"src.nan_itself.app","to":"src.nan_itself.modules.runtime","cross":true},{"from":"src.nan_itself.app","to":"src.nan_itself.skills.runtime","cross":true},{"from":"src.nan_itself.app","to":"src.nan_itself.tools.runtime","cross":true},{"from":"src.nan_itself.app","to":"src.nan_itself.utils.llm"},{"from":"src.nan_itself.modules.builtin","to":"src.nan_itself.modules.model"},{"from":"src.nan_itself.modules.builtin.audio","to":"src.nan_itself.modules.model","cross":true},{"from":"src.nan_itself.modules.builtin.audio","to":"src.nan_itself.utils.audio"},{"from":"src.nan_itself.modules.builtin.memory","to":"src.nan_itself.modules.model","cross":true},{"from":"src.nan_itself.modules.builtin.memory","to":"src.nan_itself.utils.llm"},{"from":"src.nan_itself.modules.deps","to":"src.nan_itself.modules.model"},{"from":"src.nan_itself.modules.loading","to":"src.nan_itself.modules.model"},{"from":"src.nan_itself.modules.reload","to":"src.nan_itself.modules.model"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.builtin"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.deps"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.loading"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.model"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.persistence"},{"from":"src.nan_itself.modules.runtime","to":"src.nan_itself.modules.reload"},{"from":"src.nan_itself.skills.parsing","to":"src.nan_itself.skills.model"},{"from":"src.nan_itself.skills.registry","to":"src.nan_itself.skills.model"},{"from":"src.nan_itself.skills.registry","to":"src.nan_itself.skills.parsing"},{"from":"src.nan_itself.skills.runtime","to":"src.nan_itself.skills.model"},{"from":"src.nan_itself.skills.runtime","to":"src.nan_itself.skills.parsing"},{"from":"src.nan_itself.skills.runtime","to":"src.nan_itself.skills.registry"},{"from":"src.nan_itself.tools.builtin","to":"src.nan_itself.tools.local"},{"from":"src.nan_itself.tools.local","to":"src.nan_itself.tools.provider"},{"from":"src.nan_itself.tools.local","to":"src.nan_itself.tools.spec"},{"from":"src.nan_itself.tools.mcp","to":"src.nan_itself.tools.provider"},{"from":"src.nan_itself.tools.mcp","to":"src.nan_itself.tools.spec"},{"from":"src.nan_itself.tools.provider","to":"src.nan_itself.tools.results"},{"from":"src.nan_itself.tools.provider","to":"src.nan_itself.tools.spec"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.builtin"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.local"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.mcp"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.provider"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.results"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.spec"},{"from":"src.nan_itself.tools.runtime","to":"src.nan_itself.tools.watcher"},{"from":"src.nan_itself.tools.server","to":"src.nan_itself.tools.builtin"},{"from":"src.nan_itself.tools.server","to":"src.nan_itself.tools.results"},{"from":"src.nan_itself.tools.server","to":"src.nan_itself.tools.runtime"},{"from":"src.nan_itself.tools.server","to":"src.nan_itself.tools.view"},{"from":"src.nan_itself.tools.view","to":"src.nan_itself.tools.results"}],"communities":[{"id":"community_1","color":"lightblue","size":1,"dominantPackage":"src"},{"id":"community_10","color":"lightgreen","size":10,"dominantPackage":"src"},{"id":"community_11","color":"lightyellow","size":1,"dominantPackage":"src"},{"id":"community_12","color":"lightpink","size":1,"dominantPackage":"src"},{"id":"community_13","color":"lavender","size":1,"dominantPackage":"src"},{"id":"community_14","color":"peachpuff","size":1,"dominantPackage":"src"},{"id":"community_15","color":"lightgray","size":1,"dominantPackage":"src"},{"id":"community_2","color":"honeydew","size":1,"dominantPackage":"src"},{"id":"community_3","color":"lightblue","size":7,"dominantPackage":"src"},{"id":"community_4","color":"lightgreen","size":7,"dominantPackage":"src"},{"id":"community_5","color":"lightyellow","size":1,"dominantPackage":"src"},{"id":"community_6","color":"lightpink","size":7,"dominantPackage":"src"},{"id":"community_7","color":"lavender","size":1,"dominantPackage":"src"},{"id":"community_8","color":"peachpuff","size":4,"dominantPackage":"src"},{"id":"community_9","color":"lightgray","size":1,"dominantPackage":"src"}],"collapsed":false,"threshold":100,"totalModules":45}</script><style>
+.community-graph-help { margin: 4px 0 12px; color: #666; font-size: 13px; }
+.community-graph { margin-bottom: 24px; }
+.community-graph-controls {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    margin-bottom: 8px; font-size: 13px; color: #333;
+}
+.community-graph-controls label { display: inline-flex; align-items: center; gap: 6px; }
+.community-graph-controls select { padding: 2px 6px; }
+.community-graph-count { color: #888; }
+.community-graph-canvas-wrap { position: relative; }
+#community-graph-canvas {
+    width: 100%; max-width: 100%; height: 480px;
+    border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa;
+    display: block; cursor: grab; touch-action: none;
+}
+#community-graph-canvas.dragging { cursor: grabbing; }
+.community-graph-tooltip {
+    position: absolute; pointer-events: none; z-index: 10;
+    background: rgba(33, 33, 33, 0.95); color: #fff; padding: 8px 10px;
+    border-radius: 6px; font-size: 12px; line-height: 1.5; max-width: 280px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.community-graph-tooltip strong { color: #fff; }
+.community-graph-tooltip .cg-bridge { color: #ffb3b3; font-weight: 600; }
+.community-graph-legend {
+    display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 12px; color: #444;
+}
+.community-graph-legend .cg-swatch {
+    display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(0,0,0,0.15);
+}
+.community-graph-legend .cg-item { display: inline-flex; align-items: center; }
+</style><script>
+(function () {
+    var dataEl = document.getElementById('community-graph-data');
+    var canvas = document.getElementById('community-graph-canvas');
+    if (!dataEl || !canvas) { return; }
+
+    var data;
+    try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    if (!data || !data.nodes || !data.nodes.length) { return; }
+
+    var ctx = canvas.getContext('2d');
+    var tooltip = document.getElementById('community-graph-tooltip');
+    var filterEl = document.getElementById('community-graph-filter');
+    var bridgesEl = document.getElementById('community-graph-bridges');
+    var isolatedEl = document.getElementById('community-graph-isolated');
+    var countEl = document.getElementById('community-graph-count');
+    var legendEl = document.getElementById('community-graph-legend');
+
+    var BRIDGE_OUTLINE = '#d9534f';
+    var CROSS_EDGE = 'rgba(217, 83, 79, 0.7)';
+    var EDGE = 'rgba(120, 120, 120, 0.35)';
+
+    var nodes = data.nodes.map(function (n, i) { return Object.assign({}, n, { idx: i, x: 0, y: 0, vx: 0, vy: 0 }); });
+    var index = {};
+    nodes.forEach(function (n) { index[n.id] = n; });
+    var edges = data.edges.filter(function (e) { return index[e.from] && index[e.to]; });
+
+    // Degree for radius scaling and isolated detection.
+    nodes.forEach(function (n) { n.degree = 0; });
+    edges.forEach(function (e) { index[e.from].degree++; index[e.to].degree++; });
+
+    // Deterministic initial layout on a circle (avoids Math.random for stable renders).
+    var N = nodes.length;
+    nodes.forEach(function (n, i) {
+        var a = (2 * Math.PI * i) / N;
+        n.x = Math.cos(a) * 180;
+        n.y = Math.sin(a) * 180;
+    });
+
+    function radius(n) {
+        if (n.group) { return Math.max(10, Math.min(34, 8 + Math.sqrt(n.count || 1) * 3)); }
+        return n.bridge ? 8 : 6;
+    }
+
+    // Populate the community filter dropdown.
+    (data.communities || []).forEach(function (c) {
+        var opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.id + ' (' + c.size + ')';
+        filterEl && filterEl.appendChild(opt);
+    });
+
+    // Legend: one swatch per community plus bridge / cross-edge markers.
+    if (legendEl) {
+        var legendHTML = (data.communities || []).map(function (c) {
+            var extra = c.dominantPackage ? (' · ' + c.dominantPackage) : (c.dominantLayer ? (' · ' + c.dominantLayer) : '');
+            return '<span class="cg-item"><span class="cg-swatch" style="background:' + c.color + '"></span>' +
+                escapeHtml(c.id + extra) + '</span>';
+        }).join('');
+        legendHTML += '<span class="cg-item"><span class="cg-swatch" style="background:#fff;border-color:' +
+            BRIDGE_OUTLINE + ';border-width:2px"></span>Bridge module</span>';
+        legendHTML += '<span class="cg-item"><span class="cg-swatch" style="background:' + CROSS_EDGE + '"></span>Cross-community edge</span>';
+        legendEl.innerHTML = legendHTML;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // ---- visibility / filtering ----
+    var visible = {};
+    function recomputeVisible() {
+        var community = filterEl ? filterEl.value : '';
+        var bridgesOnly = bridgesEl ? bridgesEl.checked : false;
+        var hideIsolated = isolatedEl ? isolatedEl.checked : false;
+
+        nodes.forEach(function (n) {
+            var show = true;
+            if (community && n.community !== community) { show = false; }
+            if (bridgesOnly && !n.bridge && !n.group) { show = false; }
+            n._show = show;
+        });
+        if (hideIsolated) {
+            var connected = {};
+            edges.forEach(function (e) {
+                if (index[e.from]._show && index[e.to]._show) { connected[e.from] = true; connected[e.to] = true; }
+            });
+            nodes.forEach(function (n) { if (!connected[n.id]) { n._show = false; } });
+        }
+        visible = {};
+        var shown = 0;
+        nodes.forEach(function (n) { if (n._show) { visible[n.id] = true; shown++; } });
+        if (countEl) {
+            countEl.textContent = shown + ' / ' + nodes.length + (data.collapsed ? ' communities' : ' modules');
+        }
+    }
+
+    // ---- force simulation ----
+    var alpha = 1;
+    var selected = null;
+
+    function tick() {
+        var k = 6000; // repulsion strength
+        for (var i = 0; i < N; i++) {
+            var a = nodes[i];
+            if (!a._show) { continue; }
+            for (var j = i + 1; j < N; j++) {
+                var b = nodes[j];
+                if (!b._show) { continue; }
+                var dx = a.x - b.x, dy = a.y - b.y;
+                var d2 = dx * dx + dy * dy || 0.01;
+                var f = k / d2;
+                var d = Math.sqrt(d2);
+                var fx = (dx / d) * f, fy = (dy / d) * f;
+                a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+            }
+        }
+        edges.forEach(function (e) {
+            var a = index[e.from], b = index[e.to];
+            if (!a._show || !b._show) { return; }
+            var dx = b.x - a.x, dy = b.y - a.y;
+            var d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            var target = 70;
+            var f = (d - target) * 0.02;
+            var fx = (dx / d) * f, fy = (dy / d) * f;
+            a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+        });
+        nodes.forEach(function (n) {
+            if (!n._show) { return; }
+            n.vx -= n.x * 0.002; // gravity to center
+            n.vy -= n.y * 0.002;
+            if (n === dragNode) { return; }
+            n.x += n.vx * alpha; n.y += n.vy * alpha;
+            n.vx *= 0.85; n.vy *= 0.85;
+        });
+        alpha *= 0.985;
+        if (alpha < 0.02) { alpha = 0.02; }
+    }
+
+    // ---- rendering ----
+    var dpr = window.devicePixelRatio || 1;
+    var W = 800, H = 480, cx = 400, cy = 240, scale = 1;
+
+    function resize() {
+        var rect = canvas.getBoundingClientRect();
+        W = rect.width || 800; H = rect.height || 480;
+        canvas.width = W * dpr; canvas.height = H * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        cx = W / 2; cy = H / 2;
+    }
+
+    function neighborsOf(id) {
+        var set = {};
+        set[id] = true;
+        edges.forEach(function (e) {
+            if (e.from === id) { set[e.to] = true; }
+            if (e.to === id) { set[e.from] = true; }
+        });
+        return set;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        var hl = selected ? neighborsOf(selected) : null;
+
+        edges.forEach(function (e) {
+            var a = index[e.from], b = index[e.to];
+            if (!a._show || !b._show) { return; }
+            var dim = hl && !(hl[e.from] && hl[e.to]);
+            ctx.beginPath();
+            ctx.moveTo(cx + a.x * scale, cy + a.y * scale);
+            ctx.lineTo(cx + b.x * scale, cy + b.y * scale);
+            ctx.strokeStyle = e.cross ? CROSS_EDGE : EDGE;
+            ctx.globalAlpha = dim ? 0.08 : 1;
+            ctx.lineWidth = e.weight ? Math.min(4, 1 + e.weight * 0.4) : (e.cross ? 1.5 : 1);
+            ctx.stroke();
+        });
+        ctx.globalAlpha = 1;
+
+        var showLabels = nodes.length <= 60 || data.collapsed;
+        nodes.forEach(function (n) {
+            if (!n._show) { return; }
+            var dim = hl && !hl[n.id];
+            var r = radius(n);
+            var px = cx + n.x * scale, py = cy + n.y * scale;
+            ctx.globalAlpha = dim ? 0.2 : 1;
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, 2 * Math.PI);
+            ctx.fillStyle = n.bridge ? '#ffe2e2' : n.color;
+            ctx.fill();
+            ctx.lineWidth = n.bridge ? 2.5 : 1;
+            ctx.strokeStyle = n.bridge ? BRIDGE_OUTLINE : 'rgba(0,0,0,0.25)';
+            ctx.stroke();
+            if (showLabels) {
+                ctx.globalAlpha = dim ? 0.25 : 1;
+                ctx.fillStyle = '#333';
+                ctx.font = '11px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.fillText(n.label, px, py + r + 2);
+            }
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    var running = true;
+    function frame() {
+        if (running) { tick(); }
+        draw();
+        requestAnimationFrame(frame);
+    }
+
+    function reheat() { alpha = Math.max(alpha, 0.6); running = true; }
+
+    // ---- interaction ----
+    var dragNode = null;
+    function toGraph(evt) {
+        var rect = canvas.getBoundingClientRect();
+        return { x: (evt.clientX - rect.left - cx) / scale, y: (evt.clientY - rect.top - cy) / scale };
+    }
+    function nodeAt(evt) {
+        var p = toGraph(evt);
+        var best = null, bestD = Infinity;
+        nodes.forEach(function (n) {
+            if (!n._show) { return; }
+            var dx = n.x - p.x, dy = n.y - p.y;
+            var d = Math.sqrt(dx * dx + dy * dy);
+            if (d < radius(n) + 4 && d < bestD) { best = n; bestD = d; }
+        });
+        return best;
+    }
+
+    canvas.addEventListener('mousemove', function (evt) {
+        if (dragNode) {
+            var p = toGraph(evt);
+            dragNode.x = p.x; dragNode.y = p.y; dragNode.vx = 0; dragNode.vy = 0;
+            reheat();
+            return;
+        }
+        var n = nodeAt(evt);
+        if (n && tooltip) {
+            var rect = canvas.getBoundingClientRect();
+            var html = '<strong>' + escapeHtml(n.label) + '</strong><br>Community: ' + escapeHtml(n.community);
+            if (n.group) { html += '<br>Modules: ' + n.count; }
+            if (n.bridge) {
+                html += '<br><span class="cg-bridge">Bridge module</span>';
+                if (n.crossEdges) { html += '<br>Cross edges: ' + n.crossEdges; }
+                if (n.targets && n.targets.length) { html += '<br>Targets: ' + escapeHtml(n.targets.join(', ')); }
+            }
+            if (n.dominantPackage) { html += '<br>Package: ' + escapeHtml(n.dominantPackage); }
+            if (n.dominantLayer) { html += '<br>Layer: ' + escapeHtml(n.dominantLayer); }
+            tooltip.innerHTML = html;
+            tooltip.hidden = false;
+            var tx = evt.clientX - rect.left + 12, ty = evt.clientY - rect.top + 12;
+            tooltip.style.left = Math.min(tx, W - 20) + 'px';
+            tooltip.style.top = ty + 'px';
+            canvas.style.cursor = 'pointer';
+        } else if (tooltip) {
+            tooltip.hidden = true;
+            canvas.style.cursor = 'grab';
+        }
+    });
+    canvas.addEventListener('mouseleave', function () { if (tooltip) { tooltip.hidden = true; } });
+    canvas.addEventListener('mousedown', function (evt) {
+        var n = nodeAt(evt);
+        if (n) { dragNode = n; canvas.classList.add('dragging'); }
+    });
+    window.addEventListener('mouseup', function () {
+        if (dragNode) { dragNode = null; canvas.classList.remove('dragging'); }
+    });
+    canvas.addEventListener('click', function (evt) {
+        if (dragNode) { return; }
+        var n = nodeAt(evt);
+        selected = (n && selected !== n.id) ? n.id : null;
+    });
+
+    function applyFilters() { recomputeVisible(); reheat(); }
+    filterEl && filterEl.addEventListener('change', applyFilters);
+    bridgesEl && bridgesEl.addEventListener('change', applyFilters);
+    isolatedEl && isolatedEl.addEventListener('change', applyFilters);
+
+    window.addEventListener('resize', resize);
+
+    resize();
+    recomputeVisible();
+    // The community graph may live inside a hidden tab; size it when shown.
+    var wrap = document.getElementById('community-graph');
+    if (wrap && 'IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { if (e.isIntersecting) { resize(); reheat(); } });
+        });
+        io.observe(wrap);
+    }
+    requestAnimationFrame(frame);
+})();
+</script>
+        <h2 class="section-header">Package Mismatch</h2><ul><li><strong>Split packages:</strong> src</li></ul>
+        <h2 class="section-header">Largest Communities</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Community</th>
+                        <th>Modules</th>
+                        <th>Internal</th>
+                        <th>External</th>
+                        <th>Cross-In</th>
+                        <th>Cross-Out</th>
+                        <th>Dominant Package</th>
+                        <th>Packages</th>
+                        <th>Package Alignment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>community_10</strong></td>
+                        <td>10</td>
+                        <td>19</td>
+                        <td>2</td>
+                        <td>2</td>
+                        <td>0</td>
+                        <td>src</td>
+                        <td>1</td>
+                        <td>1.000</td>
+                    </tr>
+                    <tr>
+                        <td><strong>community_3</strong></td>
+                        <td>7</td>
+                        <td>11</td>
+                        <td>8</td>
+                        <td>1</td>
+                        <td>7</td>
+                        <td>src</td>
+                        <td>1</td>
+                        <td>1.000</td>
+                    </tr>
+                    <tr>
+                        <td><strong>community_4</strong></td>
+                        <td>7</td>
+                        <td>7</td>
+                        <td>9</td>
+                        <td>3</td>
+                        <td>6</td>
+                        <td>src</td>
+                        <td>1</td>
+                        <td>1.000</td>
+                    </tr>
+                    <tr>
+                        <td><strong>community_6</strong></td>
+                        <td>7</td>
+                        <td>10</td>
+                        <td>4</td>
+                        <td>4</td>
+                        <td>0</td>
+                        <td>src</td>
+                        <td>1</td>
+                        <td>1.000</td>
+                    </tr>
+                    <tr>
+                        <td><strong>community_8</strong></td>
+                        <td>4</td>
+                        <td>6</td>
+                        <td>3</td>
+                        <td>3</td>
+                        <td>0</td>
+                        <td>src</td>
+                        <td>1</td>
+                        <td>1.000</td>
+                    </tr>
+                    <tr>
+                        <td colspan="9"><em>... and 10 more communities</em></td>
+                    </tr>
+                </tbody>
+            </table>
+        <h2 class="section-header">Bridge Modules</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Community</th>
+                        <th>Cross Edges</th>
+                        <th>Target Communities</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>src.nan_itself.agent.engine</code></td>
+                        <td>community_3</td>
+                        <td>5</td>
+                        <td>community_10, community_4, community_6, community_8</td>
+                    </tr>
+                    <tr>
+                        <td><code>src.nan_itself.app</code></td>
+                        <td>community_4</td>
+                        <td>4</td>
+                        <td>community_10, community_3, community_6, community_8</td>
+                    </tr>
+                    <tr>
+                        <td><code>src.nan_itself.modules.model</code></td>
+                        <td>community_6</td>
+                        <td>3</td>
+                        <td>community_3, community_4</td>
+                    </tr>
+                    <tr>
+                        <td><code>src.nan_itself.agent.verbs</code></td>
+                        <td>community_3</td>
+                        <td>2</td>
+                        <td>community_4, community_8</td>
+                    </tr>
+                    <tr>
+                        <td><code>src.nan_itself.skills.model</code></td>
+                        <td>community_8</td>
+                        <td>2</td>
+                        <td>community_3</td>
+                    </tr>
+                    <tr>
+                        <td colspan="4"><em>... and 9 more bridge modules</em></td>
+                    </tr>
+                </tbody>
+            </table>
+  </div>
+  
+</section>
+
+
+</main>
+
+<footer>
+  <span>Generated by pyscn 1.30.0 · 2026-08-27 11:17:11</span>
+  <a href="https://github.com/ludo-technologies/pyscn" target="_blank" rel="noopener noreferrer">&#9733; Star pyscn on GitHub</a>
+</footer>
+
+<script>(function () {
+  var tabs = document.querySelectorAll('.tab');
+  var panels = document.querySelectorAll('.panel');
+
+  function show(id) {
+    var target = null;
+    panels.forEach(function (p) { if (p.id === id) { target = p; } });
+    if (!target) { return; }
+    panels.forEach(function (p) { p.classList.toggle('active', p === target); });
+    tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === id); });
+    window.scrollTo({ top: 0 });
+    try { history.replaceState(null, '', '#' + id); } catch (e) { /* sandboxed viewers may forbid this */ }
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { show(t.dataset.tab); });
+  });
+  document.querySelectorAll('[data-goto]').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); show(a.dataset.goto); });
+  });
+  if (location.hash.length > 1) { show(location.hash.slice(1)); } // unknown hashes leave the overview active
+})();
+
+function sortQualityTable(tableID, columnIndex, numeric, button) {
+  var table = document.getElementById(tableID);
+  if (!table) { return; }
+
+  var body = table.tBodies[0];
+  var rows = Array.prototype.slice.call(body.rows);
+  var direction = button.dataset.direction === 'asc' ? 'desc' : 'asc';
+  var multiplier = direction === 'asc' ? 1 : -1;
+
+  rows.sort(function (left, right) {
+    var leftValue = left.cells[columnIndex].dataset.sortValue || '';
+    var rightValue = right.cells[columnIndex].dataset.sortValue || '';
+    var comparison = numeric
+      ? Number(leftValue) - Number(rightValue)
+      : leftValue.localeCompare(rightValue);
+    return comparison * multiplier;
+  });
+  rows.forEach(function (row) { body.appendChild(row); });
+
+  table.querySelectorAll('th[aria-sort]').forEach(function (header) { header.removeAttribute('aria-sort'); });
+  table.querySelectorAll('.table-sort').forEach(function (control) { delete control.dataset.direction; });
+  button.dataset.direction = direction;
+  button.parentElement.setAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
+}
+
+function sortModuleQuality(columnIndex, numeric, button) {
+  sortQualityTable('module-quality-table', columnIndex, numeric, button);
+}
+
+function sortDirectoryComplexity(columnIndex, numeric, button) {
+  sortQualityTable('directory-complexity-table', columnIndex, numeric, button);
+}
+</script>
+</body>
+</html>
