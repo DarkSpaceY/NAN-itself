@@ -73,7 +73,7 @@ class AudioModule(Module):
 
     trailing_silence_frames: int = 23
 
-    min_utterance_frames: int = 8
+    min_utterance_frames: int = 20
 
     max_utterance_frames: int = 833
 

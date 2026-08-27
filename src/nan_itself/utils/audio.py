@@ -29,6 +29,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Iterator
 
+from loguru import logger
+
 
 SAMPLE_RATE = 16000
 
@@ -472,11 +474,13 @@ class UtteranceSegmenter:
         self,
         preroll_frames: int = 10,
         trailing_silence_frames: int = 23,
-        min_utterance_frames: int = 8,
+        # 600ms: below this whisper is mostly guessing, and the
+        # guesses are exactly the hallucinations we filter later.
+        min_utterance_frames: int = 20,
         max_utterance_frames: int = 833,
     ) -> None:
         # 30ms frames => 300ms preroll, ~700ms tail,
-        # 250ms minimum, ~25s maximum.
+        # 600ms minimum, ~25s maximum.
         self.preroll: deque[tuple[bytes, bool]] = deque(
             maxlen=max(1, preroll_frames),
         )
@@ -890,6 +894,8 @@ class WhisperTranscriber:
         models_dir: str | None = None,
         language: str | None = None,
         cpu_threads: int = 4,
+        no_speech_max: float = 0.6,
+        halluc_conf_max: float = 0.5,
     ) -> None:
         self.model_size = model_size
 
@@ -899,7 +905,32 @@ class WhisperTranscriber:
 
         self.cpu_threads = cpu_threads
 
+        # Anti-hallucination gate: whisper invents words when fed
+        # non-speech audio (claps, clicks, silence). A segment
+        # that BOTH looks like non-speech to the model AND reads
+        # as low-confidence is almost certainly invented.
+        self.no_speech_max = no_speech_max
+
+        self.halluc_conf_max = halluc_conf_max
+
         self._model = None
+
+    def segment_passes(
+        self,
+        no_speech_prob: float,
+        confidence: float,
+    ) -> bool:
+        """
+        Pure gate so the hallucination filter is unit-testable
+        without loading the model.
+        """
+        if (
+            no_speech_prob > self.no_speech_max
+            and confidence < self.halluc_conf_max
+        ):
+            return False
+
+        return True
 
     def load(self) -> None:
         if self._model is not None:
@@ -946,10 +977,31 @@ class WhisperTranscriber:
         words: list[dict] = []
 
         for seg in segments:
+            no_speech = float(
+                getattr(seg, "no_speech_prob", 0.0) or 0.0
+            )
+
+            avg_logprob = seg.avg_logprob
+
+            confidence = (
+                math.exp(avg_logprob)
+                if avg_logprob is not None
+                else 0.5
+            )
+
+            if not self.segment_passes(no_speech, confidence):
+                logger.info(
+                    "whisper segment dropped as likely "
+                    "hallucination (no_speech={:.2f}, conf={:.2f})",
+                    no_speech,
+                    confidence,
+                )
+
+                continue
+
             parts.append(seg.text.strip())
 
-            if seg.avg_logprob is not None:
-                confs.append(math.exp(seg.avg_logprob))
+            confs.append(confidence)
 
             for word in getattr(seg, "words", None) or []:
                 words.append(

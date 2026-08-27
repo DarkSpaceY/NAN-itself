@@ -23,6 +23,7 @@ from src.nan_itself.utils.audio import (
     SpeakerMatcher,
     Utterance,
     UtteranceSegmenter,
+    WhisperTranscriber,
     cosine_similarity,
     rms_dbfs,
     spectral_centroid_hz,
@@ -575,7 +576,9 @@ def test_capture_events_flow_into_transcript_ring():
         for event in step(silence):
             dispatch_event(module, event)
 
-    for _ in range(14):
+    # 25 speech frames ~ 750ms voiced: clears the 600ms
+    # minimum-utterance bar.
+    for _ in range(25):
         for event in step(speech):
             dispatch_event(module, event)
 
@@ -1395,3 +1398,32 @@ def test_render_heard_includes_speaker_tag():
     assert "where is my coffee" in rendered
 
     assert rendered.count("[Audio]") == 1
+
+
+# ======================================================================
+# Anti-hallucination gate (L7)
+# ======================================================================
+
+
+def test_whisper_hallucination_gate_matrix():
+    """
+    "Hello 佳佳" class of bugs: whisper inventing words for claps
+    and noise. The gate drops a segment only when BOTH signals
+    say non-speech; confident audio always survives.
+    """
+    gate = WhisperTranscriber()  # lazy: no model load here
+
+    # Non-speech + low confidence -> the "佳佳" case.
+    assert gate.segment_passes(0.90, 0.30) is False
+
+    # High no_speech but confident -> real speech, keep.
+    assert gate.segment_passes(0.90, 0.80) is True
+
+    # Low no_speech but weak confidence -> keep ( borderline ).
+    assert gate.segment_passes(0.20, 0.30) is True
+
+    # Boundary is strict-greater on both sides -> keep.
+    assert gate.segment_passes(0.60, 0.50) is True
+
+    # Just past both boundaries -> drop.
+    assert gate.segment_passes(0.61, 0.49) is False
