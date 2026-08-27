@@ -1054,7 +1054,7 @@ def test_hotwords_env_parsing():
 
 
 # ======================================================================
-# W4: speaker identity (registry + streaming assignment)
+# W4: speaker identity (auto-enrolling registry)
 # ======================================================================
 
 
@@ -1095,91 +1095,124 @@ def test_cosine_similarity_basics():
     assert cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
 
 
-def test_speaker_matcher_named_then_unknown_clusters():
-    matcher = SpeakerMatcher(threshold=0.62)
+def test_speaker_matcher_auto_clusters_and_promotes():
+    matcher = SpeakerMatcher(
+        promote_min_utterances=3,
+        promote_min_voiced_ms=3000.0,
+    )
 
-    you = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+    v1 = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
 
-    matcher.set_named({"you": you})
+    label, score, promoted = matcher.assign(v1, voiced_ms=500)
 
-    label, score = matcher.assign(you)
+    assert (label, promoted) == ("voice-1", False)
 
-    assert label == "you"
+    assert score >= 0.0  # first sight: nothing to compare with
 
-    assert score == pytest.approx(1.0)
+    # Near voice joins the same cluster; centroid blends.
+    near = np.asarray([0.9, 0.1, 0.0], dtype=np.float32)
 
-    # A distant voice opens the first anonymous cluster.
+    label, score, promoted = matcher.assign(near, voiced_ms=500)
+
+    assert label == "voice-1"
+
+    assert score > 0.9
+
+    assert not promoted
+
+    # A distant voice opens a second cluster.
     stranger = np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
 
-    label, _ = matcher.assign(stranger)
+    label, _, promoted = matcher.assign(stranger, voiced_ms=100)
+
+    assert label == "voice-2"
+
+    assert not promoted
+
+    # Third long utterance on voice-1 crosses both thresholds.
+    label, _, promoted = matcher.assign(v1, voiced_ms=2500)
 
     assert label == "voice-1"
 
-    # A voice near the stranger joins the same cluster and the
-    # centroid moves toward the mixture.
-    near = np.asarray([0.1, 0.9, 0.0], dtype=np.float32)
+    assert promoted is True
 
-    label, _ = matcher.assign(near)
+    assert matcher.known_count() == 1
 
-    assert label == "voice-1"
+    centroid = matcher.clusters["voice-1"]["centroid"]
 
-    assert matcher.unknown_counts["voice-1"] == 2
+    # ([1,0,0] + [0.9,0.1,0]) / 2 blended again with [1,0,0].
+    assert centroid[1] == pytest.approx(0.1 / 3, abs=1e-6)
 
-    centroid = matcher.unknown["voice-1"]
-
-    assert centroid[0] == pytest.approx(0.05, abs=1e-6)
-
-    assert matcher.labels().count("voice-1") == 1
+    assert matcher.clusters["voice-1"]["count"] == 3
 
 
-def test_matcher_threshold_gates_named_space():
+def test_matcher_nearest_must_exceed_threshold():
     matcher = SpeakerMatcher(threshold=0.9)
 
-    you = np.asarray([1.0, 0.0], dtype=np.float32)
+    matcher.assign([1.0, 0.0], voiced_ms=100)
 
-    matcher.set_named({"you": you})
+    # 45 degrees: cosine 0.707 < 0.9 -> must NOT join voice-1.
+    label, score, _ = matcher.assign([0.7071, 0.7071])
 
-    # 45 degrees: cosine 0.707 < 0.9 -> must NOT claim "you".
-    label, score = matcher.assign([0.7071, 0.7071])
-
-    assert label == "voice-1"
+    assert label == "voice-2"
 
     assert score == pytest.approx(0.7071, abs=1e-3)
 
 
-def test_refresh_voices_loads_registry_and_survives_corruption(
-    tmp_path,
-):
-    module = make_module()
+def test_matcher_only_promoted_voices_survive_serialization():
+    matcher = SpeakerMatcher(
+        promote_min_utterances=2,
+        promote_min_voiced_ms=2000.0,
+    )
 
-    module.voices_dir = tmp_path
+    matcher.assign([1.0, 0.0], voiced_ms=1000)
 
-    np.save(tmp_path / "alice.npy",
-            np.asarray([1.0, 0.0], dtype=np.float32))
+    matcher.assign([1.0, 0.0], voiced_ms=1500)  # promotes voice-1
 
-    np.save(tmp_path / "bob.npy",
-            np.asarray([0.0, 1.0], dtype=np.float32))
+    matcher.assign([0.0, 1.0], voiced_ms=9000)  # voice-2, below bar
 
-    module._refresh_voices()
+    payload = matcher.serialize()
 
-    assert sorted(module.matcher.named) == ["alice", "bob"]
+    assert list(payload["voices"]) == ["voice-1"]
 
-    with module._state_lock:
-        assert module._stats["voices_loaded"] == 2
+    revived = SpeakerMatcher()
 
-    (tmp_path / "broken.npy").write_bytes(b"not an npy file")
+    revived.restore(payload)
 
-    module._refresh_voices()
+    assert revived.known_count() == 1
 
-    assert sorted(module.matcher.named) == ["alice", "bob"]
+    assert "voice-1" in revived.clusters
 
-    # Fingerprint unchanged -> second scan is a no-op (no reload
-    # side effects, e.g. object identity preserved).
-    first = module.matcher.named["alice"]
+    assert "voice-2" not in revived.clusters
 
-    module._refresh_voices()
+    # ID numbering never reuses dead session ids: next fresh
+    # voice continues past every id ever minted.
+    label, _, _ = revived.assign([0.0, 1.0], voiced_ms=1)
 
-    assert module.matcher.named["alice"] is first
+    assert label == "voice-3"
+
+    # Same voice after restore still matches its old cluster.
+    label, score, _ = revived.assign([1.0, 0.0], voiced_ms=100)
+
+    assert label == "voice-1"
+
+    assert score > 0.99
+
+    # No promotion replay: already persisted.
+    assert revived.known_count() == 1
+
+
+def test_matcher_restore_rejects_bad_payloads():
+    matcher = SpeakerMatcher()
+
+    with pytest.raises(TypeError):
+        matcher.restore([1, 2])
+
+    with pytest.raises(TypeError):
+        matcher.restore({"voices": [], "next_id": 1})
+
+    with pytest.raises(TypeError):
+        matcher.restore({"voices": {}, "next_id": 0})
 
 
 def test_attribute_speaker_tags_heard_and_stats():
@@ -1187,10 +1220,6 @@ def test_attribute_speaker_tags_heard_and_stats():
 
     module.embedder_factory = lambda: FakeEmbedder(
         [[1.0, 0.0]],
-    )
-
-    module.matcher.set_named(
-        {"you": np.asarray([1.0, 0.0], dtype=np.float32)},
     )
 
     utt = Utterance(pcm=b"", voiced_ms=600, total_ms=700)
@@ -1203,15 +1232,17 @@ def test_attribute_speaker_tags_heard_and_stats():
     module._attribute_speaker(utt)
 
     with module._state_lock:
-        assert module._heard[-1]["speaker"] == "you"
+        assert module._heard[-1]["speaker"] == "voice-1"
 
-        assert module._stats["last_speaker"] == "you"
+        assert module._stats["last_speaker"] == "voice-1"
 
         assert module._stats["last_speaker_score"] == (
-            pytest.approx(1.0, abs=1e-3)
+            pytest.approx(0.0, abs=1e-6)  # first sight
         )
 
-        assert module._stats["speakers_session"] == 1
+        assert module._stats["voices_session"] == 1
+
+        assert module._stats["voices_known"] == 0
 
         assert module._stats["speaker_backend"] == "FakeEmbedder"
 
@@ -1242,32 +1273,102 @@ def test_attribute_speaker_degrades_on_backend_failure():
         )
 
 
-def test_attribute_speaker_skips_too_short_utterances():
+def test_registry_write_through_on_promotion(tmp_path):
     module = make_module()
 
-    seen = []
+    module.registry_path = tmp_path / "voices.json"
 
-    def factory():
-        seen.append(1)
+    # The matcher snapshot these thresholds at construction.
+    module.matcher.promote_min_utterances = 3
 
-        return FakeEmbedder([[1.0, 0.0]])
+    module.matcher.promote_min_voiced_ms = 3000.0
 
-    module.embedder_factory = factory
-
-    short = Utterance(pcm=b"", voiced_ms=120, total_ms=400)
-
-    assert module._accept_transcript(
-        {"text": "hm", "confidence": 0.9, "language": "en"},
+    module.embedder_factory = lambda: FakeEmbedder(
+        [[1.0, 0.0]],
     )
 
-    # The loop gates on voiced duration before calling us; the
-    # method itself stays cheap and idempotent either way.
-    module._attribute_speaker(short)
+    utt = Utterance(pcm=b"", voiced_ms=2000, total_ms=2000)
 
-    assert len(seen) == 1
+    for text in ("still me", "still me here", "me again"):
+        assert module._accept_transcript(
+            {"text": text, "confidence": 0.9,
+             "language": "en"},
+        )
+
+        module._attribute_speaker(utt)
+
+    assert module.registry_path.is_file()
+
+    payload = json.loads(
+        module.registry_path.read_text(),
+    )
+
+    assert list(payload["voices"]) == ["voice-1"]
+
+    assert payload["voices"]["voice-1"]["count"] == 3
+
+    # A fresh module boots with the learned voice.
+    revived = make_module()
+
+    revived.registry_path = module.registry_path
+
+    revived._load_registry()
+
+    assert revived.matcher.known_count() == 1
+
+    with revived._state_lock:
+        assert revived._stats["voices_known"] == 1
+
+
+def test_registry_corruption_is_quarantined(tmp_path):
+    module = make_module()
+
+    module.registry_path = tmp_path / "voices.json"
+
+    module.registry_path.write_bytes(b"not json at all {{")
+
+    module._load_registry()
+
+    quarantined = list(tmp_path.glob("*.corrupt-*"))
+
+    assert len(quarantined) == 1
+
+    assert module.matcher.clusters == {}
 
     with module._state_lock:
-        assert module._heard[-1].get("speaker") == "voice-1"
+        assert module._stats["voices_known"] == 0
+
+
+def test_registry_throttled_saving(tmp_path):
+    module = make_module()
+
+    module.registry_path = tmp_path / "voices.json"
+
+    module.registry_save_throttle_s = 999.0
+
+    module.embedder_factory = lambda: FakeEmbedder(
+        [[1.0, 0.0]],
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=600, total_ms=600)
+
+    assert module._accept_transcript(
+        {"text": "one", "confidence": 0.9, "language": "en"},
+    )
+
+    module._attribute_speaker(utt)
+
+    assert not module.registry_path.exists()  # dirty, throttled
+
+    module._maybe_save_registry(promoted=False)  # still inside window
+
+    assert not module.registry_path.exists()
+
+    module._registry_last_save = 0.0  # force window open
+
+    module._maybe_save_registry(promoted=False)
+
+    assert module.registry_path.exists()
 
 
 def test_render_heard_includes_speaker_tag():
@@ -1282,14 +1383,14 @@ def test_render_heard_includes_speaker_tag():
             {"ts": time.time(), "text": "where is my coffee",
              "confidence": 0.91, "language": "en",
              "rate": 2.0, "hotword": None,
-             "speaker": "you"},
+             "speaker": "voice-3"},
         )
 
     rendered = time_machine_query(module)
 
-    assert '- heard' in rendered
+    assert "- heard" in rendered
 
-    assert "(you)" in rendered
+    assert "(voice-3)" in rendered
 
     assert "where is my coffee" in rendered
 

@@ -1010,94 +1010,219 @@ def cosine_similarity(a, b) -> float:
 
 class SpeakerMatcher:
     """
-    Voice registry + streaming diarization-by-utterance.
+    Auto-enrolling voice registry for a permanently running ear.
 
-    Two label spaces:
-
-        named    enrolled voices loaded from voices/*.npy;
-                 the authoritative, persistent identity layer
-        unknown  session-scoped anonymous clusters (voice-N);
-                 greedy nearest-centroid assignment with running
-                 mean updates, never persisted (fresh ears after
-                 reboot -- same stance as the transcript ring)
-
-    assign() is the single entry point: nearest match above the
-    threshold wins, otherwise a new anonymous cluster opens.
+    No agent, no tool, no manual file ever enrolls a voice:
+    clusters open on first sight (voice-N, numbering monotonic
+    across restarts), absorb nearest matches with a running-mean
+    centroid, and PROMOTE into the persistent registry once they
+    carry enough evidence (utterance count + accumulated voiced
+    duration). Only promoted voices survive a reboot; candidates
+    stay session-scoped. Serialization is JSON-native so the
+    registry file stays human-inspectable.
     """
 
     def __init__(
         self,
         threshold: float = 0.62,
+        promote_min_utterances: int = 5,
+        promote_min_voiced_ms: float = 20000.0,
     ) -> None:
         self.threshold = threshold
 
-        self.named: dict[str, Any] = {}
+        self.promote_min_utterances = promote_min_utterances
 
-        self.unknown: dict[str, Any] = {}
+        self.promote_min_voiced_ms = promote_min_voiced_ms
 
-        self.unknown_counts: dict[str, int] = {}
+        self.clusters: dict[str, dict] = {}
 
-        self._counter = 0
+        self.persisted: set[str] = set()
 
-    def set_named(self, mapping) -> None:
-        self.named = dict(mapping)
+        self.next_id = 1
 
     def labels(self) -> list[str]:
-        return [*self.named, *self.unknown]
+        return list(self.clusters)
 
-    def assign(self, vec) -> tuple[str, float]:
+    def known_count(self) -> int:
+        """Persistent (promoted/restored) voice count."""
+        return len(self.persisted & set(self.clusters))
+
+    def assign(
+        self,
+        vec,
+        voiced_ms: float = 0.0,
+    ) -> tuple[str, float, bool]:
+        """
+        Route one utterance embedding to a voice.
+
+        Returns (label, best_similarity, promoted_now). The
+        score is the nearest similarity even when it falls
+        below the threshold (a new cluster opens then).
+        """
         import numpy as np
+
+        now = time.time()
 
         best_label: str | None = None
 
         best_score = -1.0
 
-        for label, ref in self.named.items():
-            score = cosine_similarity(vec, ref)
+        for label, cluster in self.clusters.items():
+            score = cosine_similarity(
+                vec,
+                cluster["centroid"],
+            )
 
             if score > best_score:
                 best_label, best_score = label, score
 
-        for label, centroid in self.unknown.items():
-            score = cosine_similarity(vec, centroid)
-
-            if score > best_score:
-                best_label, best_score = label, score
+        promoted_now = False
 
         if (
             best_label is not None
             and best_score >= self.threshold
         ):
-            if best_label in self.unknown:
-                count = self.unknown_counts[best_label]
+            cluster = self.clusters[best_label]
 
-                centroid = self.unknown[best_label]
+            count = cluster["count"]
 
-                blended = centroid * count + np.asarray(
+            blended = (
+                cluster["centroid"] * count
+                + np.asarray(vec, dtype=np.float32)
+            )
+
+            cluster["centroid"] = (
+                blended / (count + 1)
+            ).astype(np.float32)
+
+            cluster["count"] = count + 1
+
+            cluster["voiced_ms"] += voiced_ms
+
+            cluster["last_seen"] = now
+
+        else:
+            best_label = f"voice-{self.next_id}"
+
+            self.next_id += 1
+
+            self.clusters[best_label] = {
+                "centroid": np.asarray(
                     vec,
                     dtype=np.float32,
-                )
+                ).copy(),
+                "count": 1,
+                "voiced_ms": float(voiced_ms),
+                "created_at": now,
+                "last_seen": now,
+            }
 
-                self.unknown[best_label] = (
-                    blended / (count + 1)
-                ).astype(np.float32)
+            best_score = max(best_score, 0.0)
 
-                self.unknown_counts[best_label] = count + 1
+        cluster = self.clusters[best_label]
 
-            return best_label, best_score
+        if (
+            best_label not in self.persisted
+            and cluster["count"] >= self.promote_min_utterances
+            and cluster["voiced_ms"]
+            >= self.promote_min_voiced_ms
+        ):
+            self.persisted.add(best_label)
 
-        self._counter += 1
+            promoted_now = True
 
-        label = f"voice-{self._counter}"
+        return best_label, best_score, promoted_now
 
-        self.unknown[label] = np.asarray(
-            vec,
-            dtype=np.float32,
-        ).copy()
+    # ------------------------------------------------------------------
+    # Registry persistence (JSON-native, human-inspectable)
+    # ------------------------------------------------------------------
 
-        self.unknown_counts[label] = 1
+    def serialize(self) -> dict:
+        voices: dict[str, dict] = {}
 
-        return label, best_score
+        for label in sorted(self.persisted):
+            cluster = self.clusters.get(label)
+
+            if cluster is None:
+                continue
+
+            voices[label] = {
+                "centroid": [
+                    round(float(x), 5)
+                    for x in cluster["centroid"]
+                ],
+                "count": cluster["count"],
+                "voiced_ms": round(
+                    cluster["voiced_ms"], 1
+                ),
+                "created_at": cluster["created_at"],
+                "last_seen": cluster["last_seen"],
+            }
+
+        return {
+            "next_id": self.next_id,
+            "voices": voices,
+        }
+
+    def restore(self, data: Any) -> None:
+        import numpy as np
+
+        if not isinstance(data, dict):
+            raise TypeError("voice registry must be an object")
+
+        voices = data.get("voices", {})
+
+        next_id = data.get("next_id", 1)
+
+        if not isinstance(voices, dict):
+            raise TypeError("voices must be an object")
+
+        if not isinstance(next_id, int) or next_id < 1:
+            raise TypeError("next_id must be a positive int")
+
+        self.clusters.clear()
+
+        self.persisted.clear()
+
+        self.next_id = next_id
+
+        for label, payload in voices.items():
+            centroid = payload.get("centroid")
+
+            if (
+                not isinstance(centroid, list)
+                or not centroid
+            ):
+                continue
+
+            self.clusters[label] = {
+                "centroid": np.asarray(
+                    centroid,
+                    dtype=np.float32,
+                ),
+                "count": int(payload.get("count", 1)),
+                "voiced_ms": float(
+                    payload.get("voiced_ms", 0.0)
+                ),
+                "created_at": float(
+                    payload.get("created_at", 0.0)
+                ),
+                "last_seen": float(
+                    payload.get("last_seen", 0.0)
+                ),
+            }
+
+            self.persisted.add(label)
+
+        used = [
+            int(label.split("-")[1])
+            for label in self.clusters
+            if label.startswith("voice-")
+            and label.split("-")[1].isdigit()
+        ]
+
+        if used:
+            self.next_id = max(self.next_id, max(used) + 1)
 
 
 class SherpaSpeakerEmbedder:

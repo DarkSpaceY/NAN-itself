@@ -49,8 +49,9 @@ AudioPipeline(utils/audio.py，纯逻辑可测)
 TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
                                      │ 512-d 向量
                                      ▼
-                              SpeakerMatcher（named=voices/*.npy 热扫描；
-                              unknown=会话匿名簇 voice-N，重启即清）
+                              SpeakerMatcher（自动注册：voice-N 开簇→
+                              质心在线学习→证据足够自动转正持久化；
+                              注册表 data/audio/voices.json 自管原子写）
                                      │
                                      ▼
                           heard[i]["speaker"] = "you"/"voice-2"
@@ -107,8 +108,10 @@ TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
 | pitch_min_hz / pitch_max_hz | 75 / 500 | 自相关 F0 搜索范围 |
 | pitch strength_min | 0.5 | 低于此置信度视为清音段 |
 | NAN_AUDIO_SPEAKER_MODEL | models/speaker/campplus zh-en | 声纹嵌入 ONNX（sherpa-onnx） |
-| NAN_AUDIO_VOICES_DIR | models/speaker/voices | 声纹注册表目录（*.npy，热扫描） |
+| NAN_AUDIO_VOICES_REGISTRY | data/audio/voices.json | 自动注册表（模块自管，原子写） |
 | speaker_threshold | 0.62 | 余弦判同阈值 |
+| promote_min_utterances / promote_min_voiced_ms | 5 / 20000 | 自动转正阈值（句数×发声时长） |
+| registry_save_throttle_s | 60 | 日常学习落盘节流；转正立即写穿 |
 | embed_min_voiced_ms | 400 | 低于此发声时长不做声纹归属 |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |
@@ -124,6 +127,7 @@ TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
 | faster-whisper 加载失败 | available 保持 true 但转写停摆，loguru CRITICAL；句子仍进队列供未来消费者 |
 | 队列溢出 | 丢新留旧，dropped 计数进 DataSpace |
 | 进程退出 | stop() 置位 Event → join 线程（≤3s）→ 关闭音频流 |
+| 声纹注册表损坏 | 改名 .corrupt-<ts> 存证，空表重启（与记忆模块存储文件同一立场） |
 
 ## 6. 测试契约清单
 

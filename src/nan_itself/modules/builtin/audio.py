@@ -22,6 +22,7 @@ agent process never dies because a microphone is missing.
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -106,6 +107,12 @@ class AudioModule(Module):
 
     embed_min_voiced_ms: int = 400
 
+    promote_min_utterances: int = 5
+
+    promote_min_voiced_ms: float = 20000.0
+
+    registry_save_throttle_s: float = 60.0
+
     def __init__(self) -> None:
         self.sample_rate = int(
             os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
@@ -139,19 +146,25 @@ class AudioModule(Module):
             / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
         )
 
-        voices_dir = os.getenv("NAN_AUDIO_VOICES_DIR")
+        registry = os.getenv("NAN_AUDIO_VOICES_REGISTRY")
 
-        self.voices_dir = (
-            Path(voices_dir)
-            if voices_dir
-            else _repo_root() / "models" / "speaker" / "voices"
+        self.registry_path = (
+            Path(registry)
+            if registry
+            else _repo_root() / "data" / "audio" / "voices.json"
         )
 
         self.matcher = SpeakerMatcher(
             threshold=self.speaker_threshold,
+            promote_min_utterances=self.promote_min_utterances,
+            promote_min_voiced_ms=self.promote_min_voiced_ms,
         )
 
-        self._voice_fingerprints: dict[str, tuple[int, int]] = {}
+        self._registry_dirty = False
+
+        # Start inside the throttle window: ordinary learning
+        # saves at most once per window; promotions always write.
+        self._registry_last_save = time.time()
 
         # Injectable like mic_factory; tests swap in fakes.
         self.embedder_factory = (
@@ -228,8 +241,8 @@ class AudioModule(Module):
             "speaker_backend": "not loaded",
             "last_speaker": None,
             "last_speaker_score": None,
-            "voices_loaded": 0,
-            "speakers_session": 0,
+            "voices_known": 0,
+            "voices_session": 0,
         }
 
         self._last_normalized_text: str = ""
@@ -256,6 +269,8 @@ class AudioModule(Module):
             self.whisper_model,
             self.models_dir,
         )
+
+        self._load_registry()
 
         for target, name in (
             (self._capture_loop, "audio-capture"),
@@ -473,78 +488,111 @@ class AudioModule(Module):
 
         return embedder
 
-    def _refresh_voices(self) -> None:
+    def _load_registry(self) -> None:
         """
-        Rescan the voices registry; a changed fingerprint set
-        reloads every named vector. Cheap enough for the publish
-        ticker (few small .npy files).
+        Restore the auto-enrolled voice registry at boot.
+
+        A corrupt registry is renamed .corrupt-<ts> for forensics
+        and the module starts with an empty one -- same stance as
+        the memory module's storage files: never truncate, never
+        die, wait for a human.
         """
-        try:
-            entries = sorted(
-                self.voices_dir.glob("*.npy"),
-            ) if self.voices_dir.is_dir() else []
+        path = self.registry_path
 
-        except OSError:
-
+        if not path.is_file():
             return
 
-        fingerprints: dict[str, tuple[int, int]] = {}
+        try:
+            payload = json.loads(
+                path.read_text(encoding="utf-8"),
+            )
 
-        for path in entries:
+            self.matcher.restore(payload)
+
+        except Exception as exc:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+
+            corrupt = path.with_name(
+                f"{path.name}.corrupt-{stamp}",
+            )
+
             try:
-                stat = path.stat()
+                path.rename(corrupt)
 
             except OSError:
 
-                continue
+                pass
 
-            fingerprints[path.name] = (
-                stat.st_mtime_ns,
-                stat.st_size,
+            logger.error(
+                "voice registry corrupt ({}); quarantined "
+                "as {}; starting empty",
+                exc,
+                corrupt.name,
             )
 
-        if fingerprints == self._voice_fingerprints:
-            return
-
-        import numpy as np
-
-        named: dict[str, Any] = {}
-
-        for name, _ in fingerprints.items():
-            try:
-                vector = np.load(
-                    self.voices_dir / name,
-                )
-
-            except Exception:
-                logger.warning(
-                    "unreadable voice registry entry: {}", name
-                )
-
-                continue
-
-            if vector.ndim != 1 or vector.size == 0:
-                continue
-
-            named[name[:-4]] = vector.astype(np.float32)
-
-        self.matcher.set_named(named)
-
-        self._voice_fingerprints = fingerprints
+            self.matcher = SpeakerMatcher(
+                threshold=self.speaker_threshold,
+                promote_min_utterances=(
+                    self.promote_min_utterances
+                ),
+                promote_min_voiced_ms=(
+                    self.promote_min_voiced_ms
+                ),
+            )
 
         with self._state_lock:
-            self._stats["voices_loaded"] = len(named)
+            self._sync_voice_stats()
 
-            self._stats["speaker_backend"] = (
-                self._stats["speaker_backend"]
-                if self._stats["speaker_backend"]
-                != "not loaded"
-                else "registry ready"
-            )
+    def _save_registry(self) -> None:
+        """
+        Atomic write-through of the auto-enrolled registry.
+        """
+        self.registry_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        logger.info(
-            "speaker registry reloaded: {} voices",
-            len(named),
+        payload = json.dumps(
+            self.matcher.serialize(),
+            ensure_ascii=False,
+            indent=1,
+        )
+
+        tmp = self.registry_path.with_suffix(".json.tmp")
+
+        tmp.write_text(payload, encoding="utf-8")
+
+        os.replace(tmp, self.registry_path)
+
+        self._registry_dirty = False
+
+        self._registry_last_save = time.time()
+
+    def _maybe_save_registry(self, promoted: bool) -> None:
+        """
+        Promotion forces a save; ordinary learning is throttled.
+        """
+        if promoted:
+            self._save_registry()
+
+            return
+
+        if not self._registry_dirty:
+            return
+
+        if (
+            time.time() - self._registry_last_save
+            >= self.registry_save_throttle_s
+        ):
+            self._save_registry()
+
+    def _sync_voice_stats(self) -> None:
+        self._stats["voices_known"] = (
+            self.matcher.known_count()
+        )
+
+        self._stats["voices_session"] = len(
+            self.matcher.labels()
         )
 
     def _attribute_speaker(self, utt: Utterance) -> None:
@@ -564,7 +612,12 @@ class AudioModule(Module):
         if vector is None:
             return
 
-        label, score = self.matcher.assign(vector)
+        label, score, promoted = self.matcher.assign(
+            vector,
+            voiced_ms=utt.voiced_ms,
+        )
+
+        self._registry_dirty = True
 
         with self._state_lock:
             if self._heard:
@@ -576,9 +629,15 @@ class AudioModule(Module):
                 round(score, 3) if score is not None else None
             )
 
-            self._stats["speakers_session"] = len(
-                self.matcher.labels()
+            self._sync_voice_stats()
+
+        if promoted:
+            logger.info(
+                "voice promoted to persistent registry: {}",
+                label,
             )
+
+        self._maybe_save_registry(promoted)
 
     # ------------------------------------------------------------------
     # Transcript bookkeeping (extracted for direct unit driving)
@@ -673,9 +732,6 @@ class AudioModule(Module):
     async def _publish_ticker(self) -> None:
         while True:
             await asyncio.sleep(self.publish_interval)
-
-            # Voice registry is small; rescan alongside publish.
-            self._refresh_voices()
 
             with self._state_lock:
                 payload = {
