@@ -981,3 +981,190 @@ class WhisperTranscriber:
             "words": words,
             "voiced_s": round(utt.voiced_ms / 1000.0, 3),
         }
+
+
+# ======================================================================
+# W4: speaker identity (embedding registry + streaming assignment)
+# ======================================================================
+
+
+def cosine_similarity(a, b) -> float:
+    """
+    Plain cosine over 1-D float vectors; zero vectors -> 0.0.
+    """
+    import numpy as np
+
+    va = np.asarray(a, dtype=np.float32)
+
+    vb = np.asarray(b, dtype=np.float32)
+
+    denom = float(
+        np.linalg.norm(va) * np.linalg.norm(vb)
+    )
+
+    if denom <= 0:
+        return 0.0
+
+    return float(np.dot(va, vb) / denom)
+
+
+class SpeakerMatcher:
+    """
+    Voice registry + streaming diarization-by-utterance.
+
+    Two label spaces:
+
+        named    enrolled voices loaded from voices/*.npy;
+                 the authoritative, persistent identity layer
+        unknown  session-scoped anonymous clusters (voice-N);
+                 greedy nearest-centroid assignment with running
+                 mean updates, never persisted (fresh ears after
+                 reboot -- same stance as the transcript ring)
+
+    assign() is the single entry point: nearest match above the
+    threshold wins, otherwise a new anonymous cluster opens.
+    """
+
+    def __init__(
+        self,
+        threshold: float = 0.62,
+    ) -> None:
+        self.threshold = threshold
+
+        self.named: dict[str, Any] = {}
+
+        self.unknown: dict[str, Any] = {}
+
+        self.unknown_counts: dict[str, int] = {}
+
+        self._counter = 0
+
+    def set_named(self, mapping) -> None:
+        self.named = dict(mapping)
+
+    def labels(self) -> list[str]:
+        return [*self.named, *self.unknown]
+
+    def assign(self, vec) -> tuple[str, float]:
+        import numpy as np
+
+        best_label: str | None = None
+
+        best_score = -1.0
+
+        for label, ref in self.named.items():
+            score = cosine_similarity(vec, ref)
+
+            if score > best_score:
+                best_label, best_score = label, score
+
+        for label, centroid in self.unknown.items():
+            score = cosine_similarity(vec, centroid)
+
+            if score > best_score:
+                best_label, best_score = label, score
+
+        if (
+            best_label is not None
+            and best_score >= self.threshold
+        ):
+            if best_label in self.unknown:
+                count = self.unknown_counts[best_label]
+
+                centroid = self.unknown[best_label]
+
+                blended = centroid * count + np.asarray(
+                    vec,
+                    dtype=np.float32,
+                )
+
+                self.unknown[best_label] = (
+                    blended / (count + 1)
+                ).astype(np.float32)
+
+                self.unknown_counts[best_label] = count + 1
+
+            return best_label, best_score
+
+        self._counter += 1
+
+        label = f"voice-{self._counter}"
+
+        self.unknown[label] = np.asarray(
+            vec,
+            dtype=np.float32,
+        ).copy()
+
+        self.unknown_counts[label] = 1
+
+        return label, best_score
+
+
+class SherpaSpeakerEmbedder:
+    """
+    sherpa-onnx speaker-embedding adapter (CAM++ / ECAPA-class
+    ONNX models). Lazy import + lazy load; nothing here touches
+    torch. Model binary lives under models/speaker/.
+    """
+
+    def __init__(
+        self,
+        model_path: str | Path,
+    ) -> None:
+        self.model_path = str(model_path)
+
+        self._extractor: Any = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._extractor is not None
+
+    def load(self) -> None:
+        if self._extractor is not None:
+            return
+
+        import sherpa_onnx
+
+        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+            model=self.model_path,
+        )
+
+        self._extractor = (
+            sherpa_onnx.SpeakerEmbeddingExtractor(config)
+        )
+
+    @property
+    def dim(self) -> int:
+        self.load()
+
+        return int(self._extractor.dim)
+
+    def embed(self, pcm: bytes) -> Any | None:
+        """
+        int16 mono PCM -> embedding vector. None when the chunk
+        carries no usable audio.
+        """
+        import numpy as np
+
+        self.load()
+
+        samples = np.frombuffer(
+            bytes(pcm),
+            dtype=np.int16,
+        ).astype(np.float32) / 32768.0
+
+        if samples.size == 0:
+            return None
+
+        stream = self._extractor.create_stream()
+
+        stream.accept_waveform(SAMPLE_RATE, samples)
+
+        stream.input_finished()
+
+        vector = self._extractor.compute(stream)
+
+        if not vector:
+            return None
+
+        return np.asarray(vector, dtype=np.float32)

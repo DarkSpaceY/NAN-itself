@@ -42,7 +42,9 @@ from src.nan_itself.modules.model import (
 
 from src.nan_itself.utils.audio import (
     AudioPipeline,
+    SherpaSpeakerEmbedder,
     SoundDeviceMicSource,
+    SpeakerMatcher,
     Utterance,
     WhisperTranscriber,
 )
@@ -100,6 +102,10 @@ class AudioModule(Module):
 
     hotwords: tuple[str, ...] = ()
 
+    speaker_threshold: float = 0.62
+
+    embed_min_voiced_ms: int = 400
+
     def __init__(self) -> None:
         self.sample_rate = int(
             os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
@@ -121,6 +127,42 @@ class AudioModule(Module):
             for part in hotword_env.split(",")
             if part.strip()
         )
+
+        speaker_model = os.getenv("NAN_AUDIO_SPEAKER_MODEL")
+
+        self.speaker_model_path = (
+            Path(speaker_model)
+            if speaker_model
+            else _repo_root()
+            / "models"
+            / "speaker"
+            / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+        )
+
+        voices_dir = os.getenv("NAN_AUDIO_VOICES_DIR")
+
+        self.voices_dir = (
+            Path(voices_dir)
+            if voices_dir
+            else _repo_root() / "models" / "speaker" / "voices"
+        )
+
+        self.matcher = SpeakerMatcher(
+            threshold=self.speaker_threshold,
+        )
+
+        self._voice_fingerprints: dict[str, tuple[int, int]] = {}
+
+        # Injectable like mic_factory; tests swap in fakes.
+        self.embedder_factory = (
+            lambda: SherpaSpeakerEmbedder(
+                self.speaker_model_path,
+            )
+        )
+
+        self._embedder: Any = None
+
+        self._embedder_failed = False
 
         models_dir = os.getenv("NAN_AUDIO_MODELS_DIR")
 
@@ -183,6 +225,11 @@ class AudioModule(Module):
             "last_speech_rate": None,
             "last_hotword": None,
             "hotwords_total": 0,
+            "speaker_backend": "not loaded",
+            "last_speaker": None,
+            "last_speaker_score": None,
+            "voices_loaded": 0,
+            "speakers_session": 0,
         }
 
         self._last_normalized_text: str = ""
@@ -374,12 +421,164 @@ class AudioModule(Module):
 
                 continue
 
-            text = (result.get("text") or "").strip()
-
-            if not text:
+            if not self._accept_transcript(result):
                 continue
 
-            self._accept_transcript(result)
+            # W4: attribute the utterance to a voice when it is
+            # long enough to carry a stable embedding.
+            if utt.voiced_ms >= self.embed_min_voiced_ms:
+                self._attribute_speaker(utt)
+
+    # ------------------------------------------------------------------
+    # Speaker identity (W4)
+    # ------------------------------------------------------------------
+
+    def _get_embedder(self) -> Any | None:
+        """
+        Lazy singleton; a failing backend disables tagging for
+        the session instead of poisoning every utterance.
+        """
+        if self._embedder is not None:
+            return self._embedder
+
+        if self._embedder_failed:
+            return None
+
+        try:
+            embedder = self.embedder_factory()
+
+            embedder.load()
+
+        except Exception as exc:
+            self._embedder_failed = True
+
+            with self._state_lock:
+                self._stats["speaker_backend"] = (
+                    f"unavailable: {exc}"
+                )
+
+            logger.warning(
+                "speaker embedding backend unavailable: {}",
+                exc,
+            )
+
+            return None
+
+        self._embedder = embedder
+
+        with self._state_lock:
+            self._stats["speaker_backend"] = type(
+                embedder
+            ).__name__
+
+        return embedder
+
+    def _refresh_voices(self) -> None:
+        """
+        Rescan the voices registry; a changed fingerprint set
+        reloads every named vector. Cheap enough for the publish
+        ticker (few small .npy files).
+        """
+        try:
+            entries = sorted(
+                self.voices_dir.glob("*.npy"),
+            ) if self.voices_dir.is_dir() else []
+
+        except OSError:
+
+            return
+
+        fingerprints: dict[str, tuple[int, int]] = {}
+
+        for path in entries:
+            try:
+                stat = path.stat()
+
+            except OSError:
+
+                continue
+
+            fingerprints[path.name] = (
+                stat.st_mtime_ns,
+                stat.st_size,
+            )
+
+        if fingerprints == self._voice_fingerprints:
+            return
+
+        import numpy as np
+
+        named: dict[str, Any] = {}
+
+        for name, _ in fingerprints.items():
+            try:
+                vector = np.load(
+                    self.voices_dir / name,
+                )
+
+            except Exception:
+                logger.warning(
+                    "unreadable voice registry entry: {}", name
+                )
+
+                continue
+
+            if vector.ndim != 1 or vector.size == 0:
+                continue
+
+            named[name[:-4]] = vector.astype(np.float32)
+
+        self.matcher.set_named(named)
+
+        self._voice_fingerprints = fingerprints
+
+        with self._state_lock:
+            self._stats["voices_loaded"] = len(named)
+
+            self._stats["speaker_backend"] = (
+                self._stats["speaker_backend"]
+                if self._stats["speaker_backend"]
+                != "not loaded"
+                else "registry ready"
+            )
+
+        logger.info(
+            "speaker registry reloaded: {} voices",
+            len(named),
+        )
+
+    def _attribute_speaker(self, utt: Utterance) -> None:
+        embedder = self._get_embedder()
+
+        if embedder is None:
+            return
+
+        try:
+            vector = embedder.embed(utt.pcm)
+
+        except Exception as exc:
+            logger.warning("speaker embedding failed: {}", exc)
+
+            return
+
+        if vector is None:
+            return
+
+        label, score = self.matcher.assign(vector)
+
+        with self._state_lock:
+            if self._heard:
+                self._heard[-1]["speaker"] = label
+
+            self._stats["last_speaker"] = label
+
+            self._stats["last_speaker_score"] = (
+                round(score, 3) if score is not None else None
+            )
+
+            self._stats["speakers_session"] = len(
+                self.matcher.labels()
+            )
 
     # ------------------------------------------------------------------
     # Transcript bookkeeping (extracted for direct unit driving)
@@ -474,6 +673,9 @@ class AudioModule(Module):
     async def _publish_ticker(self) -> None:
         while True:
             await asyncio.sleep(self.publish_interval)
+
+            # Voice registry is small; rescan alongside publish.
+            self._refresh_voices()
 
             with self._state_lock:
                 payload = {
@@ -591,6 +793,11 @@ class AudioModule(Module):
             confidence = item.get("confidence", 0.0)
 
             tags = ""
+
+            speaker = item.get("speaker")
+
+            if speaker:
+                tags += f" ({speaker})"
 
             if confidence < 0.6:
                 tags += f" (conf {confidence})"

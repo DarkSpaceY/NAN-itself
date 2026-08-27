@@ -22,7 +22,9 @@
 MVP 摘要：L1 能量（RMS/噪声底）+ L4 事件（VAD/静默/瞬态）
 + L7 内容（STT/置信度/语言/词级时间戳）+ W2 已并入 L2 特征
 （ZCR/质心/平坦度）与 L6 启发式环境四态分类；W3 已并入 L3
-（F0/音高轮廓/语速）与热词通道。其余按 features 文档 W4–W6 推进。
+（F0/音高轮廓/语速）与热词通道；W4 已并入 L5（声纹注册/识别
++ 流式逐句说话人分离，CAM++ via sherpa-onnx，零 torch）。
+其余按 features 文档 W5–W6 推进。
 
 ## 2. MVP 范围（本次实现）
 
@@ -41,9 +43,17 @@ AudioPipeline(utils/audio.py，纯逻辑可测)
         │ 句子(bytes)
         ▼ queue(32)
 转写线程 B → WhisperTranscriber(faster-whisper base, lazy import)
-        │ {text, conf, lang}
-        ▼
-TranscriptRing(deque maxlen=hear_history)
+        │ {text, conf, lang, words, voiced_s}
+        ├────────────────────────────┐
+        ▼                            │ voiced≥400ms
+TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
+                                     │ 512-d 向量
+                                     ▼
+                              SpeakerMatcher（named=voices/*.npy 热扫描；
+                              unknown=会话匿名簇 voice-N，重启即清）
+                                     │
+                                     ▼
+                          heard[i]["speaker"] = "you"/"voice-2"
 ```
 
 - **丢包策略**：mic 队列满→丢弃新帧并计数；utterance 队列满→丢弃新句并计数。只在 DataSpace 上报数字，不打断采集。
@@ -65,8 +75,8 @@ TranscriptRing(deque maxlen=hear_history)
 - ambient: tonal / noisy            # 仅非语音且非安静时出现
 - level: -38.2 dBFS (noise floor -55.1)
 - sharp sound detected at 14:31     # 仅 60s 内出现过瞬态
-- heard 14:32 [hot:nan] "嘿 NAN，帮我看下这个报错"
-- heard 14:31 (conf 0.42) "……什么东西响了一声"
+- heard 14:32 (you) [hot:nan] "嘿 NAN，帮我看下这个报错"
+- heard 14:31 (voice-2) (conf 0.42) "……什么东西响了一声"
 ```
 
 不可用时（仍在本模块领地内，一行）：
@@ -96,6 +106,10 @@ TranscriptRing(deque maxlen=hear_history)
 | NAN_AUDIO_HOTWORDS | 空 | 逗号分隔热词，文本侧匹配，命中加 [hot:x] 标签 |
 | pitch_min_hz / pitch_max_hz | 75 / 500 | 自相关 F0 搜索范围 |
 | pitch strength_min | 0.5 | 低于此置信度视为清音段 |
+| NAN_AUDIO_SPEAKER_MODEL | models/speaker/campplus zh-en | 声纹嵌入 ONNX（sherpa-onnx） |
+| NAN_AUDIO_VOICES_DIR | models/speaker/voices | 声纹注册表目录（*.npy，热扫描） |
+| speaker_threshold | 0.62 | 余弦判同阈值 |
+| embed_min_voiced_ms | 400 | 低于此发声时长不做声纹归属 |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |
 | quiet_report_after_s | 120 | 安静多久后不再输出 query |
@@ -132,4 +146,6 @@ TranscriptRing(deque maxlen=hear_history)
 
 见 `docs/audio-features.md` 的「实现波次」表；此处不再重复。
 
-调研备忘：RealtimeSTT（现 utils/listen.py）验证过子进程 RT-STT 可行性但隐藏了原始 PCM——W1 由本模块自管采集取而代之；listen.py 保留作参考实现不删除。
+调研备忘：
+- RealtimeSTT（现 utils/listen.py）验证过子进程 RT-STT 可行性但隐藏了原始 PCM——W1 由本模块自管采集取而代之；listen.py 保留作参考实现不删除。
+- 声纹模型：sherpa-onnx 发布 tag 实际拼写为 `speaker-recongition-models`（上游拼错，直拼 recognition 会 404）；GitHub 直连仅 ~7KB/s，用 ghfast.top 镜像 28MB/112s；校验以 release 内 checksum.txt 的 sha256 为准（CAM++ zh-en = f682b514…d11）。

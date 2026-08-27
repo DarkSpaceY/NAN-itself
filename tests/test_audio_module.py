@@ -20,8 +20,10 @@ from src.nan_itself.utils.audio import (
     EchoTranscriber,
     FeatureTracker,
     PitchTracker,
+    SpeakerMatcher,
     Utterance,
     UtteranceSegmenter,
+    cosine_similarity,
     rms_dbfs,
     spectral_centroid_hz,
     spectral_flatness,
@@ -591,6 +593,10 @@ def test_capture_events_flow_into_transcript_ring():
 
     assert queued == 1
 
+    module.embedder_factory = lambda: FakeEmbedder(
+        [list(range(4))],
+    )
+
     while not module._utterance_queue.empty():
         utt = module._utterance_queue.get_nowait()
 
@@ -600,10 +606,16 @@ def test_capture_events_flow_into_transcript_ring():
 
         assert accepted
 
+        if utt.voiced_ms >= module.embed_min_voiced_ms:
+            module._attribute_speaker(utt)
+
     with module._state_lock:
         assert module._stats["transcripts_total"] == 1
 
         text = module._heard[-1]["text"]
+
+        assert module._heard[-1]["speaker"] == "voice-1"
+
 
         # Simulate the capture session being live for rendering.
         module._stats["available"] = True
@@ -1039,3 +1051,246 @@ def test_hotwords_env_parsing():
 
         else:
             os.environ["NAN_AUDIO_HOTWORDS"] = env_backup
+
+
+# ======================================================================
+# W4: speaker identity (registry + streaming assignment)
+# ======================================================================
+
+
+import numpy as np
+
+
+class FakeEmbedder:
+    """Deterministic embedding source for unit flows."""
+
+    def __init__(self, vectors, fail: bool = False) -> None:
+        self.vectors = [np.asarray(v, dtype=np.float32)
+                        for v in vectors]
+
+        self.calls = 0
+
+        self.fail = fail
+
+    def load(self) -> None:
+        if self.fail:
+            raise RuntimeError("no model binary")
+
+    def embed(self, pcm: bytes):
+        if self.fail:
+            raise RuntimeError("no model binary")
+
+        self.calls += 1
+
+        return self.vectors[(self.calls - 1) % len(self.vectors)]
+
+
+def test_cosine_similarity_basics():
+    assert cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
+
+    assert cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
+
+    assert cosine_similarity([0, 0], [1, 0]) == 0.0
+
+    assert cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
+
+
+def test_speaker_matcher_named_then_unknown_clusters():
+    matcher = SpeakerMatcher(threshold=0.62)
+
+    you = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+
+    matcher.set_named({"you": you})
+
+    label, score = matcher.assign(you)
+
+    assert label == "you"
+
+    assert score == pytest.approx(1.0)
+
+    # A distant voice opens the first anonymous cluster.
+    stranger = np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
+
+    label, _ = matcher.assign(stranger)
+
+    assert label == "voice-1"
+
+    # A voice near the stranger joins the same cluster and the
+    # centroid moves toward the mixture.
+    near = np.asarray([0.1, 0.9, 0.0], dtype=np.float32)
+
+    label, _ = matcher.assign(near)
+
+    assert label == "voice-1"
+
+    assert matcher.unknown_counts["voice-1"] == 2
+
+    centroid = matcher.unknown["voice-1"]
+
+    assert centroid[0] == pytest.approx(0.05, abs=1e-6)
+
+    assert matcher.labels().count("voice-1") == 1
+
+
+def test_matcher_threshold_gates_named_space():
+    matcher = SpeakerMatcher(threshold=0.9)
+
+    you = np.asarray([1.0, 0.0], dtype=np.float32)
+
+    matcher.set_named({"you": you})
+
+    # 45 degrees: cosine 0.707 < 0.9 -> must NOT claim "you".
+    label, score = matcher.assign([0.7071, 0.7071])
+
+    assert label == "voice-1"
+
+    assert score == pytest.approx(0.7071, abs=1e-3)
+
+
+def test_refresh_voices_loads_registry_and_survives_corruption(
+    tmp_path,
+):
+    module = make_module()
+
+    module.voices_dir = tmp_path
+
+    np.save(tmp_path / "alice.npy",
+            np.asarray([1.0, 0.0], dtype=np.float32))
+
+    np.save(tmp_path / "bob.npy",
+            np.asarray([0.0, 1.0], dtype=np.float32))
+
+    module._refresh_voices()
+
+    assert sorted(module.matcher.named) == ["alice", "bob"]
+
+    with module._state_lock:
+        assert module._stats["voices_loaded"] == 2
+
+    (tmp_path / "broken.npy").write_bytes(b"not an npy file")
+
+    module._refresh_voices()
+
+    assert sorted(module.matcher.named) == ["alice", "bob"]
+
+    # Fingerprint unchanged -> second scan is a no-op (no reload
+    # side effects, e.g. object identity preserved).
+    first = module.matcher.named["alice"]
+
+    module._refresh_voices()
+
+    assert module.matcher.named["alice"] is first
+
+
+def test_attribute_speaker_tags_heard_and_stats():
+    module = make_module()
+
+    module.embedder_factory = lambda: FakeEmbedder(
+        [[1.0, 0.0]],
+    )
+
+    module.matcher.set_named(
+        {"you": np.asarray([1.0, 0.0], dtype=np.float32)},
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=600, total_ms=700)
+
+    assert module._accept_transcript(
+        {"text": "it is me", "confidence": 0.9,
+         "language": "en"},
+    )
+
+    module._attribute_speaker(utt)
+
+    with module._state_lock:
+        assert module._heard[-1]["speaker"] == "you"
+
+        assert module._stats["last_speaker"] == "you"
+
+        assert module._stats["last_speaker_score"] == (
+            pytest.approx(1.0, abs=1e-3)
+        )
+
+        assert module._stats["speakers_session"] == 1
+
+        assert module._stats["speaker_backend"] == "FakeEmbedder"
+
+
+def test_attribute_speaker_degrades_on_backend_failure():
+    module = make_module()
+
+    module.embedder_factory = lambda: FakeEmbedder(
+        [], fail=True,
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=600, total_ms=700)
+
+    assert module._accept_transcript(
+        {"text": "who said that", "confidence": 0.9,
+         "language": "en"},
+    )
+
+    module._attribute_speaker(utt)
+
+    with module._state_lock:
+        assert "speaker" not in module._heard[-1]
+
+        assert module._stats["last_speaker"] is None
+
+        assert module._stats["speaker_backend"].startswith(
+            "unavailable:",
+        )
+
+
+def test_attribute_speaker_skips_too_short_utterances():
+    module = make_module()
+
+    seen = []
+
+    def factory():
+        seen.append(1)
+
+        return FakeEmbedder([[1.0, 0.0]])
+
+    module.embedder_factory = factory
+
+    short = Utterance(pcm=b"", voiced_ms=120, total_ms=400)
+
+    assert module._accept_transcript(
+        {"text": "hm", "confidence": 0.9, "language": "en"},
+    )
+
+    # The loop gates on voiced duration before calling us; the
+    # method itself stays cheap and idempotent either way.
+    module._attribute_speaker(short)
+
+    assert len(seen) == 1
+
+    with module._state_lock:
+        assert module._heard[-1].get("speaker") == "voice-1"
+
+
+def test_render_heard_includes_speaker_tag():
+    module = make_module()
+
+    with module._state_lock:
+        module._stats["available"] = True
+
+        module._stats["quiet_s"] = 1.0
+
+        module._heard.append(
+            {"ts": time.time(), "text": "where is my coffee",
+             "confidence": 0.91, "language": "en",
+             "rate": 2.0, "hotword": None,
+             "speaker": "you"},
+        )
+
+    rendered = time_machine_query(module)
+
+    assert '- heard' in rendered
+
+    assert "(you)" in rendered
+
+    assert "where is my coffee" in rendered
+
+    assert rendered.count("[Audio]") == 1
