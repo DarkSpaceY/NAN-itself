@@ -128,6 +128,10 @@ class AudioModule(Module):
 
     emotion_min_voiced_ms: int = 800
 
+    whisper_subprocess: bool = True
+
+    whisper_result_timeout: float = 30.0
+
     def __init__(self) -> None:
         self.sample_rate = int(
             os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
@@ -191,6 +195,22 @@ class AudioModule(Module):
         self._embedder: Any = None
 
         self._embedder_failed = False
+
+        self.whisper_subprocess = (
+            os.getenv("NAN_AUDIO_WHISPER_SUBPROCESS", "1") == "1"
+        )
+
+        self.whisper_worker_factory = lambda: WhisperWorkerProxy(
+            model_size=self.whisper_model,
+            models_dir=str(self.models_dir),
+            language=self.whisper_language,
+            translate_enabled=(
+                os.getenv("NAN_AUDIO_TRANSLATE", "0") == "1"
+            ),
+            result_timeout=self.whisper_result_timeout,
+        )
+
+        self._whisper_worker: Any = None
 
         tagger_model = os.getenv("NAN_AUDIO_TAGGER_MODEL")
 
@@ -349,6 +369,8 @@ class AudioModule(Module):
             "last_pauses": None,
             "last_register": None,
             "last_translation": None,
+            "whisper_timeouts": 0,
+            "whisper_restarts": 0,
         }
 
         self._last_normalized_text: str = ""
@@ -395,6 +417,17 @@ class AudioModule(Module):
         self._publish_task = asyncio.create_task(
             self._publish_ticker(),
         )
+
+        # Park forever: a returning start() tells the Facade this
+        # is a state-only module, and it will re-run start() every
+        # few seconds -- spawning duplicate thread pairs each time.
+        try:
+            await asyncio.Event().wait()
+
+        finally:
+            # Cancelled by the Facade on shutdown: make sure the
+            # daemon threads see the stop flag too.
+            self._stop_event.set()
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -547,7 +580,7 @@ class AudioModule(Module):
                 continue
 
             try:
-                result = self.transcriber.transcribe(utt)
+                result = self._transcribe(utt)
 
             except Exception as exc:
                 logger.exception(
@@ -558,6 +591,19 @@ class AudioModule(Module):
                     self._stats["load_error"] = str(exc)
 
                 continue
+
+            with self._state_lock:
+                self._stats["whisper_timeouts"] = getattr(
+                    self._whisper_worker,
+                    "timeouts",
+                    0,
+                ) if self._whisper_worker else 0
+
+                self._stats["whisper_restarts"] = getattr(
+                    self._whisper_worker,
+                    "restarts",
+                    0,
+                ) if self._whisper_worker else 0
 
             if not self._accept_transcript(result):
                 continue
@@ -989,6 +1035,20 @@ class AudioModule(Module):
             if register:
                 self._stats["last_register"] = register
 
+
+    def _transcribe(self, utt: Utterance) -> dict:
+        """
+        Route one utterance to whisper. Subprocess mode keeps
+        pathological inputs (noise loops, memory balloons) away
+        from the agent process; direct mode serves unit tests.
+        """
+        if not self.whisper_subprocess:
+            return self.transcriber.transcribe(utt)
+
+        if self._whisper_worker is None:
+            self._whisper_worker = self.whisper_worker_factory()
+
+        return self._whisper_worker.transcribe(utt)
 
     # ------------------------------------------------------------------
     # Transcript bookkeeping (extracted for direct unit driving)

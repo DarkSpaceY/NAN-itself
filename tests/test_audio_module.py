@@ -1894,3 +1894,132 @@ def test_utterance_extras_attach_to_heard():
         assert module._heard[-1]["register"] == "mid (180Hz)"
 
         assert module._stats["last_formants"] != []
+
+
+# ======================================================================
+# Whisper subprocess isolation + voiced-ratio noise armor
+# ======================================================================
+
+
+def test_segmenter_ratio_gate_filters_claps():
+    """
+    Clap signature: 2-3 loud frames riding on preroll + long
+    trailing silence. The ratio gate must keep it out of
+    whisper entirely.
+    """
+    segmenter = UtteranceSegmenter(
+        preroll_frames=10,
+        trailing_silence_frames=23,
+        min_utterance_frames=4,
+        max_utterance_frames=400,
+    )
+
+    bang = level_frame(-20.0)
+
+    silence = level_frame(-120.0)
+
+    for _ in range(12):
+        segmenter.feed(silence, False)
+
+    segmenter.feed(bang, True)
+
+    segmenter.feed(bang, True)
+
+    out: list = []
+
+    for _ in range(25):
+        out.extend(segmenter.feed(silence, False))
+
+    assert out == []
+
+
+def test_segmenter_ratio_gate_keeps_real_speech_with_pauses():
+    segmenter = UtteranceSegmenter(
+        preroll_frames=10,
+        trailing_silence_frames=23,
+        min_utterance_frames=4,
+        max_utterance_frames=400,
+    )
+
+    speech = level_frame(-25.0)
+
+    silence = level_frame(-120.0)
+
+    for _ in range(12):
+        segmenter.feed(silence, False)
+
+    segmenter.feed(speech, True)
+
+    for _ in range(14):
+        segmenter.feed(speech, True)
+
+    for _ in range(4):
+        segmenter.feed(silence, False)
+
+    for _ in range(14):
+        segmenter.feed(speech, True)
+
+    out: list = []
+
+    for _ in range(25):
+        out.extend(segmenter.feed(silence, False))
+
+    assert len(out) == 1
+
+    assert out[0].voiced_ms == 29 * 30  # trigger + 14 + 14
+
+    assert out[0].pauses_ms == [120]
+
+
+def test_whisper_worker_proxy_roundtrip(tmp_path):
+    """
+    Full protocol through a REAL subprocess: job in, ready
+    marker, result out, stats intact.
+    """
+    from src.nan_itself.utils.audio import WhisperWorkerProxy
+
+    proxy = WhisperWorkerProxy(
+        model_size="base",
+        models_dir="models/whisper",
+        result_timeout=90,
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=1000, total_ms=1000)
+
+    result = proxy.transcribe(utt)
+
+    assert proxy._process is not None
+
+    assert proxy._process.is_alive()
+
+    # White-noise-ish empty pcm: worker must ANSWER (not hang),
+    # whatever it says.
+    assert "error" not in result or result["error"] == ""
+
+    assert result["voiced_s"] == 1.0
+
+    proxy._restart()
+
+    assert proxy.restarts == 1
+
+
+def test_whisper_worker_proxy_timeout_restarts(tmp_path):
+    from src.nan_itself.utils.audio import WhisperWorkerProxy
+
+    proxy = WhisperWorkerProxy(
+        model_size="base",
+        models_dir="models/whisper",
+        result_timeout=0.05,  # worker can't answer this fast
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=1000, total_ms=1000)
+
+    result = proxy.transcribe(utt)
+
+    assert result["error"] == "whisper worker timeout"
+
+    assert proxy.timeouts == 1
+
+    assert proxy.restarts >= 1
+
+    assert result["text"] == ""

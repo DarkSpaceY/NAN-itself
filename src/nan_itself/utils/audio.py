@@ -27,8 +27,6 @@ import queue
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Iterator
-
 from loguru import logger
 
 
@@ -485,6 +483,11 @@ class UtteranceSegmenter:
         min_utterance_frames: int = 20,
         max_utterance_frames: int = 833,
     ) -> None:
+        # Noise-armor threshold: a segment whose voiced share
+        # (excluding the closing trailing silence) is below this
+        # is a clap/click/hum, not speech -- never transcribe it.
+        self.min_voiced_ratio = 0.5
+
         # 30ms frames => 300ms preroll, ~700ms tail,
         # 600ms minimum, ~25s maximum.
         self.preroll: deque[tuple[bytes, bool]] = deque(
@@ -579,6 +582,8 @@ class UtteranceSegmenter:
 
         pauses = self.pauses
 
+        trailing = self.silence_run
+
         self.buffer = []
 
         self.voiced_count = 0
@@ -588,6 +593,16 @@ class UtteranceSegmenter:
         self.pauses = []
 
         if voiced < self.min_voiced:
+            return []
+
+        # Claps ride in on a long trailing silence; real speech
+        # does not. Ratio excludes the closing run.
+        speech_frames = len(buffered) - trailing
+
+        if (
+            speech_frames > 0
+            and voiced / speech_frames < self.min_voiced_ratio
+        ):
             return []
 
         pcm = b"".join(chunk for chunk, _ in buffered)
@@ -1889,3 +1904,261 @@ def pitch_register(f0s: list[float]) -> str | None:
         register = "mid"
 
     return f"{register} ({median:.0f}Hz)"
+
+
+# ======================================================================
+# Whisper subprocess isolation (pathological-input armor)
+# ======================================================================
+
+
+def _whisper_worker_main(
+    jobs: "queue.Queue",
+    results: "queue.Queue",
+    model_size: str,
+    models_dir: str | None,
+    language: str | None,
+    translate_enabled: bool,
+) -> None:
+    """
+    Subprocess body: owns the whisper model. A pathological
+    segment (noise loops, memory balloon) degrades THIS process
+    only; the supervisor restarts it on timeout.
+    """
+    import numpy as np
+
+    from faster_whisper import WhisperModel
+
+    kwargs: dict = {"device": "cpu", "compute_type": "int8"}
+
+    if models_dir:
+        kwargs["download_root"] = models_dir
+
+    model = WhisperModel(model_size, **kwargs)
+
+    results.put({"event": "ready"})
+
+    while True:
+        job = jobs.get()
+
+        if job is None:
+            return
+
+        pcm, voiced_ms, translate = job
+
+        try:
+            audio = np.frombuffer(
+                pcm,
+                dtype=np.int16,
+            ).astype(np.float32) / 32768.0
+
+            segments, info = model.transcribe(
+                audio,
+                language=language,
+                beam_size=1,
+                word_timestamps=True,
+            )
+
+            parts: list[str] = []
+
+            confs: list[float] = []
+
+            words: list[dict] = []
+
+            for seg in segments:
+                no_speech = float(
+                    getattr(seg, "no_speech_prob", 0.0) or 0.0
+                )
+
+                logprob = seg.avg_logprob
+
+                confidence = (
+                    math.exp(logprob)
+                    if logprob is not None
+                    else 0.5
+                )
+
+                # The anti-hallucination gate runs IN the worker:
+                # a hanging segment is exactly what we never
+                # want to shuttle across the boundary.
+                if not (
+                    no_speech > 0.6 and confidence < 0.5
+                ):
+                    parts.append(seg.text.strip())
+
+                    confs.append(confidence)
+
+                for word in getattr(seg, "words", None) or []:
+                    words.append(
+                        {
+                            "w": (word.word or "").strip(),
+                            "start": float(word.start or 0.0),
+                            "end": float(word.end or 0.0),
+                            "p": round(
+                                math.exp(word.probability)
+                                if word.probability is not None
+                                else 0.5,
+                                3,
+                            ),
+                        },
+                    )
+
+            text = " ".join(p for p in parts if p).strip()
+
+            confidence = (
+                round(sum(confs) / len(confs), 3)
+                if confs
+                else 0.5
+            )
+
+            result = {
+                "text": text,
+                "confidence": confidence,
+                "language": getattr(info, "language", None),
+                "words": words,
+                "voiced_s": round(voiced_ms / 1000.0, 3),
+            }
+
+            if translate and text:
+                translated, _ = model.transcribe(
+                    audio,
+                    language=result["language"],
+                    task="translate",
+                    beam_size=1,
+                )
+
+                result["translation"] = " ".join(
+                    seg.text.strip()
+                    for seg in translated
+                    if seg.text.strip()
+                )
+
+            results.put(result)
+
+        except Exception as exc:
+            results.put({"error": str(exc)})
+
+
+class WhisperWorkerProxy:
+    """
+    Main-process handle to the whisper worker subprocess.
+
+    transcribe() waits at most result_timeout seconds; on
+    timeout the worker is presumed wedged (pathological input)
+    and restarted. The agent process never hangs.
+    """
+
+    def __init__(
+        self,
+        model_size: str = "base",
+        models_dir: str | None = None,
+        language: str | None = None,
+        translate_enabled: bool = False,
+        result_timeout: float = 30.0,
+        ready_timeout: float = 120.0,
+    ) -> None:
+        self.model_size = model_size
+
+        self.models_dir = models_dir
+
+        self.language = language
+
+        self.translate_enabled = translate_enabled
+
+        self.result_timeout = result_timeout
+
+        self.ready_timeout = ready_timeout
+
+        self.restarts = 0
+
+        self.timeouts = 0
+
+        self._jobs = None
+
+        self._results = None
+
+        self._process = None
+
+    def _ensure(self) -> None:
+        import multiprocessing as mp
+
+        if self._process is not None and self._process.is_alive():
+            return
+
+        self._jobs = mp.Queue()
+
+        self._results = mp.Queue()
+
+        self._process = mp.Process(
+            target=_whisper_worker_main,
+            args=(
+                self._jobs,
+                self._results,
+                self.model_size,
+                self.models_dir,
+                self.language,
+                self.translate_enabled,
+            ),
+            daemon=True,
+            name="whisper-worker",
+        )
+
+        self._process.start()
+
+        # Wait out the model load in the worker; the ready marker
+        # also proves the queue wiring works both directions.
+        try:
+            marker = self._results.get(timeout=self.ready_timeout)
+
+        except Exception:
+            self._restart()
+
+            raise RuntimeError("whisper worker never became ready")
+
+        if not (isinstance(marker, dict) and "event" in marker):
+            # Not a marker? Put it back for the real consumer.
+            self._results.put(marker)
+
+    def transcribe(self, utt: Utterance) -> dict:
+        self._ensure()
+
+        try:
+            self._jobs.put(
+                (utt.pcm, utt.voiced_ms, self.translate_enabled),
+            )
+
+        except Exception as exc:
+            self._restart()
+
+            return {"error": str(exc), "text": ""}
+
+        try:
+            result = self._results.get(
+                timeout=self.result_timeout,
+            )
+
+        except Exception:
+            self.timeouts += 1
+
+            self._restart()
+
+            return {
+                "error": "whisper worker timeout",
+                "text": "",
+            }
+
+        return result
+
+    def _restart(self) -> None:
+        self.restarts += 1
+
+        if self._process is not None:
+            try:
+                self._process.terminate()
+
+                self._process.join(timeout=2)
+
+            except Exception:
+
+                pass
+
+        self._process = None
