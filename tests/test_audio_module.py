@@ -25,9 +25,15 @@ from src.nan_itself.utils.audio import (
     UtteranceSegmenter,
     WhisperTranscriber,
     cosine_similarity,
+    estimate_bpm,
+    lpc_formants,
+    peak_stats,
+    pitch_register,
     rms_dbfs,
+    spectral_bandwidth,
     spectral_centroid_hz,
     spectral_flatness,
+    spectral_rolloff,
     zero_crossing_rate,
 )
 
@@ -1648,3 +1654,243 @@ def test_render_shows_tag_and_emotion_inside_territory():
     assert rendered.count("[Audio]") == 1
 
     assert "[Ambient]" not in rendered
+
+
+# ======================================================================
+# 🟡 sweep: peak/bandwidth/rolloff/formants/pauses/bpm/register/
+#    dynamic range/SNR/translation
+# ======================================================================
+
+
+def test_spectral_bandwidth_and_rolloff_tone_vs_noise():
+    # Pure tone: energy at one bin -> tiny spread, low rolloff.
+    tone_bw = spectral_bandwidth(level_frame(-20.0))
+
+    noise_bw = spectral_bandwidth(noise_frame(31))
+
+    assert noise_bw > tone_bw * 5
+
+    tone_roll = spectral_rolloff(level_frame(-20.0))
+
+    noise_roll = spectral_rolloff(noise_frame(32))
+
+    assert noise_roll > tone_roll
+
+
+def test_peak_stats_and_clipping():
+    half = level_frame(-6.0)
+
+    peak, clipped = peak_stats(half)
+
+    assert -8.0 < peak < -4.0
+
+    assert clipped is False
+
+    loud = (32767).to_bytes(2, "little", signed=True) * 480
+
+    peak, clipped = peak_stats(loud)
+
+    assert peak == pytest.approx(0.0, abs=0.01)
+
+    assert clipped is True
+
+
+def test_lpc_formants_track_sine_frequency():
+    # A pure sine has exactly one spectral resonance: LPC should
+    # place its first formant at the sine frequency.
+    tone = b"".join(
+        tone_frame(300.0, amplitude=6000) for _ in range(6)
+    )
+
+    formants = lpc_formants(tone)
+
+    assert len(formants) == 3
+
+    assert formants[0] == pytest.approx(300.0, abs=60.0)
+
+    assert lpc_formants(b"") == []
+
+
+def test_segmenter_reports_interior_pauses():
+    segmenter = UtteranceSegmenter(
+        preroll_frames=3,
+        trailing_silence_frames=5,
+        min_utterance_frames=4,
+        max_utterance_frames=400,
+    )
+
+    silence = level_frame(-120.0)
+
+    speech = level_frame(-25.0)
+
+    for _ in range(4):
+        segmenter.feed(silence, False)
+
+    segmenter.feed(speech, True)
+
+    for _ in range(5):
+        segmenter.feed(speech, True)
+
+    # Interior pause: 4 silence frames = 120ms.
+    for _ in range(4):
+        segmenter.feed(silence, False)
+
+    for _ in range(5):
+        segmenter.feed(speech, True)
+
+    out: list = []
+
+    for _ in range(6):
+        out.extend(segmenter.feed(silence, False))
+
+    assert len(out) == 1
+
+    assert out[0].pauses_ms == [120]
+
+
+def test_estimate_bpm_on_click_train():
+    # 120 BPM = a click every 0.5s; 3s of clicks at 16k.
+    import array
+
+    click = (20000).to_bytes(2, "little", signed=True) * 80
+
+    gap = (0).to_bytes(2, "little", signed=True) * (
+        SAMPLE_RATE // 2 - 80
+    )
+
+    pcm = (click + gap) * 6
+
+    bpm = estimate_bpm(pcm)
+
+    assert bpm == pytest.approx(120.0, abs=6.0)
+
+    # Plain tone has no onsets -> no tempo claim.
+    assert estimate_bpm(level_frame(-20.0) * 40) is None
+
+
+def test_pitch_register_neutral_wording():
+    assert pitch_register([120.0] * 12) == "low (120Hz)"
+
+    assert pitch_register([220.0] * 12) == "high (220Hz)"
+
+    assert pitch_register([170.0] * 12) == "mid (170Hz)"
+
+    assert pitch_register([120.0] * 3) is None
+
+
+def test_pipeline_reports_sweep_stats():
+    pipeline = make_pipeline()
+
+    pcm = level_frame(-25.0)
+
+    for _ in range(12):
+        pipeline.process(pcm)
+
+    stats = pipeline.latest_stats
+
+    for key in (
+        "bandwidth_hz",
+        "rolloff_hz",
+        "peak_dbfs",
+        "dynamic_range_db",
+        "clip_total",
+    ):
+        assert key in stats
+
+    # Constant frames never clip; snr only during speech.
+    assert stats["clip_total"] == 0
+
+
+def test_translation_pipeline_end_to_end():
+    module = make_module()
+
+    module.transcriber = EchoTranscriber(
+        text="你好呀", translate_enabled=True,
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=900, total_ms=900)
+
+    result = module.transcriber.transcribe(utt)
+
+    assert module._accept_transcript(result)
+
+    with module._state_lock:
+        assert module._heard[-1]["translation"] == (
+            "EN: 你好呀 #1"
+        )
+
+        assert module._stats["last_translation"] == (
+            "EN: 你好呀 #1"
+        )
+
+    with module._state_lock:
+        module._stats["available"] = True
+
+        module._stats["quiet_s"] = 1.0
+
+    rendered = time_machine_query(module)
+
+    assert '-> "EN: 你好呀 #1"' in rendered
+
+
+def test_utterance_extras_attach_to_heard():
+    module = make_module()
+
+    module.embedder_factory = lambda: FakeEmbedder([[1.0, 0.0]])
+
+    module.emotion_factory = lambda: FakeEmotion()
+
+    # Speech frames + interior pause build f0s/pauses via the
+    # real pipeline; then run the utterance through the loop.
+    pipeline = module.pipeline
+
+    pipeline.vad = LoudIsSpeechGate(threshold_dbfs=-30.0)
+
+    speech = tone_frame(180.0, amplitude=6000)
+
+    silence = level_frame(-120.0)
+
+    now = [0.0]
+
+    utt = None
+
+    def step(pcm):
+        now[0] += 0.03
+
+        for event in pipeline.process(pcm, now=now[0]):
+            nonlocal utt
+
+            if event["type"] == "utterance":
+                utt = event["utterance"]
+
+    for _ in range(5):
+        step(silence)
+
+    for _ in range(16):
+        step(speech)
+
+    for _ in range(4):
+        step(silence)
+
+    for _ in range(16):
+        step(speech)
+
+    for _ in range(25):
+        step(silence)
+
+    assert utt is not None
+
+    assert utt.pauses_ms == [120]
+
+    assert utt.f0s and len(utt.f0s) >= 10
+
+    make_accepted(module, "still talking here")
+
+    module._utterance_extras(utt)
+
+    with module._state_lock:
+        assert module._heard[-1]["pauses"] == 1
+
+        assert module._heard[-1]["register"] == "mid (180Hz)"
+
+        assert module._stats["last_formants"] != []

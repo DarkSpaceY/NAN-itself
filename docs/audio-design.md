@@ -26,7 +26,9 @@ MVP 摘要：L1 能量（RMS/噪声底）+ L4 事件（VAD/静默/瞬态）
 + 流式逐句说话人分离，CAM++ via sherpa-onnx，零 torch）；W5 已并入
 L6（CED-tiny AudioSet 527 类环境打标，环境窗+逐句）；W6 已并入
 L8 音频侧（emotion2vec_plus_base 9 类情绪，onnxruntime，专业音频
-模型——情绪永远不走 LLM）。语义意图归 agent 层。
+模型——情绪永远不走 LLM）；🟡 sweep 已并入（峰值/削波、包络/动态
+范围、带宽/滚降、LPC 共振峰、句内停顿、SNR、BPM 粗估、音高区、
+翻译通道）。语义意图归 agent 层。
 
 ## 2. MVP 范围（本次实现）
 
@@ -119,6 +121,7 @@ TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
 | utt_tag_min_prob | 0.4 | 逐句标签上渲染的最低概率 |
 | NAN_AUDIO_EMOTION_MODEL / _HEAD | models/emotion/{emotion2vec_plus_base.onnx, emotion2vec_head.json} | 9 类情绪 |
 | emotion_min_voiced_ms | 800 | 短于此不做情绪（不可靠） |
+| NAN_AUDIO_TRANSLATE | 0 | 1=非英文句追加 whisper 翻译通道（成本×2） |
 | embed_min_voiced_ms | 400 | 低于此发声时长不做声纹归属 |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |

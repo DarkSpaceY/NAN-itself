@@ -43,7 +43,10 @@ from src.nan_itself.modules.model import (
 
 from src.nan_itself.utils.audio import (
     AudioPipeline,
+    estimate_bpm,
+    lpc_formants,
     OnnxEmotionRecognizer,
+    pitch_register,
     SherpaAudioTagger,
     SherpaSpeakerEmbedder,
     SoundDeviceMicSource,
@@ -287,6 +290,9 @@ class AudioModule(Module):
             model_size=self.whisper_model,
             models_dir=str(self.models_dir),
             language=self.whisper_language,
+            translate_enabled=(
+                os.getenv("NAN_AUDIO_TRANSLATE", "0") == "1"
+            ),
         )
 
         self.mic_factory = lambda: SoundDeviceMicSource(
@@ -338,6 +344,11 @@ class AudioModule(Module):
             "last_emotion": None,
             "last_emotion_prob": None,
             "emotions_total": 0,
+            "bpm": None,
+            "last_formants": [],
+            "last_pauses": None,
+            "last_register": None,
+            "last_translation": None,
         }
 
         self._last_normalized_text: str = ""
@@ -562,6 +573,8 @@ class AudioModule(Module):
             # speaker identity to mean anything.
             if utt.voiced_ms >= self.emotion_min_voiced_ms:
                 self._recognize_emotion(utt)
+
+            self._utterance_extras(utt)
 
     # ------------------------------------------------------------------
     # Speaker identity (W4)
@@ -822,6 +835,21 @@ class AudioModule(Module):
                 for name, prob in events[:2]
             ]
 
+        musicish = any(
+            "music" in name.lower() or "singing" in name.lower()
+            for name, _ in events
+        ) or self.pipeline.ambient_kind == "tonal"
+
+        if musicish:
+            try:
+                bpm = estimate_bpm(window)
+
+            except Exception:
+                bpm = None
+
+            with self._state_lock:
+                self._stats["bpm"] = bpm
+
     def _tag_utterance(self, utt: Utterance) -> None:
         tagger = self._get_tagger()
 
@@ -928,6 +956,40 @@ class AudioModule(Module):
                 self._stats.get("emotions_total", 0) + 1
             )
 
+    def _utterance_extras(self, utt: Utterance) -> None:
+        """
+        🟡-sweep extras: pause structure, LPC formants, pitch
+        register. All cheap numpy, all DataSpace/heard-only.
+        """
+        pauses = utt.pauses_ms or []
+
+        formants = (
+            lpc_formants(utt.pcm)
+            if utt.voiced_ms >= 800
+            else []
+        )
+
+        register = pitch_register(utt.f0s or [])
+
+        with self._state_lock:
+            if self._heard:
+                self._heard[-1]["pauses"] = len(pauses)
+
+                if formants:
+                    self._heard[-1]["formants"] = formants
+
+                if register:
+                    self._heard[-1]["register"] = register
+
+            self._stats["last_pauses"] = len(pauses)
+
+            if formants:
+                self._stats["last_formants"] = formants
+
+            if register:
+                self._stats["last_register"] = register
+
+
     # ------------------------------------------------------------------
     # Transcript bookkeeping (extracted for direct unit driving)
     # ------------------------------------------------------------------
@@ -984,6 +1046,8 @@ class AudioModule(Module):
                 None,
             )
 
+            translation = result.get("translation")
+
             self._heard.append(
                 {
                     "ts": now_ts,
@@ -995,6 +1059,7 @@ class AudioModule(Module):
                     "language": result.get("language"),
                     "rate": rate,
                     "hotword": hotword,
+                    "translation": translation,
                 },
             )
 
@@ -1011,6 +1076,9 @@ class AudioModule(Module):
                 self._stats["hotwords_total"] = (
                     self._stats.get("hotwords_total", 0) + 1
                 )
+
+            if translation:
+                self._stats["last_translation"] = translation
 
         return True
 
@@ -1145,6 +1213,8 @@ class AudioModule(Module):
         for item in reversed(heard):
             preview = item["text"][: self.hear_preview_cap]
 
+            translation = item.get("translation")
+
             clock = datetime.fromtimestamp(item["ts"]).strftime(
                 "%H:%M",
             )
@@ -1176,9 +1246,12 @@ class AudioModule(Module):
             if hotword:
                 tags += f" [hot:{hotword}]"
 
-            out.append(
-                f'- heard {clock}{tags} "{preview}"'
-            )
+            line = f'- heard {clock}{tags} "{preview}"'
+
+            if translation:
+                line += f' -> "{translation[: self.hear_preview_cap]}"'
+
+            out.append(line)
 
             if len(out) >= self.hear_render_limit:
                 break

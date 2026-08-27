@@ -457,6 +457,12 @@ class Utterance:
 
     transient_events: list[dict] | None = None
 
+    # Interior silence gaps (ms each), trailing closer excluded.
+    pauses_ms: list[int] | None = None
+
+    # Voiced F0 samples observed while this utterance was open.
+    f0s: list[float] | None = None
+
 
 class UtteranceSegmenter:
     """
@@ -497,6 +503,8 @@ class UtteranceSegmenter:
 
         self.silence_run = 0
 
+        self.pauses: list[int] = []
+
     def feed(
         self,
         pcm: bytes,
@@ -515,6 +523,9 @@ class UtteranceSegmenter:
         self.buffer.append((pcm, is_speech))
 
         if is_speech:
+            if self.silence_run >= 2:  # >=60ms counts as a pause
+                self.pauses.append(self.silence_run * 30)
+
             self.voiced_count += 1
 
             self.silence_run = 0
@@ -566,11 +577,15 @@ class UtteranceSegmenter:
 
         voiced = self.voiced_count
 
+        pauses = self.pauses
+
         self.buffer = []
 
         self.voiced_count = 0
 
         self.silence_run = 0
+
+        self.pauses = []
 
         if voiced < self.min_voiced:
             return []
@@ -582,6 +597,7 @@ class UtteranceSegmenter:
                 pcm=pcm,
                 voiced_ms=voiced * 30,
                 total_ms=len(buffered) * 30,
+                pauses_ms=pauses,
             )
         ]
 
@@ -643,6 +659,12 @@ class AudioPipeline:
 
         self._last_transient_at = 0.0
 
+        self.clip_total = 0
+
+        self._last_clip_at = 0.0
+
+        self._current_f0s: list[float] = []
+
         self.speech_active = False
 
         self.last_sound_monotonic: float | None = None
@@ -671,26 +693,46 @@ class AudioPipeline:
         if dbfs > self.tracker.noise_floor or is_speech:
             self.last_sound_monotonic = now
 
-        # W2 ambient features: windowed means feed the classifier.
+        peak_dbfs, clipped = peak_stats(pcm)
+
+        if clipped and now - self._last_clip_at >= 1.0:
+            self._last_clip_at = now
+
+            self.clip_total += 1
+
+        # Ambient features: windowed means feed the classifier.
+        # Six fields: zcr, centroid, flatness, bandwidth,
+        # rolloff, dbfs (the last doubles as dynamic range).
         self.feature_window.append(
             (
                 zero_crossing_rate(pcm),
                 spectral_centroid_hz(pcm),
                 spectral_flatness(pcm),
+                spectral_bandwidth(pcm),
+                spectral_rolloff(pcm),
+                dbfs,
             ),
         )
 
-        zcr = sum(f[0] for f in self.feature_window) / len(
-            self.feature_window,
-        )
+        window = list(self.feature_window)
 
-        centroid = sum(f[1] for f in self.feature_window) / len(
-            self.feature_window,
-        )
+        n = len(window)
 
-        flatness = sum(f[2] for f in self.feature_window) / len(
-            self.feature_window,
-        )
+        zcr = sum(f[0] for f in window) / n
+
+        centroid = sum(f[1] for f in window) / n
+
+        flatness = sum(f[2] for f in window) / n
+
+        bandwidth = sum(f[3] for f in window) / n
+
+        rolloff = sum(f[4] for f in window) / n
+
+        levels = sorted(f[5] for f in window)
+
+        dynamic_range = levels[int(0.95 * (n - 1))] - levels[
+            int(0.05 * (n - 1))
+        ]
 
         self.ambient_kind = self.classifier.classify(
             is_speech=is_speech,
@@ -703,6 +745,8 @@ class AudioPipeline:
         pitch_stats = self.pitch.feed(pcm)
 
         if is_speech and pitch_stats["f0_hz"] > 0:
+            self._current_f0s.append(pitch_stats["f0_hz"])
+
             pitch_trend = self.pitch.trend()
 
         else:
@@ -721,6 +765,10 @@ class AudioPipeline:
             )
 
         for utt in self.segmenter.feed(pcm, is_speech):
+            utt.f0s = self._current_f0s
+
+            self._current_f0s = []
+
             events.append(
                 {"type": "utterance", "utterance": utt}
             )
@@ -734,6 +782,22 @@ class AudioPipeline:
         stats["centroid_hz"] = round(centroid, 1)
 
         stats["flatness"] = round(flatness, 3)
+
+        stats["bandwidth_hz"] = round(bandwidth, 1)
+
+        stats["rolloff_hz"] = round(rolloff, 1)
+
+        stats["peak_dbfs"] = round(peak_dbfs, 1)
+
+        stats["clip_total"] = self.clip_total
+
+        stats["dynamic_range_db"] = round(dynamic_range, 1)
+
+        stats["snr_db"] = (
+            round(dbfs - self.tracker.noise_floor, 1)
+            if is_speech
+            else None
+        )
 
         stats["ambient_kind"] = self.ambient_kind
 
@@ -845,10 +909,13 @@ class EchoTranscriber:
 
     WORD_SPAN_S = 0.2
 
-    def __init__(self, text: str = "echo") -> None:
+    def __init__(self, text: str = "echo",
+                 translate_enabled: bool = False) -> None:
         self.text = text
 
         self.calls = 0
+
+        self.translate_enabled = translate_enabled
 
     def load(self) -> None:
         pass
@@ -872,13 +939,18 @@ class EchoTranscriber:
             for i, token in enumerate(tokens)
         ]
 
-        return {
+        result = {
             "text": full_text,
             "confidence": 0.9,
             "language": "zh",
             "words": words,
             "voiced_s": round(utt.voiced_ms / 1000.0, 3),
         }
+
+        if self.translate_enabled:
+            result["translation"] = f"EN: {full_text}"
+
+        return result
 
 
 class WhisperTranscriber:
@@ -896,6 +968,7 @@ class WhisperTranscriber:
         cpu_threads: int = 4,
         no_speech_max: float = 0.6,
         halluc_conf_max: float = 0.5,
+        translate_enabled: bool = False,
     ) -> None:
         self.model_size = model_size
 
@@ -912,6 +985,10 @@ class WhisperTranscriber:
         self.no_speech_max = no_speech_max
 
         self.halluc_conf_max = halluc_conf_max
+
+        # Off by default: the second whisper pass doubles cost
+        # for non-English utterances.
+        self.translate_enabled = translate_enabled
 
         self._model = None
 
@@ -1026,13 +1103,36 @@ class WhisperTranscriber:
             else 0.5
         )
 
-        return {
+        result = {
             "text": text,
             "confidence": confidence,
             "language": getattr(info, "language", None),
             "words": words,
             "voiced_s": round(utt.voiced_ms / 1000.0, 3),
         }
+
+        language = result.get("language")
+
+        if (
+            self.translate_enabled
+            and text
+            and language
+            and language != "en"
+        ):
+            translated_segments, _ = self._model.transcribe(
+                audio,
+                language=language,
+                task="translate",
+                beam_size=1,
+            )
+
+            result["translation"] = " ".join(
+                seg.text.strip()
+                for seg in translated_segments
+                if seg.text.strip()
+            )
+
+        return result
 
 
 # ======================================================================
@@ -1516,3 +1616,276 @@ class OnnxEmotionRecognizer:
                 for i in order[:3]
             ],
         }
+
+
+# ======================================================================
+# 🟡 sweep: cheap spectral/temporal extras (pure numpy)
+# ======================================================================
+
+
+def spectral_bandwidth(pcm: bytes | memoryview) -> float:
+    """
+    Std-dev of the spectrum around its centroid: spread of
+    energy across frequencies (Hz).
+    """
+    import numpy as np
+
+    freqs, magnitude = _spectrum(pcm)
+
+    total = magnitude.sum()
+
+    if total <= 0:
+        return 0.0
+
+    centroid = float((freqs * magnitude).sum() / total)
+
+    return float(
+        np.sqrt(
+            (magnitude * (freqs - centroid) ** 2).sum() / total
+        )
+    )
+
+
+def spectral_rolloff(
+    pcm: bytes | memoryview,
+    pct: float = 0.85,
+) -> float:
+    """
+    Frequency below which `pct` of the spectral energy lies.
+    Telephone-band audio rolls off near 3.4 kHz; full-band
+    content reaches much higher.
+    """
+    import numpy as np
+
+    freqs, magnitude = _spectrum(pcm)
+
+    total = magnitude.sum()
+
+    if total <= 0:
+        return 0.0
+
+    cumulative = np.cumsum(magnitude)
+
+    index = int(np.searchsorted(cumulative, pct * total))
+
+    index = min(index, len(freqs) - 1)
+
+    return float(freqs[index])
+
+
+def peak_stats(pcm: bytes | memoryview) -> tuple[float, bool]:
+    """
+    (peak_dbfs, clipped) for one chunk. Clipped means samples
+    touch >= 99% of full scale -- distortion happened.
+    """
+    import array
+
+    samples = array.array("h")
+
+    samples.frombytes(bytes(pcm))
+
+    if not len(samples):
+        return -120.0, False
+
+    peak = max(abs(s) for s in samples)
+
+    dbfs = (
+        20.0 * math.log10(peak / 32768.0) if peak else -120.0
+    )
+
+    return max(-120.0, min(0.0, dbfs)), peak >= 32767 * 0.99
+
+
+def lpc_formants(
+    pcm: bytes | memoryview,
+    sample_rate: int = SAMPLE_RATE,
+    order: int | None = None,
+    max_frames: int = 24,
+) -> list[float]:
+    """
+    Median F1/F2/F3 via LPC root analysis over the chunk.
+
+    Autocorrelation method + Levinson-Durbin, per 40ms frame
+    (50% hop); roots inside the unit circle with positive
+    imaginary part are candidate formants. Pure numpy; runs
+    per-utterance, never per-frame.
+    """
+    import numpy as np
+
+    x = np.frombuffer(
+        bytes(pcm),
+        dtype=np.int16,
+    ).astype(np.float32) / 32768.0
+
+    if order is None:
+        order = 2 + sample_rate // 1000
+
+    frame = int(0.04 * sample_rate)
+
+    hop = frame // 2
+
+    if len(x) < frame or frame <= order + 2:
+        return []
+
+    formant_samples: list[list[float]] = []
+
+    for start in range(0, len(x) - frame + 1, hop):
+        chunk = x[start : start + frame]
+
+        chunk = chunk - chunk.mean()
+
+        if float((chunk * chunk).sum()) <= 1e-8:
+            continue
+
+        # Biased autocorrelation.
+        ac = np.correlate(chunk, chunk, "full")[
+            len(chunk) - 1 : len(chunk) - 1 + order + 1
+        ]
+
+        if ac[0] <= 0:
+            continue
+
+        ac = ac / ac[0]
+
+        # Levinson-Durbin.
+        a = np.zeros(order, dtype=np.float64)
+
+        error = ac[0]
+
+        for k in range(1, order + 1):
+            reflection = ac[k] - np.dot(
+                a[: k - 1][::-1],
+                ac[1:k],
+            )
+
+            reflection /= error
+
+            a[: k - 1] = (
+                a[: k - 1] - reflection * a[: k - 1][::-1]
+            )
+
+            a[k - 1] = reflection
+
+            error *= 1.0 - reflection * reflection
+
+            if error <= 0:
+                break
+
+        if error <= 0:
+            continue
+
+        roots = np.roots(np.r_[1.0, -a])
+
+        roots = roots[np.abs(roots) < 0.999]
+
+        angles = np.angle(roots)
+
+        freqs = np.abs(angles) * sample_rate / (2 * np.pi)
+
+        freqs = np.sort(freqs)
+
+        freqs = freqs[
+            (freqs >= 150) & (freqs <= 4500)
+        ]
+
+        if len(freqs) >= 3:
+            formant_samples.append(
+                [float(f) for f in freqs[:3]]
+            )
+
+        if len(formant_samples) >= max_frames:
+            break
+
+    if not formant_samples:
+        return []
+
+    stacked = np.asarray(formant_samples)
+
+    return [
+        round(float(np.median(stacked[:, i])), 1)
+        for i in range(3)
+    ]
+
+
+def estimate_bpm(
+    pcm: bytes | memoryview,
+    min_bpm: float = 60.0,
+    max_bpm: float = 180.0,
+) -> float | None:
+    """
+    Crude tempo from onset-envelope autocorrelation at 100Hz.
+    Returns None when no periodicity stands out -- silence and
+    plain speech yield None, steady music yields a number.
+    """
+    import numpy as np
+
+    x = np.frombuffer(
+        bytes(pcm),
+        dtype=np.int16,
+    ).astype(np.float32) / 32768.0
+
+    if len(x) < SAMPLE_RATE:  # <1s: no tempo claim
+        return None
+
+    envelope = np.abs(x)
+
+    kernel = np.ones(SAMPLE_RATE // 100) / (SAMPLE_RATE // 100)
+
+    envelope = np.convolve(envelope, kernel, "same")
+
+    envelope = envelope[:: 160]  # ~100Hz track
+
+    envelope = envelope - envelope.mean()
+
+    if float((envelope * envelope).sum()) <= 1e-9:
+        return None
+
+    ac = np.correlate(envelope, envelope, "full")[len(envelope) - 1 :]
+
+    if ac[0] <= 0:
+        return None
+
+    ac = ac / ac[0]
+
+    lo = int(60.0 / max_bpm * 100)
+
+    hi = min(int(60.0 / min_bpm * 100), len(ac) - 1)
+
+    if hi - lo < 5:
+        return None
+
+    segment = ac[lo:hi]
+
+    peak = int(segment.argmax())
+
+    strength = float(segment[peak])
+
+    if strength < 0.25:
+        return None
+
+    return round(60.0 * 100.0 / (lo + peak), 1)
+
+
+def pitch_register(f0s: list[float]) -> str | None:
+    """
+    Neutral pitch-register readout from voiced F0 samples.
+    Deliberately NOT a gender/age guess -- that needs a real
+    model and this layer refuses to fake one.
+    """
+    if len(f0s) < 10:
+        return None
+
+    import numpy as np
+
+    median = float(np.median(np.asarray(f0s)))
+
+    if median < 140.0:
+        register = "low"
+
+    elif median > 195.0:
+        register = "high"
+
+    else:
+        register = "mid"
+
+    return f"{register} ({median:.0f}Hz)"
