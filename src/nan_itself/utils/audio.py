@@ -150,6 +150,127 @@ def spectral_flatness(pcm: bytes | memoryview) -> float:
     return min(1.0, geometric / arithmetic)
 
 
+class PitchTracker:
+    """
+    Autocorrelation F0 over 30ms frames (75-500 Hz by default).
+
+    Wiener-Khinchin: zero-padded |FFT|^2 -> IFFT gives the
+    autocorrelation without circular wraparound. The peak lag in
+    the voiced range is the period; peak/energy is confidence.
+
+    The tracker also keeps a voiced-pitch contour and reduces it
+    to a three-way trend (rising/falling/steady) for the future
+    L8 emotion layer.
+    """
+
+    def __init__(
+        self,
+        min_hz: float = 75.0,
+        max_hz: float = 500.0,
+        strength_min: float = 0.5,
+        contour_frames: int = 33,
+    ) -> None:
+        self.min_lag = max(2, int(SAMPLE_RATE / max_hz))
+
+        self.max_lag = int(SAMPLE_RATE / min_hz)
+
+        self.strength_min = strength_min
+
+        self.contour: deque[float] = deque(
+            maxlen=max(2, contour_frames),
+        )
+
+        self.f0 = 0.0
+
+        self.strength = 0.0
+
+    def feed(self, pcm: bytes) -> dict[str, float]:
+        import numpy as np
+
+        x = np.frombuffer(
+            bytes(pcm),
+            dtype=np.int16,
+        ).astype(np.float32) / 32768.0
+
+        x = x - x.mean()
+
+        energy = float((x * x).sum())
+
+        if energy <= 0:
+            self.f0 = 0.0
+
+            self.strength = 0.0
+
+            return {
+                "f0_hz": 0.0,
+                "pitch_strength": 0.0,
+            }
+
+        n = 1 << (2 * len(x) - 1).bit_length()
+
+        spec = np.fft.rfft(x, n)
+
+        ac = np.fft.irfft(
+            spec * np.conj(spec),
+            n,
+        )[: len(x)]
+
+        segment = ac[self.min_lag : self.max_lag + 1]
+
+        offset = int(segment.argmax())
+
+        lag = self.min_lag + offset
+
+        strength = (
+            float(segment[offset] / ac[0]) if ac[0] > 0 else 0.0
+        )
+
+        if strength >= self.strength_min:
+            self.f0 = SAMPLE_RATE / lag
+
+            self.strength = strength
+
+            self.contour.append(self.f0)
+
+        else:
+            self.f0 = 0.0
+
+            self.strength = strength
+
+        return {
+            "f0_hz": round(self.f0, 1),
+            "pitch_strength": round(self.strength, 3),
+        }
+
+    def trend(
+        self,
+        delta_ratio: float = 0.08,
+        min_points: int = 8,
+    ) -> str:
+        """
+        Compare mean pitch of the two contour halves. "" means
+        not enough voiced data yet.
+        """
+        points = list(self.contour)
+
+        if len(points) < min_points:
+            return ""
+
+        half = len(points) // 2
+
+        head = sum(points[:half]) / half
+
+        tail = sum(points[half:]) / (len(points) - half)
+
+        if tail > head * (1.0 + delta_ratio):
+            return "rising"
+
+        if tail < head * (1.0 - delta_ratio):
+            return "falling"
+
+        return "steady"
+
+
 class AmbientClassifier:
     """
     Heuristic speech/tonal/noisy/quiet ruling over windowed
@@ -484,12 +605,19 @@ class AudioPipeline:
         transient_rise_db: float = 18.0,
         transient_cooldown_s: float = 1.0,
         ambient_window_frames: int = 33,
+        pitch_min_hz: float = 75.0,
+        pitch_max_hz: float = 500.0,
     ) -> None:
         self.tracker = FeatureTracker()
 
         self.vad = VadGate(vad_aggressiveness)
 
         self.classifier = AmbientClassifier()
+
+        self.pitch = PitchTracker(
+            min_hz=pitch_min_hz,
+            max_hz=pitch_max_hz,
+        )
 
         # ~1s of 30ms frames: stable enough for classification.
         self.feature_window: deque[tuple[float, float, float]] = (
@@ -568,6 +696,14 @@ class AudioPipeline:
             flatness=flatness,
         )
 
+        pitch_stats = self.pitch.feed(pcm)
+
+        if is_speech and pitch_stats["f0_hz"] > 0:
+            pitch_trend = self.pitch.trend()
+
+        else:
+            pitch_trend = ""
+
         if (
             not is_speech
             and dbfs >= self.tracker.noise_floor + self.transient_rise_db
@@ -596,6 +732,10 @@ class AudioPipeline:
         stats["flatness"] = round(flatness, 3)
 
         stats["ambient_kind"] = self.ambient_kind
+
+        stats.update(pitch_stats)
+
+        stats["pitch_trend"] = pitch_trend
 
         self.latest_stats = stats
 
@@ -694,8 +834,12 @@ class SoundDeviceMicSource:
 class EchoTranscriber:
     """
     Test double: pretends to transcribe by echoing metadata.
-    Never touches faster-whisper.
+    Fabricates word timestamps from the text so word-level
+    contracts can be exercised without whisper. Never touches
+    faster-whisper.
     """
+
+    WORD_SPAN_S = 0.2
 
     def __init__(self, text: str = "echo") -> None:
         self.text = text
@@ -708,10 +852,28 @@ class EchoTranscriber:
     def transcribe(self, utt: Utterance) -> dict:
         self.calls += 1
 
+        full_text = f"{self.text} #{self.calls}"
+
+        tokens = full_text.split()
+
+        words = [
+            {
+                "w": token,
+                "start": round(i * self.WORD_SPAN_S, 2),
+                "end": round(
+                    (i + 0.75) * self.WORD_SPAN_S, 2
+                ),
+                "p": 0.9,
+            }
+            for i, token in enumerate(tokens)
+        ]
+
         return {
-            "text": f"{self.text} #{self.calls}",
+            "text": full_text,
             "confidence": 0.9,
             "language": "zh",
+            "words": words,
+            "voiced_s": round(utt.voiced_ms / 1000.0, 3),
         }
 
 
@@ -760,8 +922,6 @@ class WhisperTranscriber:
         )
 
     def transcribe(self, utt: Utterance) -> dict:
-        import io
-
         import numpy as np
 
         self.load()
@@ -776,17 +936,35 @@ class WhisperTranscriber:
             language=self.language,
             beam_size=1,
             vad_filter=False,
+            word_timestamps=True,
         )
 
         parts: list[str] = []
 
         confs: list[float] = []
 
+        words: list[dict] = []
+
         for seg in segments:
             parts.append(seg.text.strip())
 
             if seg.avg_logprob is not None:
                 confs.append(math.exp(seg.avg_logprob))
+
+            for word in getattr(seg, "words", None) or []:
+                words.append(
+                    {
+                        "w": (word.word or "").strip(),
+                        "start": float(word.start or 0.0),
+                        "end": float(word.end or 0.0),
+                        "p": round(
+                            math.exp(word.probability)
+                            if word.probability is not None
+                            else 0.5,
+                            3,
+                        ),
+                    },
+                )
 
         text = " ".join(p for p in parts if p).strip()
 
@@ -800,4 +978,6 @@ class WhisperTranscriber:
             "text": text,
             "confidence": confidence,
             "language": getattr(info, "language", None),
+            "words": words,
+            "voiced_s": round(utt.voiced_ms / 1000.0, 3),
         }

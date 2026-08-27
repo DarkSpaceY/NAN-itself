@@ -19,6 +19,8 @@ from src.nan_itself.utils.audio import (
     AudioPipeline,
     EchoTranscriber,
     FeatureTracker,
+    PitchTracker,
+    Utterance,
     UtteranceSegmenter,
     rms_dbfs,
     spectral_centroid_hz,
@@ -779,3 +781,261 @@ def test_pipeline_populates_ambient_features_and_kind():
     assert pipeline.latest_stats["ambient_kind"] == "quiet"
 
     assert pipeline.tracker.noise_floor > -30.0
+
+
+# ======================================================================
+# W3: pitch contour, speech rate, word timestamps, hotwords
+# ======================================================================
+
+
+def tone_frame(hz: float, amplitude: int = 8000) -> bytes:
+    import array
+    import math
+
+    count = SAMPLE_RATE * FRAME_MS // 1000
+
+    samples = array.array(
+        "h",
+        [
+            int(
+                amplitude
+                * math.sin(2 * math.pi * hz * i / SAMPLE_RATE)
+            )
+            for i in range(count)
+        ],
+    )
+
+    return samples.tobytes()
+
+
+def test_pitch_tracker_locks_onto_sine_and_rejects_noise():
+    tracker = PitchTracker()
+
+    stats = tracker.feed(tone_frame(200.0))
+
+    assert stats["f0_hz"] == pytest.approx(200.0, abs=4.0)
+
+    assert stats["pitch_strength"] > 0.5
+
+    # Broadband noise is unvoiced: no contour growth, low f0.
+    tracker_noise = PitchTracker()
+
+    for i in range(5):
+        stats = tracker_noise.feed(noise_frame(20 + i))
+
+    assert list(tracker_noise.contour) == []
+
+    assert stats["pitch_strength"] < 0.5
+
+    # Digital silence has no energy at all.
+    silent = PitchTracker().feed(level_frame(-120.0))
+
+    assert silent["f0_hz"] == 0.0
+
+
+def test_pitch_trend_detects_rising_and_steady():
+    tracker = PitchTracker(contour_frames=64)
+
+    for _ in range(12):
+        tracker.feed(tone_frame(160.0))
+
+    for _ in range(12):
+        tracker.feed(tone_frame(250.0))
+
+    assert tracker.trend() == "rising"
+
+    tracker = PitchTracker(contour_frames=64)
+
+    for _ in range(16):
+        tracker.feed(tone_frame(200.0))
+
+    assert tracker.trend() == "steady"
+
+    # Too few voiced points -> no verdict.
+    assert PitchTracker().trend() == ""
+
+
+def test_transcriber_double_provides_word_timestamps():
+    echo = EchoTranscriber(text="hello nan world")
+
+    echo.calls = 0
+
+    utterance = Utterance(
+        pcm=b"",
+        voiced_ms=900,
+        total_ms=1200,
+    )
+
+    result = echo.transcribe(utterance)
+
+    assert result["voiced_s"] == pytest.approx(0.9)
+
+    words = result["words"]
+
+    assert [w["w"] for w in words] == [
+        "hello",
+        "nan",
+        "world",
+        "#1",
+    ]
+
+    assert words[0]["start"] < words[0]["end"]
+
+    assert words[2]["start"] > words[0]["start"]
+
+
+def test_accept_transcript_computes_rate_and_hotword():
+    module = make_module()
+
+    module.hotwords = ("nan",)
+
+    module.transcriber = EchoTranscriber(text="hello nan world")
+
+    utterance = Utterance(
+        pcm=b"",
+        voiced_ms=900,
+        total_ms=1200,
+    )
+
+    result = module.transcriber.transcribe(utterance)
+
+    # "hello nan world #1" contains the configured hotword.
+    assert module._accept_transcript(result) is True
+
+    with module._state_lock:
+        entry = module._heard[-1]
+
+        rate = entry["rate"]
+
+        assert entry["hotword"] == "nan"
+
+        assert module._stats["hotwords_total"] == 1
+
+    assert rate == pytest.approx(4 / 0.9, rel=0.05)
+
+    assert module._stats["last_speech_rate"] == rate
+
+    # A named utterance tags the hotword too.
+    named = {
+        "text": "嘿 nan 帮我看下这个报错",
+        "confidence": 0.93,
+        "language": "zh",
+        "words": [],
+        "voiced_s": 0.0,
+    }
+
+    assert module._accept_transcript(named) is True
+
+    with module._state_lock:
+        assert module._heard[-1]["hotword"] == "nan"
+
+        assert module._stats["hotwords_total"] == 2
+
+    assert module._stats["last_hotword"] == "nan"
+
+
+def test_query_renders_voice_line_and_hotword_tags():
+    module = make_module()
+
+    module.hotwords = ("nan",)
+
+    with module._state_lock:
+        module._stats["available"] = True
+
+        module._stats["speech_active"] = True
+
+        module._stats["f0_hz"] = 198.4
+
+        module._stats["pitch_trend"] = "rising"
+
+        module._stats["quiet_s"] = 0.0
+
+        module._heard.append(
+            {"ts": time.time(), "text": "嘿 nan",
+             "confidence": 0.9, "language": "zh",
+             "rate": 2.5, "hotword": "nan"},
+        )
+
+    rendered = time_machine_query(module)
+
+    assert "- voice: ~198 Hz (rising)" in rendered
+
+    assert "[hot:nan]" in rendered
+
+    # Territory preserved: everything under the one header.
+    assert rendered.count("[Audio]") == 1
+
+    assert "[Ambient]" not in rendered
+
+    assert "[Heard]" not in rendered
+
+
+def test_query_hides_voice_line_when_unvoiced():
+    module = make_module()
+
+    with module._state_lock:
+        module._stats["available"] = True
+
+        module._stats["speech_active"] = True
+
+        module._stats["f0_hz"] = 0.0
+
+        module._stats["pitch_trend"] = ""
+
+    rendered = time_machine_query(module)
+
+    assert "- hearing: speech active" in rendered
+
+    assert "- voice:" not in rendered
+
+
+def test_pipeline_merges_pitch_into_stats_during_speech():
+    pipeline = AudioPipeline(
+        preroll_frames=5,
+        trailing_silence_frames=7,
+        min_utterance_frames=4,
+        max_utterance_frames=400,
+        ambient_window_frames=10,
+    )
+
+    # Sine at -21 dBFS gates as speech and carries clean F0.
+    pipeline.vad = LoudIsSpeechGate(threshold_dbfs=-25.0)
+
+    voice = tone_frame(200.0, amplitude=4100)
+
+    for _ in range(12):
+        pipeline.process(voice)
+
+    stats = pipeline.latest_stats
+
+    assert stats["f0_hz"] == pytest.approx(200.0, abs=4.0)
+
+    assert stats["pitch_strength"] > 0.5
+
+    assert stats["pitch_trend"] == "steady"
+
+    # Silence frames stop the trend verdict but keep stats sane.
+    for _ in range(3):
+        pipeline.process(level_frame(-120.0))
+
+    assert pipeline.latest_stats["pitch_trend"] == ""
+
+
+def test_hotwords_env_parsing():
+    import os
+
+    env_backup = os.environ.get("NAN_AUDIO_HOTWORDS")
+
+    try:
+        os.environ["NAN_AUDIO_HOTWORDS"] = "nan, 小娜 , NAN"
+
+        module = AudioModule()
+
+        assert module.hotwords == ("nan", "小娜", "nan")
+
+    finally:
+        if env_backup is None:
+            os.environ.pop("NAN_AUDIO_HOTWORDS", None)
+
+        else:
+            os.environ["NAN_AUDIO_HOTWORDS"] = env_backup

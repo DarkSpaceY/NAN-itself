@@ -98,6 +98,8 @@ class AudioModule(Module):
 
     whisper_language: str | None = None
 
+    hotwords: tuple[str, ...] = ()
+
     def __init__(self) -> None:
         self.sample_rate = int(
             os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
@@ -110,6 +112,14 @@ class AudioModule(Module):
         self.whisper_model = os.getenv(
             "NAN_AUDIO_WHISPER_MODEL",
             "base",
+        )
+
+        hotword_env = os.getenv("NAN_AUDIO_HOTWORDS", "")
+
+        self.hotwords = tuple(
+            self._normalize_text(part)
+            for part in hotword_env.split(",")
+            if part.strip()
         )
 
         models_dir = os.getenv("NAN_AUDIO_MODELS_DIR")
@@ -167,6 +177,12 @@ class AudioModule(Module):
             "dropped_frames_total": 0,
             "dropped_utterances_total": 0,
             "load_error": None,
+            "f0_hz": 0.0,
+            "pitch_strength": 0.0,
+            "pitch_trend": "",
+            "last_speech_rate": None,
+            "last_hotword": None,
+            "hotwords_total": 0,
         }
 
         self._last_normalized_text: str = ""
@@ -369,6 +385,10 @@ class AudioModule(Module):
     # Transcript bookkeeping (extracted for direct unit driving)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        return "".join(text.split()).lower()
+
     def _accept_transcript(self, result: dict[str, Any]) -> bool:
         """Record one transcription; False when deduplicated/empty."""
         text = (result.get("text") or "").strip()
@@ -376,7 +396,7 @@ class AudioModule(Module):
         if not text:
             return False
 
-        normalized = "".join(text.split()).lower()
+        normalized = self._normalize_text(text)
 
         now_ts = time.time()
 
@@ -395,6 +415,28 @@ class AudioModule(Module):
 
             self._last_normalized_text = normalized
 
+            words = result.get("words") or []
+
+            voiced_s = float(result.get("voiced_s") or 0.0)
+
+            rate = (
+                round(
+                    len(words) / max(voiced_s, 0.3),
+                    2,
+                )
+                if words and voiced_s > 0
+                else None
+            )
+
+            hotword = next(
+                (
+                    hw
+                    for hw in self.hotwords
+                    if hw in normalized
+                ),
+                None,
+            )
+
             self._heard.append(
                 {
                     "ts": now_ts,
@@ -404,12 +446,24 @@ class AudioModule(Module):
                         2,
                     ),
                     "language": result.get("language"),
+                    "rate": rate,
+                    "hotword": hotword,
                 },
             )
 
             self._stats["transcripts_total"] += 1
 
             self._stats["last_heard_ts"] = now_ts
+
+            if rate is not None:
+                self._stats["last_speech_rate"] = rate
+
+            if hotword:
+                self._stats["last_hotword"] = hotword
+
+                self._stats["hotwords_total"] = (
+                    self._stats.get("hotwords_total", 0) + 1
+                )
 
         return True
 
@@ -459,6 +513,19 @@ class AudioModule(Module):
 
         if stats.get("speech_active"):
             lines.append("- hearing: speech active")
+
+            f0 = stats.get("f0_hz") or 0.0
+
+            if f0 > 0:
+                voice_line = f"- voice: ~{int(f0)} Hz"
+
+                trend = stats.get("pitch_trend") or ""
+
+                if trend:
+                    voice_line += f" ({trend})"
+
+                lines.append(voice_line)
+
         elif quiet is not None:
             lines.append(
                 f"- hearing: quiet {self._fmt_span(quiet)}"
@@ -497,11 +564,13 @@ class AudioModule(Module):
 
         if (
             not heard_lines
+            and not stats.get("speech_active")
             and (quiet is None or quiet >= self.quiet_report_after_s)
             and stats.get("transcripts_total", 0) == 0
         ):
-            # Nothing has ever been heard and the room is dead:
-            # stay silent instead of spamming empty ambience.
+            # Nothing has ever been heard, the room is dead and
+            # no speech is in flight: stay silent instead of
+            # spamming empty ambience.
             return None
 
         return "\n".join(lines)
@@ -521,10 +590,18 @@ class AudioModule(Module):
 
             confidence = item.get("confidence", 0.0)
 
-            tag = "" if confidence >= 0.6 else f" (conf {confidence})"
+            tags = ""
+
+            if confidence < 0.6:
+                tags += f" (conf {confidence})"
+
+            hotword = item.get("hotword")
+
+            if hotword:
+                tags += f" [hot:{hotword}]"
 
             out.append(
-                f'- heard {clock}{tag} "{preview}"'
+                f'- heard {clock}{tags} "{preview}"'
             )
 
             if len(out) >= self.hear_render_limit:
@@ -561,6 +638,9 @@ class AudioModule(Module):
                 "transients_total": self._stats[
                     "transients_total"
                 ],
+                "hotwords_total": self._stats.get(
+                    "hotwords_total", 0
+                ),
                 "noise_floor_seed": self.pipeline.tracker.noise_floor,
             }
 
@@ -580,6 +660,7 @@ class AudioModule(Module):
             "utterances_total",
             "transcripts_total",
             "transients_total",
+            "hotwords_total",
         )
 
         for key in total_keys:

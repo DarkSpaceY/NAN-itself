@@ -20,9 +20,9 @@
 再进代码。本文件只关心系统的形状。
 
 MVP 摘要：L1 能量（RMS/噪声底）+ L4 事件（VAD/静默/瞬态）
-+ L7 内容（STT/置信度/语言）+ W2 已并入 L2 特征（ZCR/质心/平坦度）
-与 L6 启发式环境三分类（speech/tonal/noisy/quiet）。
-其余层按 features 文档的 W3–W6 波次推进。
++ L7 内容（STT/置信度/语言/词级时间戳）+ W2 已并入 L2 特征
+（ZCR/质心/平坦度）与 L6 启发式环境四态分类；W3 已并入 L3
+（F0/音高轮廓/语速）与热词通道。其余按 features 文档 W4–W6 推进。
 
 ## 2. MVP 范围（本次实现）
 
@@ -61,10 +61,11 @@ TranscriptRing(deque maxlen=hear_history)
 ```
 [Audio]
 - hearing: speech active / quiet 42s
+- voice: ~198 Hz (rising)           # 仅语音在途且有基频时出现
 - ambient: tonal / noisy            # 仅非语音且非安静时出现
 - level: -38.2 dBFS (noise floor -55.1)
 - sharp sound detected at 14:31     # 仅 60s 内出现过瞬态
-- heard 14:32 "嘿 NAN，帮我看下这个报错"
+- heard 14:32 [hot:nan] "嘿 NAN，帮我看下这个报错"
 - heard 14:31 (conf 0.42) "……什么东西响了一声"
 ```
 
@@ -92,6 +93,9 @@ TranscriptRing(deque maxlen=hear_history)
 | max_utterance_ms | 25000 | 强制收句 |
 | transient_rise_db | 18 | 瞬态触发阈值（相对噪声底） |
 | ambient_window_frames | 33 | 环境特征滑动窗口（≈1s，30ms 帧） |
+| NAN_AUDIO_HOTWORDS | 空 | 逗号分隔热词，文本侧匹配，命中加 [hot:x] 标签 |
+| pitch_min_hz / pitch_max_hz | 75 / 500 | 自相关 F0 搜索范围 |
+| pitch strength_min | 0.5 | 低于此置信度视为清音段 |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |
 | quiet_report_after_s | 120 | 安静多久后不再输出 query |
