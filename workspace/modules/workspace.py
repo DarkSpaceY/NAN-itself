@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class WorkspaceModule(Module):

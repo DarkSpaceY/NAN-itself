@@ -7,12 +7,13 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     AgentToolView,
     Provider,
     ProviderSpec,
     ProviderRuntime,
 )
+from src.nan_itself.tools import mcp as mcp_backend
 
 
 class FakeSession:
@@ -191,8 +192,8 @@ async def test_agent_views_have_independent_active_provider():
         [fake_tool("browser_open")],
     )
 
-    main = runtime.create_agent_view()
-    subagent = runtime.create_agent_view()
+    main = AgentToolView(runtime)
+    subagent = AgentToolView(runtime)
 
     await main.call_tool(
         "route",
@@ -237,8 +238,8 @@ async def test_agent_views_share_same_provider_connection():
         [fake_tool("read_file")],
     )
 
-    main = runtime.create_agent_view()
-    subagent = runtime.create_agent_view()
+    main = AgentToolView(runtime)
+    subagent = AgentToolView(runtime)
 
     await main.call_tool(
         "route",
@@ -283,7 +284,7 @@ async def test_agent_views_share_same_provider_connection():
 async def test_unknown_mcp_cannot_be_routed():
     runtime = ProviderRuntime()
 
-    view = runtime.create_agent_view()
+    view = AgentToolView(runtime)
 
     result = await view.call_tool(
         "route",
@@ -304,7 +305,7 @@ async def test_tool_call_without_active_provider_is_rejected():
         [fake_tool("read_file")],
     )
 
-    view = runtime.create_agent_view()
+    view = AgentToolView(runtime)
 
     result = await view.call_tool(
         "read_file",
@@ -325,7 +326,7 @@ async def test_tool_call_is_forwarded_to_active_provider():
         [fake_tool("read_file")],
     )
 
-    view = runtime.create_agent_view()
+    view = AgentToolView(runtime)
 
     await view.call_tool(
         "route",
@@ -384,7 +385,7 @@ mcp_servers:
         config.read_text(encoding="utf-8")
     )
 
-    specs = ProviderRuntime._parse_builtin_config(
+    specs = mcp_backend.parse_builtin_config(
         raw,
         config,
     )
@@ -437,7 +438,7 @@ cwd: /tmp
         config.read_text(encoding="utf-8")
     )
 
-    specs = ProviderRuntime._parse_workspace_config(
+    specs = mcp_backend.parse_workspace_config(
         raw,
         config,
     )
@@ -480,7 +481,7 @@ mcp_servers:
         config.read_text(encoding="utf-8")
     )
 
-    specs = ProviderRuntime._parse_workspace_config(
+    specs = mcp_backend.parse_workspace_config(
         raw,
         config,
     )
@@ -539,7 +540,7 @@ mcp_servers:
 
     monkeypatch.setattr(
         runtime,
-        "_connect_provider",
+        "_connect_mcp",
         fake_connect,
     )
 
@@ -607,7 +608,7 @@ async def test_workspace_provider_can_be_added_and_removed(
 
     monkeypatch.setattr(
         runtime,
-        "_connect_provider",
+        "_connect_mcp",
         fake_connect,
     )
 
@@ -672,7 +673,7 @@ command: fake
         builtin_session
     )
 
-    assert config.resolve() not in runtime._workspace_sources
+    assert config.resolve() not in runtime._mcp_sources
 
 
 @pytest.mark.asyncio
@@ -711,7 +712,7 @@ async def test_workspace_scan_is_not_repeated_for_unchanged_file(
 
     monkeypatch.setattr(
         runtime,
-        "_connect_provider",
+        "_connect_mcp",
         fake_connect,
     )
 
@@ -753,3 +754,89 @@ async def test_runtime_stop_closes_all_providers():
     assert browser_stack.closed is True
     assert runtime.providers == {}
     
+
+# ============================================================================
+# Parser edges
+# ============================================================================
+
+
+def test_workspace_single_form_falls_back_to_file_stem(tmp_path):
+    config = tmp_path / "github.yaml"
+
+    config.write_text(
+        """
+command: npx
+args:
+  - "--yes"
+""",
+        encoding="utf-8",
+    )
+
+    raw = yaml.safe_load(
+        config.read_text(encoding="utf-8")
+    )
+
+    specs = mcp_backend.parse_workspace_config(raw, config)
+
+    assert len(specs) == 1
+    assert specs[0].name == "github"
+
+
+def test_load_yaml_rejects_non_mapping_root(tmp_path):
+    config = tmp_path / "list.yaml"
+
+    config.write_text("- a\n- b\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid YAML object"):
+        mcp_backend.load_yaml(config)
+
+
+def test_spec_from_mapping_coerces_env_and_args_to_strings():
+    spec = mcp_backend.spec_from_mapping(
+        name="x",
+        raw={
+            "command": "uvx",
+            "args": [1, "--flag", True],
+            "env": {"PORT": 8080, "MODE": "fast"},
+        },
+        source="s",
+        origin="workspace",
+    )
+
+    assert spec.args == ("1", "--flag", "True")
+    assert dict(spec.env) == {"PORT": "8080", "MODE": "fast"}
+
+
+def test_parse_workspace_config_rejects_non_mapping_servers():
+    with pytest.raises(ValueError, match="'mcp_servers' must be a mapping"):
+        mcp_backend.parse_workspace_config(
+            {"mcp_servers": ["a"]},
+            Path("fake.yaml"),
+        )
+
+
+def test_parse_builtin_config_rejects_non_mapping_servers():
+    with pytest.raises(ValueError, match="'mcp_servers' must be a mapping"):
+        mcp_backend.parse_builtin_config(
+            {"mcp_servers": 42},
+            Path("fake.yaml"),
+        )
+
+
+def test_parse_workspace_config_rejects_empty_name(tmp_path):
+    config = tmp_path / "empty.yaml"
+
+    config.write_text(
+        """
+name: ""
+command: npx
+""",
+        encoding="utf-8",
+    )
+
+    raw = yaml.safe_load(
+        config.read_text(encoding="utf-8")
+    )
+
+    with pytest.raises(ValueError, match="Invalid workspace MCP name"):
+        mcp_backend.parse_workspace_config(raw, config)

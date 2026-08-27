@@ -341,11 +341,7 @@ class AgentLoop:
             if batch:
                 return "\n\n".join(batch)
 
-            if getattr(
-                self.agent,
-                "_late_reports",
-                None,
-            ):
+            if self.agent.has_pending_reports():
                 return ""
 
             getter = asyncio.create_task(

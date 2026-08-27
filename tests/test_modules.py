@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from src.nan_itself.modules.facade import (
+from src.nan_itself.modules import (
     DataSpace,
+    DataSpaceReader,
     Facade,
     Module,
     ModuleState,
+    ModuleTurn,
+    TurnRecord,
 )
 
 
@@ -174,7 +177,7 @@ async def test_workspace_module_is_discovered_from_file(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -224,7 +227,7 @@ async def test_workspace_file_without_module_header_is_ignored(tmp_path):
 
     (workspace / "ignored.py").write_text(
         """
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Ignored(Module):
@@ -261,7 +264,7 @@ async def test_workspace_file_with_multiple_modules_is_rejected(tmp_path):
         """
 # @module
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class A(Module):
@@ -319,7 +322,7 @@ async def test_builtin_and_workspace_modules_share_one_registry(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Workspace(Module):
@@ -370,7 +373,7 @@ async def test_workspace_cannot_override_builtin(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Workspace(Module):
@@ -416,7 +419,7 @@ async def test_module_dependency_uses_dataspace_not_instance(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -439,7 +442,7 @@ class Foo(Module):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Bar(Module):
@@ -508,7 +511,7 @@ async def test_dependency_cycle_is_rejected(tmp_path):
         """
 # @module
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class A(Module):
@@ -525,7 +528,7 @@ class A(Module):
         """
 # @module
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class B(Module):
@@ -559,7 +562,7 @@ async def test_missing_dependency_does_not_crash_facade(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -607,7 +610,7 @@ async def test_module_crash_is_supervised_and_retried(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -667,7 +670,7 @@ async def test_state_only_module_is_restarted(tmp_path):
         """
 # @module
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -721,7 +724,7 @@ async def test_stop_calls_module_stop(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -771,7 +774,7 @@ async def test_query_receives_one_consistent_dataspace_snapshot(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class A(Module):
@@ -803,7 +806,7 @@ class A(Module):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class B(Module):
@@ -862,7 +865,7 @@ async def test_query_failure_does_not_take_module_down(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -915,7 +918,7 @@ async def test_dataspace_persistence(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -998,7 +1001,7 @@ async def test_module_private_state_persistence(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1096,7 +1099,7 @@ async def test_corrupt_or_invalid_private_state_does_not_block_other_modules(
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Broken(Module):
@@ -1115,7 +1118,7 @@ class Broken(Module):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Healthy(Module):
@@ -1178,7 +1181,7 @@ async def test_hot_reload_preserves_dataspace_and_live_private_state(
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1235,7 +1238,7 @@ class Foo(Module):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1315,7 +1318,7 @@ async def test_hot_reload_failure_keeps_old_generation(
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1355,7 +1358,7 @@ class Foo(Module):
             """
 # @module
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1399,7 +1402,7 @@ async def test_hot_reload_private_state_restore_failure_keeps_old_generation(
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1449,7 +1452,7 @@ class Foo(Module):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1501,7 +1504,7 @@ async def test_removed_workspace_module_is_stopped_but_dataspace_is_retained(
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1574,7 +1577,7 @@ async def test_persistence_layout_is_separated(tmp_path):
 
 import asyncio
 
-from src.nan_itself.modules.facade import Module
+from src.nan_itself.modules import Module
 
 
 class Foo(Module):
@@ -1631,3 +1634,1283 @@ class Foo(Module):
     ) == {
         "public_value": "dataspace",
     }
+
+# ============================================================================
+# Enrichment: error caching, revival, reload window, atomicity, builtins
+# ============================================================================
+
+
+async def _wait_for(predicate, timeout=3.0):
+    import time as _t
+
+    deadline = _t.monotonic() + timeout
+
+    while _t.monotonic() < deadline:
+        if predicate():
+            return True
+
+        await asyncio.sleep(0.02)
+
+    return False
+
+
+MODULE_IMPORT = "from src.nan_itself.modules import Module"
+
+
+@pytest.mark.asyncio
+async def test_unchanged_broken_module_is_not_retried_until_fixed(tmp_path):
+    workspace = tmp_path / "ws"
+
+    target = workspace / "flaky.py"
+
+    workspace.mkdir(parents=True)
+
+    target.write_text(
+        "# @module\n\n"
+        + MODULE_IMPORT
+        + "\n\nclass Flaky(Module):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                target.resolve()
+                in facade._workspace_load_errors
+            )
+        )
+
+        assert ok
+
+        await asyncio.sleep(0.08)
+
+        # Unchanged: exactly one cached error, no retry churn.
+        assert len(facade._workspace_load_errors) == 1
+        assert "flaky" not in facade.modules
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        target.write_text(
+            "# @module\n\n"
+            + MODULE_IMPORT
+            + "\n\nclass Flaky(Module):\n"
+            + "    id = \"flaky\"\n\n"
+            + "    async def start(self):\n"
+            + "        while True:\n"
+            + "            await asyncio.sleep(10)\n",
+            encoding="utf-8",
+        )
+
+        ok = await _wait_for(
+            lambda: "flaky" in facade.modules
+        )
+
+        assert ok
+        assert target.resolve() not in facade._workspace_load_errors
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_removed_module_leaves_live_dataspace_for_revival(tmp_path):
+    workspace = tmp_path / "ws"
+
+    target = workspace / "keep.py"
+
+    workspace.mkdir(parents=True)
+
+    target.write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        + MODULE_IMPORT
+        + "\n\nclass Keep(Module):\n"
+        + "    id = \"keep\"\n\n"
+        + "    async def start(self):\n"
+        + "        self.data.publish({\"v\": 1})\n\n"
+        + "        while True:\n"
+        + "            await asyncio.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["keep"].snapshot()
+                == {"v": 1}
+            )
+        )
+
+        assert ok
+
+        retained = facade.dataspaces["keep"]
+
+        target.unlink()
+
+        ok = await _wait_for(
+            lambda: "keep" not in facade.modules
+        )
+
+        assert ok
+        assert facade.dataspaces["keep"] is retained
+        assert retained.snapshot() == {"v": 1}
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        target.write_text(
+            "# @module\n\n"
+            "import asyncio\n\n"
+            + MODULE_IMPORT
+            + "\n\nclass Keep(Module):\n"
+            + "    id = \"keep\"\n\n"
+            + "    async def start(self):\n"
+            + "        self.data.publish({\"v\": 2})\n\n"
+            + "        while True:\n"
+            + "            await asyncio.sleep(10)\n",
+            encoding="utf-8",
+        )
+
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["keep"].snapshot()
+                == {"v": 2}
+            )
+        )
+
+        assert ok
+        assert facade.dataspaces["keep"] is retained
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_hot_reload_candidate_starts_before_old_stops(tmp_path):
+    workspace = tmp_path / "ws"
+
+    target = workspace / "swap.py"
+
+    events_file = tmp_path / "events.txt"
+
+    workspace.mkdir(parents=True)
+
+    OLD_BODY = (
+        "# @module\n\n"
+        "import asyncio\n\n"
+        + MODULE_IMPORT
+        + "\n\nEVENTS = r\"" + str(events_file) + "\"\n\n"
+        "class Swap(Module):\n"
+        "    id = \"swap\"\n\n"
+        "    async def start(self):\n"
+        "        with open(EVENTS, \"a\") as fh:\n"
+        "            fh.write(\"old-start\\n\")\n"
+        "        while True:\n"
+        "            await asyncio.sleep(0.05)\n\n"
+        "    async def stop(self):\n"
+        "        with open(EVENTS, \"a\") as fh:\n"
+        "            fh.write(\"old-stop\\n\")\n"
+    )
+
+    NEW_BODY = OLD_BODY.replace("Swap(", "SwapTwo(")
+    NEW_BODY = NEW_BODY.replace("old-start", "cand-start")
+    NEW_BODY = NEW_BODY.replace("old-stop", "cand-stop")
+
+    target.write_text(OLD_BODY, encoding="utf-8")
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                events_file.exists()
+                and "old-start"
+                in events_file.read_text().splitlines()
+            )
+        )
+
+        assert ok
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        target.write_text(NEW_BODY, encoding="utf-8")
+
+        ok = await _wait_for(
+            lambda: (
+                facade.modules["swap"].generation >= 1
+                and events_file.exists()
+                and "cand-stop"
+                not in events_file.read_text().splitlines()
+                and False
+            )
+            or (
+                facade.modules["swap"].generation >= 1
+                and "old-stop"
+                in events_file.read_text().splitlines()
+            )
+        )
+
+        assert ok
+
+        lines = events_file.read_text().splitlines()
+
+        assert "cand-start" in lines
+
+        assert lines.index("cand-start") < lines.index(
+            "old-stop"
+        )
+
+    finally:
+        await facade.stop()
+
+
+def test_atomic_write_cleans_temp_file_on_failure(
+    tmp_path,
+    monkeypatch,
+):
+    from src.nan_itself.modules import (
+        persistence as mp,
+    )
+
+    target = tmp_path / "x.json"
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mp.os, "replace", boom)
+
+    try:
+        mp.atomic_write_json(target, {"a": 1})
+    except OSError:
+        pass
+
+    leftovers = [
+        item.name
+        for item in tmp_path.iterdir()
+        if item.name.endswith(".tmp")
+    ]
+
+    assert leftovers == []
+
+
+@pytest.mark.asyncio
+async def test_builtin_crash_is_retried(tmp_path):
+    attempts = []
+
+    class Crashy(Module):
+        id = "crashy"
+
+        async def start(self):
+            attempts.append(len(attempts))
+
+            if len(attempts) == 1:
+                raise RuntimeError("first boot fails")
+
+            while True:
+                await asyncio.sleep(10)
+
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(Crashy,),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.modules["crashy"].state
+                == ModuleState.RUNNING
+                and len(attempts) >= 2
+            )
+        )
+
+        assert ok
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_workspace_can_require_builtin(tmp_path):
+    base_started: list[str] = []
+
+    class Base(Module):
+        id = "base"
+
+        async def start(self):
+            base_started.append("base")
+
+            self.data.publish({"v": 7})
+
+            while True:
+                await asyncio.sleep(10)
+
+    workspace = tmp_path / "ws"
+
+    workspace.mkdir(parents=True)
+
+    (workspace / "consumer.py").write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        + MODULE_IMPORT
+        + "\n\nclass Consumer(Module):\n"
+        + "    id = \"consumer\"\n"
+        + "    requires = (\"base\",)\n\n"
+        + "    async def start(self):\n"
+        + "        v = self.dependencies[\"base\"].snapshot()[\"v\"]\n"
+        + "        self.data.publish({\"echo\": v})\n\n"
+        + "        while True:\n"
+        + "            await asyncio.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        builtin_modules=(Base,),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["consumer"].snapshot()
+                == {"echo": 7}
+            )
+        )
+
+        # echo==7 is only possible if the builtin generation
+        # published before the workspace consumer started.
+        assert ok
+        assert base_started == ["base"]
+
+    finally:
+        await facade.stop()
+
+
+class CountingBuiltin(Module):
+    id = "counter"
+
+    def __init__(self):
+        self.count = 0
+
+    async def start(self):
+        self.count += 1
+
+        self.data.publish({"count": self.count})
+
+        while True:
+            await asyncio.sleep(10)
+
+    def serialize_state(self):
+        return {"count": self.count}
+
+    def restore_state(self, state):
+        self.count = state.get("count", 0)
+
+
+@pytest.mark.asyncio
+async def test_builtin_persistence_round_trip(tmp_path):
+    data_dir = tmp_path / "data"
+
+    first = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(CountingBuiltin,),
+        data_dir=data_dir,
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await first.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                first.dataspaces["counter"].snapshot()
+                == {"count": 1}
+            )
+        )
+
+        assert ok
+
+    finally:
+        await first.stop()
+
+    second = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(CountingBuiltin,),
+        data_dir=data_dir,
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await second.start()
+
+    try:
+        instance = second.modules["counter"].instance
+
+        ok = await _wait_for(
+            lambda: instance.count >= 2
+        )
+
+        assert ok
+        assert second.dataspaces[
+            "counter"
+        ].snapshot() == {"count": instance.count}
+
+    finally:
+        await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_builtin_query_reaches_ambient_context(tmp_path):
+    class Noter(Module):
+        id = "noter"
+
+        async def start(self):
+            self.data.publish({"note": "hello-from-noter"})
+
+            while True:
+                await asyncio.sleep(10)
+
+        async def query(self, turn):
+            note = self.data.snapshot()["note"]
+
+            return f"NOTER:{note}"
+
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(Noter,),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: bool(
+                facade.dataspaces["noter"].snapshot()
+            )
+        )
+
+        assert ok
+
+        results = await facade.query_snapshot(
+            "turn-x",
+            facade.snapshot(),
+        )
+
+        assert any(
+            "NOTER:hello-from-noter" in item
+            for item in results
+        )
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_conflict_with_builtin_raises_typed_error(tmp_path):
+    from src.nan_itself.modules import (
+        DuplicateModuleError,
+    )
+
+    class Reserved(Module):
+        id = "reserved"
+
+        async def start(self):
+            while True:
+                await asyncio.sleep(10)
+
+    workspace = tmp_path / "ws"
+
+    workspace.mkdir(parents=True)
+
+    (workspace / "reserved.py").write_text(
+        "# @module\n\n"
+        + MODULE_IMPORT
+        + "\n\nclass Reserved(Module):\n"
+        + "    id = \"reserved\"\n\n"
+        + "    async def start(self):\n"
+        + "        while True:\n"
+        + "            await asyncio.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        builtin_modules=(Reserved,),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                (workspace / "reserved.py").resolve()
+                in facade._workspace_load_errors
+            )
+        )
+
+        assert ok
+
+        err = facade._workspace_load_errors[
+            (workspace / "reserved.py").resolve()
+        ]
+
+        assert isinstance(err, DuplicateModuleError)
+        assert "<builtin>" in str(err)
+        assert facade.modules["reserved"].origin == "builtin"
+
+    finally:
+        await facade.stop()
+
+
+# ============================================================================
+# Round 2 enrichment: contracts, wiring, rejection paths, builtin chains
+# ============================================================================
+
+
+def test_dataspace_revision_counts_publications():
+    space = DataSpace("rev-check")
+
+    assert space.revision == 0
+
+    space.publish({"a": 1})
+    space.publish({"a": 2})
+
+    assert space.revision == 2
+
+
+def test_dataspace_reader_is_readonly_projection():
+    space = DataSpace("owner-id")
+
+    space.publish({"v": 5})
+
+    reader = DataSpaceReader(space)
+
+    assert reader.owner == "owner-id"
+    assert reader.revision == 1
+    assert reader.snapshot() == {"v": 5}
+
+    # The whole point: readers cannot publish.
+    assert not hasattr(reader, "publish")
+
+
+def test_module_turn_delegates_to_inner_turn():
+    class Probe:
+        agent_hash = "abc123"
+        depth = 2
+
+    turn = ModuleTurn(
+        turn=Probe(),
+        data={"x": 1},
+    )
+
+    # Attribute access falls through to the inner turn...
+    assert turn.agent_hash == "abc123"
+    assert turn.depth == 2
+
+    # ...while data stays the ModuleTurn's own field.
+    assert turn.data == {"x": 1}
+
+
+@pytest.mark.asyncio
+async def test_query_skips_non_running_modules(tmp_path):
+    class Sick(Module):
+        id = "sick"
+
+        async def start(self):
+            raise RuntimeError("boot fail")
+
+    class HQ(Module):
+        id = "hq"
+
+        async def start(self):
+            self.data.publish({"on": True})
+
+            while True:
+                await asyncio.sleep(10)
+
+        async def query(self, turn):
+            return "HQ-OK"
+
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(Sick, HQ),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: "sick" in facade.modules
+        )
+
+        assert ok
+
+        # Crash retries keep the record mostly DOWN (retry
+        # interval 30ms); poll at 5ms to catch the stable window.
+        saw_down = False
+
+        for _ in range(600):
+            if (
+                facade.modules["sick"].state
+                == ModuleState.DOWN
+            ):
+                saw_down = True
+                break
+
+            await asyncio.sleep(0.005)
+
+        assert saw_down
+
+        results = await facade.query_snapshot(
+            "t",
+            facade.snapshot(),
+        )
+
+        # The DOWN module is not queried at all.
+        assert results == ["HQ-OK"]
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_late_arriving_dependency_gets_wired(tmp_path):
+    workspace = tmp_path / "ws"
+
+    workspace.mkdir(parents=True)
+
+    (workspace / "consumer.py").write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        "from src.nan_itself.modules import Module\n\n"
+        "class Consumer(Module):\n"
+        "    id = \"consumer\"\n"
+        "    requires = (\"later\",)\n\n"
+        "    async def start(self):\n"
+        "        while True:\n"
+        "            d = self.dependencies.get(\"later\")\n"
+        "            v = d.snapshot()[\"v\"] if d else None\n"
+        "            self.data.publish({\"seen\": v})\n"
+        "            await asyncio.sleep(0.02)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        # Phase 1: dependency missing, consumer survives with None.
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["consumer"].snapshot()
+                == {"seen": None}
+            )
+        )
+
+        assert ok
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        (workspace / "later.py").write_text(
+            "# @module\n\n"
+            "import asyncio\n\n"
+            "from src.nan_itself.modules import Module\n\n"
+            "class Later(Module):\n"
+            "    id = \"later\"\n\n"
+            "    async def start(self):\n"
+            "        self.data.publish({\"v\": 9})\n\n"
+            "        while True:\n"
+            "            await asyncio.sleep(10)\n",
+            encoding="utf-8",
+        )
+
+        # Phase 2: the next rebuild rebinds readers automatically.
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["consumer"].snapshot()
+                == {"seen": 9}
+            )
+        )
+
+        assert ok
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_crash_captures_error_on_record(tmp_path):
+    workspace = tmp_path / "ws"
+
+    workspace.mkdir(parents=True)
+
+    (workspace / "boom.py").write_text(
+        "# @module\n\n"
+        "from src.nan_itself.modules import Module\n\n"
+        "class Boom(Module):\n"
+        "    id = \"boom\"\n\n"
+        "    async def start(self):\n"
+        "        raise RuntimeError(\"explosion reason\")\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.modules["boom"].state
+                == ModuleState.DOWN
+            )
+        )
+
+        assert ok
+
+        err = facade.modules["boom"].error
+
+        assert isinstance(err, RuntimeError)
+        assert "explosion reason" in str(err)
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_corrupt_dataspace_file_does_not_prevent_boot(tmp_path):
+    data_dir = tmp_path / "data"
+
+    dataspace_dir = data_dir / "dataspace"
+
+    dataspace_dir.mkdir(parents=True)
+
+    # Wrong JSON shape entirely.
+    (dataspace_dir / "stub.json").write_text(
+        "[\"not\", \"an object\"]",
+        encoding="utf-8",
+    )
+
+    workspace = tmp_path / "ws"
+
+    workspace.mkdir(parents=True)
+
+    (workspace / "stub.py").write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        "from src.nan_itself.modules import Module\n\n"
+        "class Stub(Module):\n"
+        "    id = \"stub\"\n\n"
+        "    async def start(self):\n"
+        "        self.data.publish({\"ok\": True})\n\n"
+        "        while True:\n"
+        "            await asyncio.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=data_dir,
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["stub"].snapshot()
+                == {"ok": True}
+            )
+        )
+
+        assert ok
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_hot_reload_rejects_id_change(tmp_path):
+    workspace = tmp_path / "ws"
+
+    target = workspace / "stable.py"
+
+    workspace.mkdir(parents=True)
+
+    target.write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        "from src.nan_itself.modules import Module\n\n"
+        "class Stable(Module):\n"
+        "    id = \"stable\"\n\n"
+        "    async def start(self):\n"
+        "        self.data.publish({\"gen\": \"v1\"})\n\n"
+        "        while True:\n"
+        "            await asyncio.sleep(10)\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["stable"].snapshot()
+                == {"gen": "v1"}
+            )
+        )
+
+        assert ok
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        target.write_text(
+            "# @module\n\n"
+            "import asyncio\n\n"
+            "from src.nan_itself.modules import Module\n\n"
+            "class Renamed(Module):\n"
+            "    id = \"renamed\"\n\n"
+            "    async def start(self):\n"
+            "        while True:\n"
+            "            await asyncio.sleep(10)\n",
+            encoding="utf-8",
+        )
+
+        ok = await _wait_for(
+            lambda: (
+                (target).resolve()
+                in facade._workspace_load_errors
+            )
+        )
+
+        assert ok
+
+        err = facade._workspace_load_errors[
+            target.resolve()
+        ]
+
+        assert "changed Module id" in str(err)
+
+        # Old generation untouched, still serving v1.
+        assert "stable" in facade.modules
+        assert facade.modules["stable"].generation == 0
+        assert facade.dataspaces["stable"].snapshot() == {
+            "gen": "v1"
+        }
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_hot_reload_serialize_failure_keeps_old_generation(tmp_path):
+    workspace = tmp_path / "ws"
+
+    target = workspace / "ser.py"
+
+    workspace.mkdir(parents=True)
+
+    target.write_text(
+        "# @module\n\n"
+        "import asyncio\n\n"
+        "from src.nan_itself.modules import Module\n\n"
+        "class Ser(Module):\n"
+        "    id = \"ser\"\n\n"
+        "    async def start(self):\n"
+        "        self.data.publish({\"gen\": 1})\n\n"
+        "        while True:\n"
+        "            await asyncio.sleep(10)\n\n"
+        "    def serialize_state(self):\n"
+        "        raise RuntimeError(\"serialize-nope\")\n",
+        encoding="utf-8",
+    )
+
+    facade = Facade(
+        workspace_modules=workspace,
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces["ser"].snapshot()
+                == {"gen": 1}
+            )
+        )
+
+        assert ok
+
+        import time as _t
+
+        _t.sleep(0.01)
+
+        target.write_text(
+            "# @module\n\n"
+            "import asyncio\n\n"
+            "from src.nan_itself.modules import Module\n\n"
+            "class Ser(Module):\n"
+            "    id = \"ser\"\n\n"
+            "    async def start(self):\n"
+            "        self.data.publish({\"gen\": 2})\n\n"
+            "        while True:\n"
+            "            await asyncio.sleep(10)\n",
+            encoding="utf-8",
+        )
+
+        ok = await _wait_for(
+            lambda: (
+                target.resolve()
+                in facade._workspace_load_errors
+            )
+        )
+
+        assert ok
+
+        err = facade._workspace_load_errors[
+            target.resolve()
+        ]
+
+        assert "serialize-nope" in str(err)
+
+        # Rejection happened before any candidate work.
+        assert facade.modules["ser"].generation == 0
+        assert facade.dataspaces["ser"].snapshot() == {"gen": 1}
+
+    finally:
+        await facade.stop()
+
+
+def test_package_exports_are_complete():
+    import src.nan_itself.modules as m
+
+    required = {
+        "DataSpace",
+        "DataSpaceReader",
+        "MODULE_HEADER",
+        "Module",
+        "ModuleRecord",
+        "ModuleState",
+        "ModuleTurn",
+        "DuplicateModuleError",
+        "BUILTIN_MODULES",
+        "Facade",
+    }
+
+    assert required <= set(m.__all__)
+
+
+@pytest.mark.asyncio
+async def test_builtin_pair_dependency_chain(tmp_path):
+    chain: list[str] = []
+
+    class Base(Module):
+        id = "chain-base"
+
+        async def start(self):
+            chain.append("base")
+
+            self.data.publish({"v": 3})
+
+            while True:
+                await asyncio.sleep(10)
+
+    class Derived(Module):
+        id = "chain-derived"
+        requires = ("chain-base",)
+
+        async def start(self):
+            chain.append("derived")
+
+            v = self.dependencies[
+                "chain-base"
+            ].snapshot()["v"]
+
+            self.data.publish({"echo": v})
+
+            while True:
+                await asyncio.sleep(10)
+
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(Base, Derived),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.dataspaces[
+                    "chain-derived"
+                ].snapshot()
+                == {"echo": 3}
+            )
+        )
+
+        assert ok
+        assert chain == ["base", "derived"]
+
+    finally:
+        await facade.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_persists_builtin_artifacts(tmp_path):
+    class Keeper(Module):
+        id = "keeper"
+
+        def __init__(self):
+            self.token = "token-1"
+
+        async def start(self):
+            self.data.publish({"token": self.token})
+
+            while True:
+                await asyncio.sleep(10)
+
+        def serialize_state(self):
+            return {"token": self.token}
+
+    data_dir = tmp_path / "data"
+
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(Keeper,),
+        data_dir=data_dir,
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    ok = await _wait_for(
+        lambda: bool(
+            facade.dataspaces["keeper"].snapshot()
+        )
+    )
+
+    assert ok
+
+    await facade.stop()
+
+    assert (data_dir / "dataspace" / "keeper.json").is_file()
+    assert (data_dir / "private" / "keeper.json").is_file()
+
+
+# ============================================================================
+# Module infrastructure: TurnRecord delivery + LLM provisioning
+# ============================================================================
+
+
+class _LlmProbe(Module):
+    id = "llm-probe"
+
+    def __init__(self):
+        self.seen_llm = "unset"
+
+    async def start(self):
+        self.seen_llm = (
+            "has-llm"
+            if self.llm is not None
+            else "no-llm"
+        )
+
+        while True:
+            await asyncio.sleep(10)
+
+
+@pytest.mark.asyncio
+async def test_facade_provisions_llm_to_modules(tmp_path):
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(_LlmProbe,),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+        llm="SENTINEL-LLM",
+    )
+
+    await facade.start()
+
+    try:
+        ok = await _wait_for(
+            lambda: (
+                facade.modules["llm-probe"].instance.seen_llm
+                == "has-llm"
+            )
+        )
+
+        assert ok
+
+    finally:
+        await facade.stop()
+
+
+def test_facade_without_llm_leaves_none(tmp_path):
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        data_dir=tmp_path / "data",
+    )
+
+    assert facade.llm is None
+
+
+class _OrderA(Module):
+    id = "order-a"
+
+    def __init__(self):
+        self.got: list = []
+
+    async def start(self):
+        while True:
+            await asyncio.sleep(10)
+
+    async def on_turn(self, record):
+        self.got.append(("a", record))
+
+
+class _OrderB(Module):
+    id = "order-b"
+
+    def __init__(self):
+        self.got: list = []
+
+    async def start(self):
+        while True:
+            await asyncio.sleep(10)
+
+    async def on_turn(self, record):
+        self.got.append(("b", record))
+
+
+@pytest.mark.asyncio
+async def test_deliver_broadcasts_to_all_modules(tmp_path):
+    facade = Facade(
+        workspace_modules=tmp_path / "ws",
+        builtin_modules=(_OrderA, _OrderB),
+        data_dir=tmp_path / "data",
+        scan_interval=0.03,
+        retry_interval=0.03,
+    )
+
+    await facade.start()
+
+    try:
+        record = TurnRecord(
+            agent_hash="h",
+            parent_hash=None,
+            depth=0,
+            task=None,
+            user_input="u",
+            world={},
+            reply="r",
+            error=None,
+            started_at=1.0,
+            ended_at=2.0,
+        )
+
+        facade.deliver_turn(record)
+
+        ok = await _wait_for(
+            lambda: (
+                len(facade.modules["order-a"].instance.got)
+                == 1
+                and len(facade.modules["order-b"].instance.got)
+                == 1
+            )
+        )
+
+        assert ok
+
+        # Same record object reached everyone.
+        assert (
+            facade.modules["order-a"].instance.got[0][1]
+            is record
+        )
+        assert (
+            facade.modules["order-b"].instance.got[0][1]
+            is record
+        )
+
+    finally:
+        await facade.stop()

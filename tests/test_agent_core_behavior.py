@@ -9,11 +9,12 @@ from mcp.types import Tool
 
 from src.nan_itself.agent.core import CoreAgent
 from src.nan_itself.agent.runtime import AgentContext
-from src.nan_itself.skills.facade import (
+from src.nan_itself.skills import (
+    UnknownSkillError,
     Skill,
     SkillMetadata,
 )
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     Provider,
     ProviderSpec,
     ProviderRuntime,
@@ -74,7 +75,10 @@ class FakeSkills:
         self,
         name: str,
     ) -> Skill:
-        return self._skills[name]
+        try:
+            return self._skills[name]
+        except KeyError:
+            raise UnknownSkillError(f"Unknown Skill: {name}")
 
     def catalog(self):
         return [
@@ -82,12 +86,19 @@ class FakeSkills:
             for name in sorted(self._skills)
         ]
 
+    def refresh(self):
+        self.refresh_calls = (
+            getattr(self, "refresh_calls", 0) + 1
+        )
+
 
 class FakeModules:
     def __init__(
         self,
         context: list[str] | None = None,
     ):
+        self.turn_records: list = []
+
         self.world = {
             "todo": {
                 "active": 3,
@@ -109,6 +120,9 @@ class FakeModules:
 
     def snapshot(self):
         return self.world
+
+    def deliver_turn(self, record):
+        self.turn_records.append(record)
 
     async def query_snapshot(
         self,
@@ -301,10 +315,12 @@ def complete_tool() -> Tool:
 
 
 @pytest.mark.asyncio
-async def test_main_agent_uses_core_skill_only():
+async def test_main_agent_uses_persona_layer():
+    persona_text = "CORE SYSTEM PROMPT"
+
     core = make_skill(
         "core",
-        "CORE SYSTEM PROMPT",
+        persona_text,
     )
 
     llm = SequenceLLM([
@@ -324,7 +340,7 @@ async def test_main_agent_uses_core_skill_only():
                 "RESEARCH SYSTEM PROMPT",
             ),
         }),
-        core_skill=core,
+        persona_source=lambda: persona_text,
     )
 
     result = await agent.run(
@@ -370,7 +386,7 @@ async def test_main_agent_receives_ambient_module_context():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -388,44 +404,6 @@ async def test_main_agent_receives_ambient_module_context():
         "Todo: report is due today."
         in (system.content or "")
     )
-
-
-@pytest.mark.asyncio
-async def test_main_history_respects_token_budget():
-    core = make_skill()
-
-    llm = SequenceLLM([
-        response(text="answer-0"),
-        response(text="answer-1"),
-        response(text="answer-2"),
-        response(text="answer-3"),
-        response(text="answer-4"),
-        response(text="answer-5"),
-    ])
-
-    agent = CoreAgent(
-        llm=llm,
-        modules=FakeModules(),
-        providers=ProviderRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-        history_token_budget=45,
-    )
-
-    for index in range(6):
-        await agent.run(
-            f"user-{index}"
-        )
-
-    assert len(
-        agent._main_history
-    ) == 3
-
-# ============================================================================
-# World snapshot
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -462,7 +440,7 @@ async def test_main_and_subagent_share_exact_same_snapshot():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     result = await agent.run(
@@ -544,7 +522,7 @@ async def test_module_can_distinguish_main_and_subagent():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -634,7 +612,7 @@ async def test_tool_call_round_trips_through_model():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     result = await agent.run(
@@ -720,7 +698,7 @@ async def test_subagent_activates_skill_itself():
             "core": core,
             "research": research,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -754,7 +732,7 @@ async def test_subagent_activates_skill_itself():
     # sees the catalog of switchable skills.
     assert "CORE" in first_system
     assert "RESEARCH" not in first_system
-    assert "[Available Skills]" in first_system
+    assert "<skills>" in first_system
 
     switched_system = (
         switched_request
@@ -807,7 +785,7 @@ async def test_subagent_inherits_parent_skill_by_default():
             "core": core,
             "research": research,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -870,7 +848,7 @@ async def test_main_agent_never_sees_activate_skill():
             "core": core,
             "research": research,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -958,7 +936,7 @@ async def test_activate_skill_unknown_name_returns_error():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -1061,7 +1039,7 @@ async def test_subagent_can_dispatch_sub_subagent():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
         max_subagent_depth=2,
     )
 
@@ -1135,7 +1113,7 @@ async def test_subagent_depth_limit_is_exposed_to_agent():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
         max_subagent_depth=1,
     )
 
@@ -1207,7 +1185,7 @@ async def test_agent_can_sleep_and_resume():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     result = await agent.run(
@@ -1284,7 +1262,7 @@ async def test_routed_tools_do_not_leak_into_subagent_view():
             "core": core,
             "research": research,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     await agent.run(
@@ -1315,3 +1293,164 @@ async def test_routed_tools_do_not_leak_into_subagent_view():
         tool.name == "route"
         for tool in subagent_request.tools
     )
+
+# ============================================================================
+# Skill hot reload at turn start
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_core_run_refreshes_skills_every_turn():
+    core = make_skill(
+        "core",
+        "CORE",
+    )
+
+    skills = FakeSkills({
+        "core": core,
+    })
+
+    llm = SequenceLLM([
+        response(text="one"),
+        response(text="two"),
+    ])
+
+    agent = CoreAgent(
+        llm=llm,
+        modules=FakeModules(),
+        providers=ProviderRuntime(),
+        skills=skills,
+        persona_source=lambda: "CORE",
+    )
+
+    await agent.run("first")
+    await agent.run("second")
+
+    assert skills.refresh_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_start_refresh_makes_dropped_skill_visible(tmp_path):
+    from src.nan_itself.skills import (
+        SkillRuntime,
+    )
+
+    core = make_skill(
+        "core",
+        "CORE",
+    )
+
+    workspace = tmp_path / "skills"
+
+    skills = SkillRuntime(
+        workspace_skills=workspace,
+    )
+
+    skills.discover()
+
+    llm = SequenceLLM([
+        response(
+            calls=[
+                tool_call(
+                    call_id="dispatch",
+                    name="dispatch_subagent",
+                    arguments={
+                        "task": "use the fresh skill",
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        response(
+            text="main",
+        ),
+        response(
+            text="sub",
+        ),
+    ])
+
+    agent = CoreAgent(
+        llm=llm,
+        modules=FakeModules(),
+        providers=ProviderRuntime(),
+        skills=skills,
+        persona_source=lambda: "CORE",
+    )
+
+    # The skill lands in the workspace between discovery and the
+    # turn; only the turn-start refresh can make it visible.
+    fresh = workspace / "fresh"
+    fresh.mkdir(parents=True)
+
+    (fresh / "SKILL.md").write_text(
+        "---\nname: fresh-skill\ndescription: just dropped\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    await agent.run("delegate")
+
+    for _ in range(100):
+        if len(llm.requests) >= 3:
+            break
+
+        await asyncio.sleep(0.01)
+
+    assert len(llm.requests) >= 3
+
+    child_system = (
+        llm.requests[2]
+        .messages[0]
+        .content
+        or ""
+    )
+
+    assert "<skills>" in child_system
+    assert "fresh-skill" in child_system
+
+
+@pytest.mark.asyncio
+async def test_persona_is_reread_every_turn():
+    """
+    L1 hot reload: editing the persona between turns must be
+    visible on the next request without restarting anything.
+    """
+    holder = {"text": "PERSONA V1"}
+
+    core = make_skill(
+        "core",
+        "CORE",
+    )
+
+    llm = SequenceLLM([
+        response(text="one"),
+        response(text="two"),
+    ])
+
+    agent = CoreAgent(
+        llm=llm,
+        modules=FakeModules(),
+        providers=ProviderRuntime(),
+        skills=FakeSkills({
+            "core": core,
+        }),
+        persona_source=lambda: holder["text"],
+    )
+
+    await agent.run("first")
+
+    assert "PERSONA V1" in (
+        llm.requests[0].messages[0].content
+        or ""
+    )
+
+    holder["text"] = "PERSONA V2"
+
+    await agent.run("second")
+
+    second_system = (
+        llm.requests[1].messages[0].content
+        or ""
+    )
+
+    assert "PERSONA V2" in second_system
+    assert "PERSONA V1" not in second_system

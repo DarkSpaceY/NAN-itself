@@ -9,13 +9,16 @@ import pytest
 
 from src.nan_itself.agent.core import (
     CoreAgent,
-    _estimate_tokens,
 )
-from src.nan_itself.skills.facade import (
+from src.nan_itself.agent.engine import (
+    StepEngine,
+)
+from src.nan_itself.skills import (
+    UnknownSkillError,
     Skill,
     SkillMetadata,
 )
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     ProviderRuntime,
 )
 from src.nan_itself.utils.llm import (
@@ -57,6 +60,13 @@ def make_skill(
 
 
 class FakeModules:
+
+    def __init__(self, *args, **kwargs):
+        self.turn_records: list = []
+
+    def deliver_turn(self, record):
+        self.turn_records.append(record)
+
     def snapshot(self):
         return {}
 
@@ -76,13 +86,21 @@ class FakeSkills:
         return tuple(self.skills)
 
     def activate(self, name):
-        return self.skills[name]
+        try:
+            return self.skills[name]
+        except KeyError:
+            raise UnknownSkillError(f"Unknown Skill: {name}")
 
     def catalog(self):
         return [
             self.skills[name].metadata
             for name in sorted(self.skills)
         ]
+
+    def refresh(self):
+        self.refresh_calls = (
+            getattr(self, "refresh_calls", 0) + 1
+        )
 
 
 @dataclass
@@ -160,7 +178,7 @@ def make_agent(
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
         **kwargs,
     )
 
@@ -173,167 +191,6 @@ def user_reports(messages):
         and _REPORT_PREFIX
         in (message.content or "")
     ]
-
-
-# ============================================================================
-# Barrier
-# ============================================================================
-
-
-@pytest.mark.asyncio
-async def test_barrier_returns_all_reports_at_once():
-    core = make_skill()
-
-    started = [
-        asyncio.Event(),
-        asyncio.Event(),
-    ]
-
-    release = asyncio.Event()
-
-    class BlockedCore(CoreAgent):
-        async def _run_agent(
-            self,
-            *,
-            context,
-            user_input,
-            history,
-            seed_reports=None,
-        ):
-            if context.depth == 1:
-                index = (
-                    0
-                    if user_input == "work A"
-                    else 1
-                )
-
-                started[index].set()
-
-                await release.wait()
-
-                return FakeResult(
-                    content=f"sub::{user_input}",
-                )
-
-            return await super()._run_agent(
-                context=context,
-                user_input=user_input,
-                history=history,
-                seed_reports=seed_reports,
-            )
-
-    llm = SequenceLLM([
-        # One response fans out two children at once.
-        response(
-            calls=[
-                tool_call(
-                    call_id="d1",
-                    name="dispatch_subagent",
-                    arguments={
-                        "task": "work A",
-                    },
-                ),
-                tool_call(
-                    call_id="d2",
-                    name="dispatch_subagent",
-                    arguments={
-                        "task": "work B",
-                    },
-                ),
-            ],
-            finish_reason="tool_calls",
-        ),
-        # Model uses the barrier.
-        response(
-            calls=[
-                tool_call(
-                    call_id="barrier",
-                    name="await_subagents",
-                    arguments={},
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        response(
-            text="all done",
-        ),
-    ])
-
-    agent = BlockedCore(
-        llm=llm,
-        modules=FakeModules(),
-        providers=ProviderRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-    )
-
-    async def releaser():
-        for event in started:
-            await asyncio.wait_for(
-                event.wait(),
-                timeout=2.0,
-            )
-
-        await asyncio.sleep(0.01)
-
-        release.set()
-
-    asyncio.create_task(releaser())
-
-    result = await agent.run(
-        "fan out",
-    )
-
-    assert result.content == "all done"
-
-    final_messages = (
-        llm.requests[2].messages
-    )
-
-    tool_text = "\n".join(
-        message.content or ""
-        for message in final_messages
-        if message.role == "tool"
-    )
-
-    assert (
-        "2 subagent(s) finished"
-        in tool_text
-    )
-    assert "sub::work A" in tool_text
-    assert "sub::work B" in tool_text
-
-    # Reports delivered through the barrier are not
-    # duplicated as injected user messages afterwards.
-    assert user_reports(final_messages) == []
-
-
-@pytest.mark.asyncio
-async def test_barrier_without_outstanding_children_is_immediate():
-    llm = SequenceLLM([
-        response(text="done"),
-    ])
-
-    agent = make_agent(llm)
-
-    result = await agent.run("hello")
-
-    assert result.content == "done"
-
-    barrier_result = (
-        await agent._execute_await_subagents([])
-    )
-
-    assert barrier_result == (
-        "No outstanding subagents."
-    )
-
-
-# ============================================================================
-# Automatic step-boundary delivery
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -396,33 +253,6 @@ async def test_report_is_injected_at_next_step_boundary():
 async def test_failed_child_delivers_failed_report():
     core = make_skill()
 
-    started = asyncio.Event()
-
-    release = asyncio.Event()
-
-    class BoomCore(CoreAgent):
-        async def _run_agent(
-            self,
-            *,
-            context,
-            user_input,
-            history,
-            seed_reports=None,
-        ):
-            if context.depth == 1:
-                started.set()
-
-                await release.wait()
-
-                raise RuntimeError("boom")
-
-            return await super()._run_agent(
-                context=context,
-                user_input=user_input,
-                history=history,
-                seed_reports=seed_reports,
-            )
-
     llm = SequenceLLM([
         response(
             calls=[
@@ -436,12 +266,13 @@ async def test_failed_child_delivers_failed_report():
             ],
             finish_reason="tool_calls",
         ),
+        # Give the doomed child a beat to actually fail.
         response(
             calls=[
                 tool_call(
-                    call_id="b",
-                    name="await_subagents",
-                    arguments={},
+                    call_id="s",
+                    name="sleep",
+                    arguments={"seconds": 0.05},
                 )
             ],
             finish_reason="tool_calls",
@@ -451,49 +282,35 @@ async def test_failed_child_delivers_failed_report():
         ),
     ])
 
-    agent = BoomCore(
+    class DoomedEngine(StepEngine):
+        async def execute(self, **kwargs):
+            if kwargs["context"].depth == 1:
+                raise RuntimeError("boom")
+
+            return await super().execute(**kwargs)
+
+    agent = make_agent(llm)
+
+    agent.engine = DoomedEngine(
         llm=llm,
-        modules=FakeModules(),
-        providers=ProviderRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
+        modules=agent.modules,
+        providers=agent.providers,
+        skills=agent.skills,
+        agent_runtime=agent.agent_runtime,
     )
 
-    async def releaser():
-        await asyncio.wait_for(
-            started.wait(),
-            timeout=2.0,
-        )
-
-        await asyncio.sleep(0.01)
-
-        release.set()
-
-    asyncio.create_task(releaser())
-
-    result = await agent.run("delegate")
+    result = await agent.run("turn")
 
     assert result.content == "handled failure"
 
-    final_messages = (
-        llm.requests[2].messages
-    )
+    reports = user_reports(llm.requests[2].messages)
 
-    tool_text = "\n".join(
-        message.content or ""
-        for message in final_messages
-        if message.role == "tool"
-    )
+    assert len(reports) == 1
 
-    assert "status: failed" in tool_text
-    assert "boom" in tool_text
+    body = reports[0].content or ""
 
-
-# ============================================================================
-# Late delivery across turns
-# ============================================================================
+    assert "status: failed" in body
+    assert "boom" in body
 
 
 @pytest.mark.asyncio
@@ -503,31 +320,6 @@ async def test_late_report_arrives_next_turn():
     started = asyncio.Event()
 
     release = asyncio.Event()
-
-    class SlowCore(CoreAgent):
-        async def _run_agent(
-            self,
-            *,
-            context,
-            user_input,
-            history,
-            seed_reports=None,
-        ):
-            if context.depth == 1:
-                started.set()
-
-                await release.wait()
-
-                return FakeResult(
-                    content="late sub work",
-                )
-
-            return await super()._run_agent(
-                context=context,
-                user_input=user_input,
-                history=history,
-                seed_reports=seed_reports,
-            )
 
     llm = SequenceLLM([
         # Turn 1: dispatch then answer without waiting.
@@ -552,14 +344,27 @@ async def test_late_report_arrives_next_turn():
         ),
     ])
 
-    agent = SlowCore(
+    class GatedEngine(StepEngine):
+        async def execute(self, **kwargs):
+            if kwargs["context"].depth == 1:
+                started.set()
+
+                await release.wait()
+
+                return FakeResult(
+                    content="late sub work",
+                )
+
+            return await super().execute(**kwargs)
+
+    agent = make_agent(llm)
+
+    agent.engine = GatedEngine(
         llm=llm,
-        modules=FakeModules(),
-        providers=ProviderRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
+        modules=agent.modules,
+        providers=agent.providers,
+        skills=agent.skills,
+        agent_runtime=agent.agent_runtime,
     )
 
     first = await agent.run("turn one")
@@ -579,12 +384,12 @@ async def test_late_report_arrives_next_turn():
     release.set()
 
     for _ in range(200):
-        if agent._late_reports:
+        if agent.has_pending_reports():
             break
 
         await asyncio.sleep(0.01)
 
-    assert len(agent._late_reports) == 1
+    assert agent.has_pending_reports()
 
     second = await agent.run("turn two")
 
@@ -626,7 +431,7 @@ async def test_late_report_arrives_next_turn():
     )
 
     # Delivered exactly once.
-    assert len(agent._late_reports) == 0
+    assert not agent.has_pending_reports()
 
 
 # ============================================================================
@@ -653,7 +458,6 @@ async def test_agent_tool_surface_after_removal():
         "route",
         "sleep",
         "dispatch_subagent",
-        "await_subagents",
     }
 
     sleep_schema = tools["sleep"].input_schema
@@ -665,22 +469,9 @@ async def test_agent_tool_surface_after_removal():
         "seconds",
     ]
 
-    barrier_schema = (
-        tools["await_subagents"].input_schema
-    )
-
-    assert barrier_schema["properties"] == {}
-
 
 # ============================================================================
 # Token estimation
 # ============================================================================
 
 
-def test_token_estimator_shapes():
-    assert _estimate_tokens("") == 0
-    assert _estimate_tokens("abcd") == 1
-    assert _estimate_tokens("一二三") == 3
-
-    # Two CJK characters plus four ASCII ones.
-    assert _estimate_tokens("十二abcd") == 3

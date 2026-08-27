@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import datetime
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     tool,
 )

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     ProviderRuntime,
     ProviderSpec,

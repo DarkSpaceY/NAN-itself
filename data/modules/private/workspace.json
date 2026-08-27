@@ -12,6 +12,10 @@
       "mtime_ns": 1787022641029003695,
       "size": 0
     },
+    "docs/memory-design.md": {
+      "mtime_ns": 1787742308627249715,
+      "size": 9814
+    },
     "models/.cache/huggingface/.gitignore": {
       "mtime_ns": 1787141053307407389,
       "size": 1
@@ -125,44 +129,156 @@
       "size": 139
     },
     "src/nan_itself/agent/__init__.py": {
-      "mtime_ns": 1787478912012538221,
-      "size": 231
+      "mtime_ns": 1787715673792344236,
+      "size": 1099
     },
     "src/nan_itself/agent/core.py": {
-      "mtime_ns": 1787581995724844079,
-      "size": 27323
+      "mtime_ns": 1787715649264297817,
+      "size": 3496
+    },
+    "src/nan_itself/agent/engine.py": {
+      "mtime_ns": 1787730486122390243,
+      "size": 11360
     },
     "src/nan_itself/agent/loop.py": {
-      "mtime_ns": 1787581071876791805,
-      "size": 9320
+      "mtime_ns": 1787715673792096236,
+      "size": 10007
+    },
+    "src/nan_itself/agent/model.py": {
+      "mtime_ns": 1787715711778632989,
+      "size": 1160
+    },
+    "src/nan_itself/agent/prompts.py": {
+      "mtime_ns": 1787724709905359124,
+      "size": 4009
+    },
+    "src/nan_itself/agent/reports.py": {
+      "mtime_ns": 1787715111395529431,
+      "size": 2209
+    },
+    "src/nan_itself/agent/role.py": {
+      "mtime_ns": 1787724747322397294,
+      "size": 1188
     },
     "src/nan_itself/agent/runtime.py": {
-      "mtime_ns": 1787479052145756522,
-      "size": 8373
+      "mtime_ns": 1787712359912712308,
+      "size": 7382
+    },
+    "src/nan_itself/agent/verbs.py": {
+      "mtime_ns": 1787724747322078546,
+      "size": 7199
     },
     "src/nan_itself/app.py": {
-      "mtime_ns": 1787579493710156983,
-      "size": 3738
+      "mtime_ns": 1787742795746033660,
+      "size": 5036
     },
     "src/nan_itself/modules/__init__.py": {
-      "mtime_ns": 1787022951749303358,
-      "size": 0
+      "mtime_ns": 1787730425183966384,
+      "size": 792
     },
-    "src/nan_itself/modules/facade.py": {
-      "mtime_ns": 1787578327161600366,
-      "size": 46527
+    "src/nan_itself/modules/builtin/__init__.py": {
+      "mtime_ns": 1787742795745720284,
+      "size": 699
     },
-    "src/nan_itself/skills/facade.py": {
-      "mtime_ns": 1787578305080273422,
-      "size": 15962
+    "src/nan_itself/modules/builtin/memory.py": {
+      "mtime_ns": 1787753254270007004,
+      "size": 41764
+    },
+    "src/nan_itself/modules/deps.py": {
+      "mtime_ns": 1787669817270816375,
+      "size": 3756
+    },
+    "src/nan_itself/modules/loading.py": {
+      "mtime_ns": 1787671758910652673,
+      "size": 4115
+    },
+    "src/nan_itself/modules/model.py": {
+      "mtime_ns": 1787731487720743379,
+      "size": 6829
+    },
+    "src/nan_itself/modules/persistence.py": {
+      "mtime_ns": 1787669817272046505,
+      "size": 3671
+    },
+    "src/nan_itself/modules/reload.py": {
+      "mtime_ns": 1787673330392290140,
+      "size": 7155
+    },
+    "src/nan_itself/modules/runtime.py": {
+      "mtime_ns": 1787730392942716336,
+      "size": 26829
+    },
+    "src/nan_itself/skills/__init__.py": {
+      "mtime_ns": 1787653544414678766,
+      "size": 651
+    },
+    "src/nan_itself/skills/model.py": {
+      "mtime_ns": 1787653325975976331,
+      "size": 2087
+    },
+    "src/nan_itself/skills/parsing.py": {
+      "mtime_ns": 1787653325976201496,
+      "size": 4528
+    },
+    "src/nan_itself/skills/registry.py": {
+      "mtime_ns": 1787653376561726402,
+      "size": 6925
+    },
+    "src/nan_itself/skills/runtime.py": {
+      "mtime_ns": 1787653419778786281,
+      "size": 4780
     },
     "src/nan_itself/tools/__init__.py": {
-      "mtime_ns": 1787022951749303358,
-      "size": 0
+      "mtime_ns": 1787643224805547778,
+      "size": 1648
     },
-    "src/nan_itself/tools/facade.py": {
-      "mtime_ns": 1787587881445036821,
-      "size": 57979
+    "src/nan_itself/tools/builtin/__init__.py": {
+      "mtime_ns": 1787643335507239933,
+      "size": 911
+    },
+    "src/nan_itself/tools/builtin/local/__init__.py": {
+      "mtime_ns": 1787643342049548436,
+      "size": 160
+    },
+    "src/nan_itself/tools/builtin/mcp/tools.yaml": {
+      "mtime_ns": 1787727044809998702,
+      "size": 537
+    },
+    "src/nan_itself/tools/local.py": {
+      "mtime_ns": 1787672559455374741,
+      "size": 13104
+    },
+    "src/nan_itself/tools/mcp.py": {
+      "mtime_ns": 1787727044809501243,
+      "size": 6653
+    },
+    "src/nan_itself/tools/provider.py": {
+      "mtime_ns": 1787641921940955210,
+      "size": 3226
+    },
+    "src/nan_itself/tools/results.py": {
+      "mtime_ns": 1787641876138656737,
+      "size": 960
+    },
+    "src/nan_itself/tools/runtime.py": {
+      "mtime_ns": 1787645058844731646,
+      "size": 21335
+    },
+    "src/nan_itself/tools/server.py": {
+      "mtime_ns": 1787644992745423152,
+      "size": 4460
+    },
+    "src/nan_itself/tools/spec.py": {
+      "mtime_ns": 1787641866339661891,
+      "size": 1391
+    },
+    "src/nan_itself/tools/view.py": {
+      "mtime_ns": 1787724747322706917,
+      "size": 5875
+    },
+    "src/nan_itself/tools/watcher.py": {
+      "mtime_ns": 1787643127982323382,
+      "size": 2154
     },
     "src/nan_itself/utils/__init__.py": {
       "mtime_ns": 1787022951749303358,
@@ -177,73 +293,125 @@
       "size": 2425
     },
     "src/nan_itself/utils/llm.py": {
-      "mtime_ns": 1787581900456053790,
-      "size": 26365
+      "mtime_ns": 1787742547380842149,
+      "size": 26740
     },
     "src/nan_itself/utils/ocr.py": {
       "mtime_ns": 1787139008647653657,
       "size": 2738
     },
-    "tests/test_1.py": {
-      "mtime_ns": 1787578455704234236,
-      "size": 33657
-    },
     "tests/test_agent_core.py": {
-      "mtime_ns": 1787567933725300115,
-      "size": 11262
+      "mtime_ns": 1787730557066764077,
+      "size": 12287
     },
     "tests/test_agent_core_behavior.py": {
-      "mtime_ns": 1787573167995460500,
-      "size": 23278
+      "mtime_ns": 1787730524083402542,
+      "size": 30836
+    },
+    "tests/test_agent_enrichment.py": {
+      "mtime_ns": 1787730774297511992,
+      "size": 25377
     },
     "tests/test_agent_loop.py": {
-      "mtime_ns": 1787577815874690293,
-      "size": 5044
+      "mtime_ns": 1787715960318431939,
+      "size": 5104
+    },
+    "tests/test_agent_refactor.py": {
+      "mtime_ns": 1787730524084201340,
+      "size": 6415
     },
     "tests/test_agent_runtime.py": {
-      "mtime_ns": 1787394963180693367,
-      "size": 7849
+      "mtime_ns": 1787712253470680301,
+      "size": 7277
+    },
+    "tests/test_builtin.py": {
+      "mtime_ns": 1787727096332073471,
+      "size": 1341
     },
     "tests/test_llm_adapter.py": {
       "mtime_ns": 1787577847053676712,
       "size": 3629
     },
     "tests/test_local_tools.py": {
-      "mtime_ns": 1787560318788014263,
-      "size": 19585
+      "mtime_ns": 1787672429500149653,
+      "size": 25726
+    },
+    "tests/test_memory_module.py": {
+      "mtime_ns": 1787753190677281668,
+      "size": 12664
+    },
+    "tests/test_modules.py": {
+      "mtime_ns": 1787730646668184708,
+      "size": 63490
+    },
+    "tests/test_provider.py": {
+      "mtime_ns": 1787649338728410315,
+      "size": 3675
+    },
+    "tests/test_results.py": {
+      "mtime_ns": 1787649702966767023,
+      "size": 2676
+    },
+    "tests/test_runtime_lifecycle.py": {
+      "mtime_ns": 1787649393461883094,
+      "size": 3617
     },
     "tests/test_skills.py": {
-      "mtime_ns": 1787394159390721551,
-      "size": 14019
+      "mtime_ns": 1787653858183326834,
+      "size": 18563
     },
     "tests/test_subagent_reports.py": {
-      "mtime_ns": 1787568444841554202,
-      "size": 15200
+      "mtime_ns": 1787730501298537832,
+      "size": 10351
     },
     "tests/test_tool_timeout.py": {
-      "mtime_ns": 1787577834789312929,
-      "size": 1789
+      "mtime_ns": 1787643240222223596,
+      "size": 1782
     },
     "tests/test_tools.py": {
-      "mtime_ns": 1787581213778973986,
-      "size": 13949
+      "mtime_ns": 1787649547558857581,
+      "size": 16118
+    },
+    "tests/test_view.py": {
+      "mtime_ns": 1787649367677825855,
+      "size": 5066
+    },
+    "tests/test_watcher.py": {
+      "mtime_ns": 1787649302417119436,
+      "size": 3946
     },
     "uv.lock": {
       "mtime_ns": 1787223216800050167,
       "size": 509417
     },
-    "workspace/modules/workspace.py": {
-      "mtime_ns": 1787372165410716904,
-      "size": 4217
+    "workspace/memory/MEMORY.md": {
+      "mtime_ns": 1787753388203702964,
+      "size": 537
     },
-    "workspace/skills/core/SKILL.md": {
-      "mtime_ns": 1787577710943148254,
-      "size": 939
+    "workspace/memory/WORKSTATE.md": {
+      "mtime_ns": 1787753384804445264,
+      "size": 49
+    },
+    "workspace/memory/journal.cursor": {
+      "mtime_ns": 1787753388204618009,
+      "size": 1
+    },
+    "workspace/memory/journal.jsonl": {
+      "mtime_ns": 1787753376333552193,
+      "size": 887
+    },
+    "workspace/modules/workspace.py": {
+      "mtime_ns": 1787668062156390209,
+      "size": 4210
+    },
+    "workspace/persona.md": {
+      "mtime_ns": 1787724747323117248,
+      "size": 3322
     },
     "workspace/tools/local/clock.py": {
-      "mtime_ns": 1787579291635138920,
-      "size": 599
+      "mtime_ns": 1787643240219071763,
+      "size": 592
     }
   },
-  "scan_count": 158
+  "scan_count": 1236
 }

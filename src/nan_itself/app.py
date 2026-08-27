@@ -14,11 +14,11 @@ from src.nan_itself.agent.loop import (
     DEFAULT_TURN_GRACE,
     Inbox,
 )
-from src.nan_itself.modules.facade import (
+from src.nan_itself.modules import (
     Facade as ModuleFacade,
 )
-from src.nan_itself.skills.facade import SkillRuntime
-from src.nan_itself.tools.facade import ProviderRuntime
+from src.nan_itself.skills import SkillRuntime
+from src.nan_itself.tools import ProviderRuntime
 from src.nan_itself.utils.llm import LLMProvider
 
 
@@ -68,9 +68,34 @@ async def run_agent_process() -> None:
     ):
         os.environ.pop(key, None)
 
+    llm = _llm_from_env()
+
     providers = ProviderRuntime()
 
-    modules = ModuleFacade()
+    from src.nan_itself.modules.builtin import (
+        MemoryModule,
+    )
+
+    builtin_modules: tuple[type, ...] = (MemoryModule,)
+
+    # Hearing is hardware-dependent; the composition root decides
+    # whether it mounts at all.
+    if os.getenv("NAN_AUDIO_ENABLED", "1") != "0":
+        from src.nan_itself.modules.builtin.audio import (
+            AudioModule,
+        )
+
+        builtin_modules = (
+            MemoryModule,
+            AudioModule,
+        )
+
+        logger.info("audio module enabled")
+
+    modules = ModuleFacade(
+        llm=llm,
+        builtin_modules=builtin_modules,
+    )
 
     skills = SkillRuntime()
 
@@ -84,11 +109,22 @@ async def run_agent_process() -> None:
 
     skills.discover()
 
-    if "core" not in skills.names():
+    persona_path = Path(
+        os.getenv(
+            "NAN_PERSONA",
+            str(
+                Path(__file__).resolve().parents[2]
+                / "workspace"
+                / "persona.md"
+            ),
+        )
+    )
+
+    if not persona_path.is_file():
         logger.error(
-            "No 'core' skill found in {}; "
+            "Persona file not found: {}; "
             "cannot start without it",
-            skills.workspace_skills,
+            persona_path,
         )
 
         await providers.stop()
@@ -96,14 +132,19 @@ async def run_agent_process() -> None:
 
         return
 
-    core_skill = skills.activate("core")
+    def read_persona() -> str:
+        # Re-read on every access: the agent calls this at each
+        # turn start, so persona edits hot-reload.
+        return persona_path.read_text(
+            encoding="utf-8",
+        )
 
     agent = CoreAgent(
-        llm=_llm_from_env(),
+        llm=llm,
         modules=modules,
         providers=providers,
         skills=skills,
-        core_skill=core_skill,
+        persona_source=read_persona,
     )
 
     inbox = Inbox()
@@ -154,13 +195,28 @@ async def run_agent_process() -> None:
     except asyncio.CancelledError:
         pass
 
+    # The reader thread is blocked inside sys.stdin.readline();
+    # asyncio.run() joins the default executor on close and would
+    # wait forever. Redirecting fd 0 hands the thread an EOF.
+    try:
+        devnull = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(devnull, sys.stdin.fileno())
+    except OSError:
+        pass
+
     await loop_task
 
     logger.info("Stopping tool providers and modules")
 
-    await providers.stop()
-
-    await modules.stop()
+    # Teardown must never flip the exit code: MCP stdio stacks can
+    # raise CancelledError/anyio errors while their transports die.
+    for stop_step in (providers.stop, modules.stop):
+        try:
+            await stop_step()
+        except (Exception, asyncio.CancelledError):
+            # CancelledError is BaseException on 3.12+ and anyio's
+            # stdio teardown raises it while transports die.
+            logger.exception("Shutdown step failed; continuing")
 
     logger.info("NAN stopped cleanly")
 

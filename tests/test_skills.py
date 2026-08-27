@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.nan_itself.skills.facade import (
+from src.nan_itself.skills import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
     SkillRuntime,
+    UnknownSkillError,
 )
 
 
@@ -242,7 +243,7 @@ def test_unknown_skill_cannot_be_activated(tmp_path):
     runtime.discover()
 
     with pytest.raises(
-        KeyError,
+        UnknownSkillError,
         match="Unknown Skill",
     ):
         runtime.activate("missing")
@@ -299,7 +300,7 @@ description: Test Skill.
 
     assert (
         skill_dir
-        in runtime._workspace_errors
+        in runtime._registry.errors
     )
 
 
@@ -336,7 +337,7 @@ description: Test Skill.
     runtime.discover()
 
     assert runtime.names() == ()
-    assert skill_dir in runtime._workspace_errors
+    assert skill_dir in runtime._registry.errors
 
 
 def test_workspace_skill_description_length_limit_is_ignored(
@@ -372,7 +373,7 @@ description: {description}
     runtime.discover()
 
     assert runtime.names() == ()
-    assert skill_dir in runtime._workspace_errors
+    assert skill_dir in runtime._registry.errors
 
 
 def test_missing_frontmatter_workspace_skill_is_ignored(
@@ -398,7 +399,7 @@ def test_missing_frontmatter_workspace_skill_is_ignored(
     runtime.discover()
 
     assert runtime.names() == ()
-    assert skill_dir in runtime._workspace_errors
+    assert skill_dir in runtime._registry.errors
 
 
 def test_missing_name_workspace_skill_is_ignored(
@@ -429,7 +430,7 @@ description: Missing name.
     runtime.discover()
 
     assert runtime.names() == ()
-    assert skill_dir in runtime._workspace_errors
+    assert skill_dir in runtime._registry.errors
 
 
 def test_missing_description_workspace_skill_is_ignored(
@@ -460,7 +461,7 @@ name: broken
     runtime.discover()
 
     assert runtime.names() == ()
-    assert skill_dir in runtime._workspace_errors
+    assert skill_dir in runtime._registry.errors
 
 
 # ============================================================================
@@ -574,7 +575,7 @@ def test_workspace_skill_cannot_override_builtin(
 
     assert (
         workspace_core
-        in runtime._workspace_errors
+        in runtime._registry.errors
     )
 
 
@@ -753,3 +754,181 @@ allowed-tools: Bash pytest Read
     assert skill.frontmatter["allowed-tools"] == (
         "Bash pytest Read"
     )
+
+# ============================================================================
+# refresh / hot reload semantics
+# ============================================================================
+
+
+def make_skill_dir(skills: Path, name: str, description: str = "demo", body: str = "# body"):
+    skill_dir = skills / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return skill_dir
+
+
+def test_refresh_picks_up_new_skills(tmp_path):
+    skills = tmp_path / "skills"
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    assert runtime.names() == ()
+
+    make_skill_dir(skills, "fresh-one")
+
+    runtime.refresh()
+
+    assert runtime.names() == ("fresh-one",)
+
+
+def test_refresh_updates_body_and_generation_on_change(tmp_path):
+    skills = tmp_path / "skills"
+
+    skill_dir = make_skill_dir(skills, " evolving".strip())
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    first = runtime.activate("evolving")
+
+    import time
+
+    time.sleep(0.01)
+
+    make_skill_dir(
+        skills,
+        "evolving",
+        body="# rewritten body v2",
+    )
+
+    runtime.refresh()
+
+    second = runtime.activate("evolving")
+
+    assert second.generation == first.generation + 1
+    assert "rewritten body v2" in second.instructions
+
+
+def test_refresh_drops_removed_skills(tmp_path):
+    skills = tmp_path / "skills"
+
+    skill_dir = make_skill_dir(skills, "gone-soon")
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    assert "gone-soon" in runtime.names()
+
+    import shutil
+
+    shutil.rmtree(skill_dir)
+
+    runtime.refresh()
+
+    assert "gone-soon" not in runtime.names()
+
+
+def test_unchanged_broken_skill_is_not_retried_until_fixed(tmp_path):
+    skills = tmp_path / "skills"
+
+    skill_dir = skills / "flaky"
+    skill_dir.mkdir(parents=True)
+
+    # Missing description: registration fails, error cached.
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: flaky\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    assert "flaky" not in runtime.names()
+    assert skill_dir.resolve() in runtime._registry.errors
+
+    runtime.refresh()
+
+    # Unchanged: still broken, still skipped.
+    assert skill_dir.resolve() in runtime._registry.errors
+
+    # Fixed on disk: next refresh recovers.
+    import time
+
+    time.sleep(0.01)
+
+    make_skill_dir(skills, "flaky", description="now fine")
+
+    runtime.refresh()
+
+    assert "flaky" in runtime.names()
+    assert skill_dir.resolve() not in runtime._registry.errors
+
+
+def test_duplicate_name_across_workspace_dirs_is_rejected(tmp_path):
+    skills = tmp_path / "skills"
+
+    make_skill_dir(skills, "twin", description="first wins")
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    twin_dir = skills / "twin-clone"
+    twin_dir.mkdir(parents=True)
+
+    (twin_dir / "SKILL.md").write_text(
+        "---\nname: twin\ndescription: second loses\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    runtime.refresh()
+
+    # The first source survives untouched.
+    assert runtime.get_metadata("twin").description == "first wins"
+    assert twin_dir.resolve() in runtime._registry.errors
+
+
+def test_names_get_metadata_and_catalog_ordering(tmp_path):
+    skills = tmp_path / "skills"
+
+    make_skill_dir(skills, "zeta", description="last")
+    make_skill_dir(skills, "alpha", description="first")
+
+    runtime = SkillRuntime(workspace_skills=skills)
+    runtime.discover()
+
+    assert runtime.names() == ("alpha", "zeta")
+
+    catalog = runtime.catalog()
+
+    assert [m.name for m in catalog] == ["alpha", "zeta"]
+
+    alpha = runtime.get_metadata("alpha")
+
+    assert alpha is not None
+    assert alpha.description == "first"
+    assert runtime.get_metadata("missing") is None
+
+
+def test_missing_builtin_root_is_silently_skipped(tmp_path):
+    runtime = SkillRuntime(
+        workspace_skills=tmp_path / "ws",
+        builtin_skills=[tmp_path / "does-not-exist"],
+    )
+
+    runtime.discover()  # must not raise
+
+    assert runtime.names() == ()
+
+
+def test_unknown_skill_error_is_part_of_validation_family():
+    from src.nan_itself.skills import (
+        SkillValidationError,
+        UnknownSkillError,
+    )
+
+    assert issubclass(UnknownSkillError, SkillValidationError)
+    assert issubclass(SkillValidationError, ValueError)

@@ -14,11 +14,6 @@ mcp_servers:
       - "@playwright/mcp@0.0.79"
       - "--headless"
 
-  touchpoint:
-    command: touchpoint-mcp
-    env:
-      TOUCHPOINT_MODE: no-vision
-
   command:
     command: uvx
     args:

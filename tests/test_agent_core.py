@@ -10,11 +10,12 @@ from src.nan_itself.agent.core import (
 from src.nan_itself.agent.runtime import (
     AgentContext,
 )
-from src.nan_itself.skills.facade import (
+from src.nan_itself.skills import (
+    UnknownSkillError,
     Skill,
     SkillMetadata,
 )
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     ProviderRuntime,
     Provider,
     ProviderSpec,
@@ -57,9 +58,13 @@ class FakeModules:
         }
 
         self.queries = []
+        self.turn_records: list = []
 
     def snapshot(self):
         return self.snapshot_value
+
+    def deliver_turn(self, record):
+        self.turn_records.append(record)
 
     async def query_snapshot(
         self,
@@ -111,13 +116,21 @@ class FakeSkills:
         return tuple(self.skills)
 
     def activate(self, name):
-        return self.skills[name]
+        try:
+            return self.skills[name]
+        except KeyError:
+            raise UnknownSkillError(f"Unknown Skill: {name}")
 
     def catalog(self):
         return [
             self.skills[name].metadata
             for name in sorted(self.skills)
         ]
+
+    def refresh(self):
+        self.refresh_calls = (
+            getattr(self, "refresh_calls", 0) + 1
+        )
 
 
 def make_provider_runtime():
@@ -142,16 +155,16 @@ async def test_core_agent_produces_final_response():
     modules = FakeModules()
     providers = make_provider_runtime()
 
-    core_skill = make_skill()
+    core = make_skill()
 
     agent = CoreAgent(
         llm=llm,
         modules=modules,
         providers=providers,
         skills=FakeSkills({
-            "core": core_skill,
+            "core": core,
         }),
-        core_skill=core_skill,
+        persona_source=lambda: "You are using the core skill.",
     )
 
     result = await agent.run(
@@ -165,7 +178,7 @@ async def test_core_agent_produces_final_response():
     request = llm.requests[0]
 
     assert request.messages[0].role == "system"
-    assert "core skill" in (
+    assert "You are using the core skill." in (
         request.messages[0].content or ""
     )
 
@@ -276,16 +289,16 @@ async def test_core_agent_executes_mcp_tool_then_continues():
     ])
 
     modules = FakeModules()
-    core_skill = make_skill()
+    core = make_skill()
 
     agent = CoreAgent(
         llm=llm,
         modules=modules,
         providers=runtime,
         skills=FakeSkills({
-            "core": core_skill,
+            "core": core,
         }),
-        core_skill=core_skill,
+        persona_source=lambda: "You are using the core skill.",
     )
 
     result = await agent.run(
@@ -339,16 +352,16 @@ async def test_subagent_is_parallel_and_shares_snapshot():
     llm = FakeLLM(responses)
 
     modules = FakeModules()
-    core_skill = make_skill()
+    core = make_skill()
 
     agent = CoreAgent(
         llm=llm,
         modules=modules,
         providers=ProviderRuntime(),
         skills=FakeSkills({
-            "core": core_skill,
+            "core": core,
         }),
-        core_skill=core_skill,
+        persona_source=lambda: "You are using the core skill.",
     )
 
     result = await agent.run(
@@ -442,7 +455,7 @@ async def test_subagent_can_switch_its_own_skill():
             "core": core,
             "research": research,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     result = await agent.run(
@@ -460,7 +473,7 @@ async def test_subagent_can_switch_its_own_skill():
     first_child_request = llm.requests[2]
     switched_request = llm.requests[3]
 
-    # The child starts on the inherited core skill...
+    # The child starts with no skill at all: persona + catalog only.
     first_system = (
         first_child_request.messages[0].content
         or ""
@@ -473,12 +486,14 @@ async def test_subagent_can_switch_its_own_skill():
 
     assert (
         "You are using the core skill."
-        in first_system
+        not in first_system
     )
+
+    assert "CORE" in first_system
 
     # ...and sees the skill catalog for switching.
     assert (
-        "[Available Skills]"
+        "<skills>"
         in first_system
     )
 
@@ -493,42 +508,6 @@ async def test_subagent_can_switch_its_own_skill():
         "You are using the research skill."
         in switched_system
     )
-
-
-@pytest.mark.asyncio
-async def test_recent_history_is_bounded():
-    llm = FakeLLM([
-        LLMResponse(
-            content=f"answer-{index}",
-            tool_calls=[],
-            model="fake",
-            usage=Usage(),
-            provider="openai",
-            finish_reason="stop",
-        )
-        for index in range(6)
-    ])
-
-    modules = FakeModules()
-    core = make_skill()
-
-    agent = CoreAgent(
-        llm=llm,
-        modules=modules,
-        providers=ProviderRuntime(),
-        skills=FakeSkills({
-            "core": core,
-        }),
-        core_skill=core,
-        history_token_budget=55,
-    )
-
-    for index in range(6):
-        await agent.run(
-            f"user-{index}"
-        )
-
-    assert len(agent._main_history) == 4
 
 
 @pytest.mark.asyncio
@@ -570,7 +549,7 @@ async def test_sleep_tool_blocks_only_current_agent_execution():
         skills=FakeSkills({
             "core": core,
         }),
-        core_skill=core,
+        persona_source=lambda: "CORE",
     )
 
     result = await agent.run(

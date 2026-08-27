@@ -106,38 +106,6 @@ async def test_subagent_gets_same_world_snapshot():
     assert observed[1] is root.world
 
 
-@pytest.mark.asyncio
-async def test_subagent_has_independent_history():
-    runtime = AgentRuntime()
-
-    root = runtime.create_root(
-        history=("root-message",),
-    )
-
-    observed = []
-
-    async def worker(context):
-        observed.append(context.history)
-
-    handle = runtime.dispatch(
-        root,
-        task="work",
-        worker=worker,
-        history=("subagent-message",),
-    )
-
-    await handle.wait()
-
-    assert root.history == (
-        "root-message",
-    )
-
-    assert observed == [
-        (
-            "subagent-message",
-        )
-    ]
-
 
 def test_subagent_gets_new_identity():
     runtime = AgentRuntime()

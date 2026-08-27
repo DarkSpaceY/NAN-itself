@@ -23,8 +23,8 @@ class AgentContext:
     Runtime context owned by one Agent execution.
 
     `world` is shared by all Agents within the same dispatch tree.
-    `history` belongs only to this Agent.
-    `skill` identifies the currently active Skill.
+    `skill` identifies the currently active Skill (subagents may
+    switch it via activate_skill).
     """
 
     agent_hash: str
@@ -34,8 +34,6 @@ class AgentContext:
 
     task: str | None
 
-    history: tuple[Any, ...]
-
     skill: Any | None
 
     world: Mapping[str, Any]
@@ -43,36 +41,6 @@ class AgentContext:
     metadata: Mapping[str, Any] = field(
         default_factory=dict,
     )
-
-    def with_history(
-        self,
-        *entries: Any,
-    ) -> "AgentContext":
-        return AgentContext(
-            agent_hash=self.agent_hash,
-            parent_hash=self.parent_hash,
-            depth=self.depth,
-            task=self.task,
-            history=self.history + entries,
-            skill=self.skill,
-            world=self.world,
-            metadata=self.metadata,
-        )
-
-    def with_skill(
-        self,
-        skill: Any,
-    ) -> "AgentContext":
-        return AgentContext(
-            agent_hash=self.agent_hash,
-            parent_hash=self.parent_hash,
-            depth=self.depth,
-            task=self.task,
-            history=self.history,
-            skill=skill,
-            world=self.world,
-            metadata=self.metadata,
-        )
 
 
 class SubagentHandle:
@@ -164,7 +132,6 @@ class AgentRuntime:
         self,
         *,
         world: Mapping[str, Any] | None = None,
-        history: tuple[Any, ...] = (),
         skill: Any | None = None,
         task: str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -176,7 +143,6 @@ class AgentRuntime:
             parent_hash=None,
             depth=0,
             task=task,
-            history=tuple(history),
             skill=skill,
             world=self._freeze_world(world or {}),
             metadata=MappingProxyType(
@@ -199,7 +165,6 @@ class AgentRuntime:
         task: str,
         worker: SubagentWorker,
         skill: Any | None = None,
-        history: tuple[Any, ...] = (),
         metadata: Mapping[str, Any] | None = None,
     ) -> SubagentHandle:
         """
@@ -208,8 +173,7 @@ class AgentRuntime:
         The new Subagent:
             - gets a new identity
             - inherits the parent's world snapshot
-            - gets independent history
-            - may choose a different Skill
+            - starts with an empty Skill by default
             - increments depth
         """
         child_depth = parent.depth + 1
@@ -228,7 +192,6 @@ class AgentRuntime:
             parent_hash=parent.agent_hash,
             depth=child_depth,
             task=task,
-            history=tuple(history),
             skill=skill if skill is not None else parent.skill,
             world=parent.world,
             metadata=MappingProxyType(

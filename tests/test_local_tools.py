@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     AgentToolView,
     LocalToolProvider,
     ProviderRuntime,
@@ -14,6 +14,7 @@ from src.nan_itself.tools.facade import (
     Provider,
     tool,
 )
+from src.nan_itself.tools import local as local_backend
 
 
 def make_local_runtime(
@@ -356,7 +357,7 @@ async def test_duplicate_builtin_ids_are_rejected(tmp_path):
 TOOL_FILE_SOURCE = '''
 # @tool
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     tool,
 )
@@ -471,7 +472,7 @@ async def test_file_without_tool_header_is_ignored(tmp_path):
     write_tool_file(
         local_dir / "plain.py",
         '''
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     tool,
 )
@@ -532,19 +533,17 @@ async def test_hot_reload_replaces_the_provider_instance(
 
     connect_calls: list[str] = []
 
-    original_connect = (
-        runtime._connect_local_provider
-    )
+    original_build = local_backend.build_provider
 
-    def counting_connect(spec, cls):
+    def counting_build(spec, cls):
         connect_calls.append(spec.name)
 
-        return original_connect(spec, cls)
+        return original_build(spec, cls)
 
     monkeypatch.setattr(
-        runtime,
-        "_connect_local_provider",
-        counting_connect,
+        local_backend,
+        "build_provider",
+        counting_build,
     )
 
     await runtime._scan_workspace()
@@ -630,7 +629,7 @@ async def test_broken_file_records_error_without_crashing(
 
     assert runtime.providers == {}
 
-    assert tool_file.resolve() in runtime._local_errors
+    assert tool_file.resolve() in runtime._local_tracker.errors
 
     # Fixing the file recovers on the next scan.
     await asyncio.sleep(0.01)
@@ -653,7 +652,7 @@ async def test_file_with_multiple_classes_is_rejected(tmp_path):
         '''
 # @tool
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     tool,
 )
@@ -683,7 +682,7 @@ class B(LocalToolProvider):
     assert runtime.providers == {}
 
     assert (local_dir / "multi.py").resolve() in (
-        runtime._local_errors
+        runtime._local_tracker.errors
     )
 
 
@@ -698,7 +697,7 @@ async def test_workspace_cannot_override_builtin_local(tmp_path):
         '''
 # @tool
 
-from src.nan_itself.tools.facade import (
+from src.nan_itself.tools import (
     LocalToolProvider,
     tool,
 )
@@ -763,7 +762,7 @@ async def test_cross_source_name_conflict_is_rejected(tmp_path):
         first: {"notes"},
     }
 
-    assert second in runtime._local_errors
+    assert second in runtime._local_tracker.errors
     assert second not in runtime._local_sources
 
 
@@ -840,7 +839,7 @@ async def test_route_switches_between_mcp_and_local(tmp_path):
 
     await runtime._scan_workspace()
 
-    view = runtime.create_agent_view()
+    view = AgentToolView(runtime)
 
     # Only route is visible before activation.
     initial = await view.list_tools()
@@ -914,8 +913,8 @@ async def test_views_route_local_providers_independently(tmp_path):
 
     await runtime._scan_workspace()
 
-    main_view = runtime.create_agent_view()
-    other_view = runtime.create_agent_view()
+    main_view = AgentToolView(runtime)
+    other_view = AgentToolView(runtime)
 
     await main_view.call_tool(
         "route",
@@ -935,3 +934,250 @@ async def test_views_route_local_providers_independently(tmp_path):
     assert [item.name for item in other_tools] == [
         "route",
     ]
+
+
+# ============================================================================
+# Framework unit edges
+# ============================================================================
+
+
+def test_tool_decorator_rejects_non_function():
+    import inspect
+
+    with pytest.raises(TypeError, match="only decorate"):
+        tool()(str.upper)
+
+
+def test_duplicate_tool_name_across_hierarchy_is_rejected():
+    class Base(LocalToolProvider):
+        id = "dup_base"
+
+        @tool(description="base")
+        def read(self) -> str:
+            return "base"
+
+    class Child(Base):
+        id = "dup_child"
+
+        @tool(description="child")
+        def read(self) -> str:
+            return "child"
+
+    with pytest.raises(ValueError, match="duplicates tool name"):
+        Child()
+
+
+def test_var_args_parameter_is_rejected():
+    class Broken(LocalToolProvider):
+        id = "varargs"
+
+        @tool(description="bad")
+        def collect(self, *parts: int) -> int:
+            return sum(parts)
+
+    with pytest.raises(ValueError, match="var args"):
+        Broken()
+
+
+def test_missing_annotation_is_rejected():
+    class Broken(LocalToolProvider):
+        id = "no_annot"
+
+        @tool(description="bad")
+        def half(self, x):  # noqa: ANN001 - deliberately unannotated
+            return x / 2
+
+    with pytest.raises(ValueError, match="type-annotated"):
+        Broken()
+
+
+def test_docstring_fallback_and_custom_name_and_schema_titles():
+    class Calc(LocalToolProvider):
+        id = "calc"
+
+        @tool(name="double_it")
+        def double(self, n: int) -> int:
+            """Double an integer."""
+            return n * 2
+
+    instance = Calc()
+
+    method = instance.get_tool_method("double_it")
+
+    assert method is not None
+    assert method.description == "Double an integer."
+
+    schema = method.input_schema()
+
+    assert "title" not in schema
+    assert all(
+        "title" not in prop
+        for prop in schema["properties"].values()
+    )
+    assert set(schema["properties"]) == {"n"}
+    assert schema["required"] == ["n"]
+
+
+def test_validate_class_edges():
+    import abc
+
+    from src.nan_itself.tools.local import validate_class
+
+    with pytest.raises(TypeError):
+        validate_class(object())
+
+    with pytest.raises(TypeError):
+        validate_class(LocalToolProvider)
+
+    class Abstract(LocalToolProvider, abc.ABC):
+        id = "abstract"
+
+        @abc.abstractmethod
+        def must_impl(self) -> str: ...
+
+    with pytest.raises(TypeError, match="concrete"):
+        validate_class(Abstract)
+
+    class EmptyId(LocalToolProvider):
+        id = ""
+
+    with pytest.raises(ValueError, match="non-empty string id"):
+        validate_class(EmptyId)
+
+
+def test_has_tool_header_only_scans_head_window(tmp_path):
+    from src.nan_itself.tools.local import has_tool_header
+
+    late = tmp_path / "late.py"
+    late.write_text(
+        "\n" * 30 + "# @tool\n",
+        encoding="utf-8",
+    )
+
+    assert has_tool_header(late) is False
+    assert has_tool_header(tmp_path / "missing.py") is False
+
+
+def test_load_class_from_file_rejects_multiple_classes(tmp_path):
+    import sys as _sys
+
+    from src.nan_itself.tools.local import load_class_from_file
+
+    path = tmp_path / "multi.py"
+
+    content = (
+        "# @tool\n"
+        "from src.nan_itself.tools import LocalToolProvider\n"
+        "\n"
+        "class A(LocalToolProvider):\n"
+        "    id = \"a\"\n"
+        "\n"
+        "class B(LocalToolProvider):\n"
+        "    id = \"b\"\n"
+    )
+
+    path.write_text(content, encoding="utf-8")
+
+    before = set(_sys.modules)
+
+    with pytest.raises(RuntimeError, match="exactly one"):
+        load_class_from_file(path)
+
+    # Failed discovery must not leak its synthetic module.
+    leaked = [
+        name
+        for name in _sys.modules
+        if name not in before
+        and name.startswith("_workspace_tool_")
+    ]
+
+    assert leaked == []
+
+
+def test_load_class_from_file_syntax_error_cleans_up(tmp_path):
+    import sys as _sys
+
+    from src.nan_itself.tools.local import load_class_from_file
+
+    path = tmp_path / "broken.py"
+
+    path.write_text("def oops(:\n", encoding="utf-8")
+
+    before = set(_sys.modules)
+
+    with pytest.raises(SyntaxError):
+        load_class_from_file(path)
+
+    leaked = [
+        name
+        for name in _sys.modules
+        if name not in before
+        and name.startswith("_workspace_tool_")
+    ]
+
+    assert leaked == []
+
+
+def test_local_provider_spec_shape():
+    spec = local_backend.local_provider_spec(
+        name="n",
+        source="somewhere.py",
+        origin="workspace",
+    )
+
+    assert spec.kind == "local"
+    assert spec.file is None
+    assert spec.source == "somewhere.py"
+
+
+# ============================================================================
+# Hot reload must never execute stale bytecode
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_same_size_edit_still_reloads_fresh_code(tmp_path):
+    """
+    Regression: the dynamic loader used spec_from_file_location,
+    whose bytecode cache validates on coarse mtime + size. A
+    same-length edit within the same second executed STALE code.
+    """
+    import time
+
+    local_dir = tmp_path / "workspace" / "tools" / "local"
+
+    target = local_dir / "probe.py"
+
+    V1 = (
+        "# @tool\n\n"
+        "from src.nan_itself.tools import LocalToolProvider, tool\n\n"
+        "class Probe(LocalToolProvider):\n"
+        "    id = \"probe\"\n\n"
+        "    @tool(description=\"value\")\n"
+        "    def value(self) -> str:\n"
+        "        return \"1\"\n"
+    )
+
+    V2 = V1.replace('return "1"', 'return "2"')
+
+    assert len(V1) == len(V2)
+
+    write_tool_file(target, V1)
+
+    runtime = make_local_runtime(tmp_path)
+
+    await runtime._scan_workspace()
+
+    result = await runtime.call_tool("probe", "value", {})
+
+    assert result.content[0].text == "1"
+
+    time.sleep(0.05)  # same wall-clock second, different intent
+
+    write_tool_file(target, V2)
+
+    await runtime._scan_workspace()
+
+    result = await runtime.call_tool("probe", "value", {})
+
+    assert result.content[0].text == "2"

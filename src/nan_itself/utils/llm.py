@@ -85,6 +85,11 @@ class LLMRequest(BaseModel):
         default_factory=list,
     )
 
+    # OpenAI-compatible JSON mode ({"type": "json_object"}).
+    # Used by structured machine-facing calls such as the memory
+    # module's REVIEW/MERGE operations; None for normal turns.
+    response_format: dict | None = None
+
 
 class LLMResponse(BaseModel):
     """
@@ -312,6 +317,11 @@ class LLMProvider:
 
         if tools:
             kwargs["tools"] = tools
+
+        if request.response_format is not None:
+            kwargs["response_format"] = (
+                request.response_format
+            )
 
         stream = await self.client.chat.completions.create(
             **kwargs

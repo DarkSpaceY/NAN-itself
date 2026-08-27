@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from dataclasses import dataclass, field
 
 import pytest
@@ -19,11 +18,14 @@ class StubAgent:
 
     def __init__(self) -> None:
         self.runs: list[str] = []
-        self._late_reports: deque[str] = deque()
+        self._pending_reports: list[str] = []
         self.fail_next = 0
         self.started_turns = 0
         self.finished_turns = 0
         self.block: asyncio.Event | None = None
+
+    def has_pending_reports(self) -> bool:
+        return bool(self._pending_reports)
 
     async def run(self, inputs: str) -> object:
         self.started_turns += 1
@@ -36,7 +38,7 @@ class StubAgent:
             await self.block.wait()
 
         self.runs.append(inputs)
-        self._late_reports.clear()
+        self._pending_reports.clear()
         self.finished_turns += 1
 
         return object()
@@ -130,7 +132,7 @@ async def test_loop_survives_repeated_failures():
 async def test_late_report_triggers_empty_input_cycle():
     agent = StubAgent()
 
-    agent._late_reports.append("pending report")
+    agent._pending_reports.append("pending report")
 
     inbox, loop = make_loop(agent)
 
