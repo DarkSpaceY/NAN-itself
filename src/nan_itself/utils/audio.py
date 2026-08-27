@@ -66,6 +66,142 @@ def rms_dbfs(pcm: bytes | memoryview) -> float:
     return max(-120.0, min(0.0, dbfs))
 
 
+def zero_crossing_rate(pcm: bytes | memoryview) -> float:
+    """
+    Fraction of adjacent-sample sign changes in one chunk.
+    Pure tone -> low; hiss/clatter -> high.
+    """
+    import array
+
+    samples = array.array("h")
+
+    samples.frombytes(bytes(pcm))
+
+    count = len(samples)
+
+    if count < 2:
+        return 0.0
+
+    crossings = 0
+
+    previous = samples[0]
+
+    for sample in samples[1:]:
+        if (sample >= 0) != (previous >= 0):
+            crossings += 1
+
+        previous = sample
+
+    return crossings / (count - 1)
+
+
+def _spectrum(pcm: bytes | memoryview):
+    import numpy as np
+
+    samples = np.frombuffer(
+        bytes(pcm),
+        dtype=np.int16,
+    ).astype(np.float32) / 32768.0
+
+    magnitude = np.abs(np.fft.rfft(samples))
+
+    freqs = np.fft.rfftfreq(
+        len(samples),
+        d=1.0 / SAMPLE_RATE,
+    )
+
+    return freqs, magnitude
+
+
+def spectral_centroid_hz(pcm: bytes | memoryview) -> float:
+    """
+    Magnitude-weighted mean frequency: bright vs muffled sound.
+    """
+    freqs, magnitude = _spectrum(pcm)
+
+    total = magnitude.sum()
+
+    if total <= 0:
+        return 0.0
+
+    return float((freqs * magnitude).sum() / total)
+
+
+def spectral_flatness(pcm: bytes | memoryview) -> float:
+    """
+    Geometric/arithmetic mean ratio of the spectrum: 0 = tonal,
+    1 = white noise. Guarded for near-silent frames.
+    """
+    import numpy as np
+
+    _, magnitude = _spectrum(pcm)
+
+    floor = 1e-10
+
+    magnitude = magnitude + floor
+
+    geometric = float(np.exp(np.log(magnitude).mean()))
+
+    arithmetic = float(magnitude.mean())
+
+    if arithmetic <= 0:
+        return 0.0
+
+    return min(1.0, geometric / arithmetic)
+
+
+class AmbientClassifier:
+    """
+    Heuristic speech/tonal/noisy/quiet ruling over windowed
+    frame features. Thresholds are attributes, not constants:
+    this is W2's coarse triage, not a claim about acoustics.
+
+    Priority: speech (VAD verdict) > quiet (energy) > noisy
+    (flat spectrum) > tonal (low ZCR + low flatness).
+    """
+
+    def __init__(
+        self,
+        quiet_margin_db: float = 4.0,
+        noisy_flatness_min: float = 0.35,
+        tonal_zcr_max: float = 0.12,
+        tonal_flatness_max: float = 0.20,
+    ) -> None:
+        self.quiet_margin_db = quiet_margin_db
+
+        self.noisy_flatness_min = noisy_flatness_min
+
+        self.tonal_zcr_max = tonal_zcr_max
+
+        self.tonal_flatness_max = tonal_flatness_max
+
+    def classify(
+        self,
+        *,
+        is_speech: bool,
+        dbfs: float,
+        noise_floor: float,
+        zcr: float,
+        flatness: float,
+    ) -> str:
+        if is_speech:
+            return "speech"
+
+        if dbfs < noise_floor + self.quiet_margin_db:
+            return "quiet"
+
+        if flatness >= self.noisy_flatness_min:
+            return "noisy"
+
+        if (
+            zcr <= self.tonal_zcr_max
+            and flatness <= self.tonal_flatness_max
+        ):
+            return "tonal"
+
+        return "noisy" if zcr > 0.25 else "tonal"
+
+
 class FeatureTracker:
     """
     Rolling level statistics with silence-anchored noise floor.
@@ -347,10 +483,20 @@ class AudioPipeline:
         max_utterance_frames: int = 833,
         transient_rise_db: float = 18.0,
         transient_cooldown_s: float = 1.0,
+        ambient_window_frames: int = 33,
     ) -> None:
         self.tracker = FeatureTracker()
 
         self.vad = VadGate(vad_aggressiveness)
+
+        self.classifier = AmbientClassifier()
+
+        # ~1s of 30ms frames: stable enough for classification.
+        self.feature_window: deque[tuple[float, float, float]] = (
+            deque(maxlen=max(1, ambient_window_frames))
+        )
+
+        self.ambient_kind = "quiet"
 
         self.segmenter = UtteranceSegmenter(
             preroll_frames=preroll_frames,
@@ -393,6 +539,35 @@ class AudioPipeline:
         if dbfs > self.tracker.noise_floor or is_speech:
             self.last_sound_monotonic = now
 
+        # W2 ambient features: windowed means feed the classifier.
+        self.feature_window.append(
+            (
+                zero_crossing_rate(pcm),
+                spectral_centroid_hz(pcm),
+                spectral_flatness(pcm),
+            ),
+        )
+
+        zcr = sum(f[0] for f in self.feature_window) / len(
+            self.feature_window,
+        )
+
+        centroid = sum(f[1] for f in self.feature_window) / len(
+            self.feature_window,
+        )
+
+        flatness = sum(f[2] for f in self.feature_window) / len(
+            self.feature_window,
+        )
+
+        self.ambient_kind = self.classifier.classify(
+            is_speech=is_speech,
+            dbfs=dbfs,
+            noise_floor=self.tracker.noise_floor,
+            zcr=zcr,
+            flatness=flatness,
+        )
+
         if (
             not is_speech
             and dbfs >= self.tracker.noise_floor + self.transient_rise_db
@@ -413,6 +588,14 @@ class AudioPipeline:
         stats["mode"] = self.vad.mode
 
         stats["speech_active"] = self.speech_active
+
+        stats["zcr"] = round(zcr, 3)
+
+        stats["centroid_hz"] = round(centroid, 1)
+
+        stats["flatness"] = round(flatness, 3)
+
+        stats["ambient_kind"] = self.ambient_kind
 
         self.latest_stats = stats
 

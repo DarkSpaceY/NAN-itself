@@ -15,11 +15,15 @@ from src.nan_itself.modules.builtin.audio import (
     AudioModule,
 )
 from src.nan_itself.utils.audio import (
+    AmbientClassifier,
     AudioPipeline,
     EchoTranscriber,
     FeatureTracker,
     UtteranceSegmenter,
     rms_dbfs,
+    spectral_centroid_hz,
+    spectral_flatness,
+    zero_crossing_rate,
 )
 
 
@@ -75,6 +79,9 @@ def make_pipeline() -> AudioPipeline:
         trailing_silence_frames=7,
         min_utterance_frames=4,
         max_utterance_frames=30,
+        # Short window: keeps feature means reactive enough for
+        # step changes in these deterministic scenarios.
+        ambient_window_frames=10,
     )
 
     pipeline.vad = AlwaysNonSpeechGate()
@@ -295,7 +302,12 @@ def test_accept_transcript_records_and_dedups():
     assert len(module._heard) == 1
 
 
-def test_query_renders_ambient_and_heard_newest_first():
+def test_query_renders_inside_module_territory():
+    """
+    Territory contract: one module, one [Audio] header; every
+    line (ambient, heard, diagnostics) lives inside it. The
+    module must not mint global-looking sections in <module>.
+    """
     module = make_module()
 
     with module._state_lock:
@@ -320,23 +332,22 @@ def test_query_renders_ambient_and_heard_newest_first():
 
     rendered = time_machine_query(module)
 
-    assert "[Ambient]" in rendered
+    assert rendered.startswith("[Audio]\n")
 
     assert "- hearing: speech active" in rendered
 
     assert "-38.2" in rendered and "-55.1" in rendered
 
-    assert "[Heard]" in rendered
+    # Sub-content renders as territory lines, not sections.
+    assert "[Ambient]" not in rendered
 
-    heard_section = rendered.split("[Heard]")[1]
+    assert "[Heard]" not in rendered
 
-    latest_at = heard_section.index("latest words")
+    assert rendered.index("latest words") < rendered.index(
+        "earlier words",
+    )
 
-    earlier_at = heard_section.index("earlier words")
-
-    assert latest_at < earlier_at
-
-    assert "(conf 0.42)" in heard_section
+    assert "(conf 0.42)" in rendered
 
 
 def time_machine_query(module):
@@ -369,13 +380,13 @@ def test_query_render_limit_and_preview_cap():
 
     rendered = time_machine_query(module)
 
-    heard_section = rendered.split("[Heard]")[1]
+    assert rendered.startswith("[Audio]\n")
 
-    assert heard_section.count('"') // 2 == 3
+    assert rendered.count('"') // 2 == 3
 
-    assert '"xxxxxxxxxx' in heard_section
+    assert '"xxxxxxxxxx' in rendered
 
-    assert long_text not in heard_section
+    assert long_text not in rendered
 
 
 def test_query_returns_none_for_dead_empty_room():
@@ -404,7 +415,9 @@ def test_query_still_renders_heard_even_when_quiet_long():
 
     rendered = time_machine_query(module)
 
-    assert "[Heard]" in rendered
+    assert rendered.startswith("[Audio]\n")
+
+    assert "- heard " in rendered
 
     assert "past sentence" in rendered
 
@@ -611,3 +624,158 @@ def dispatch_event(module, event) -> None:
 
     elif event["type"] == "utterance":
         module._enqueue_utterance(event["utterance"])
+
+
+# ======================================================================
+# W2: spectral features + ambient classification
+# ======================================================================
+
+
+def noise_frame(seed: int, amplitude: int = 1500) -> bytes:
+    import random
+
+    rng = random.Random(seed)
+
+    import array
+
+    samples = array.array(
+        "h",
+        [
+            rng.randint(-amplitude, amplitude)
+            for _ in range(SAMPLE_RATE * FRAME_MS // 1000)
+        ],
+    )
+
+    return samples.tobytes()
+
+
+def test_zero_crossing_rate_tone_vs_noise():
+    assert rms_dbfs(level_frame(-20.0)) > -30.0  # sanity
+
+    # Constant frame: no sign changes at all.
+    assert zero_crossing_rate(level_frame(-20.0)) == 0.0
+
+    # Broadband noise: roughly half the samples flip sign.
+    assert zero_crossing_rate(noise_frame(1)) > 0.3
+
+
+def test_spectral_centroid_orders_tone_vs_noise():
+    # Same content each frame: centroid for white noise sits far
+    # above the near-DC constant frame.
+    tone = spectral_centroid_hz(level_frame(-20.0))
+
+    hiss = spectral_centroid_hz(noise_frame(2))
+
+    assert hiss > tone
+
+
+def test_spectral_flatness_tone_vs_noise():
+    tone_flatness = spectral_flatness(level_frame(-20.0))
+
+    noise_flatness = spectral_flatness(noise_frame(3))
+
+    assert tone_flatness < 0.1
+
+    assert noise_flatness > 0.3
+
+
+def test_ambient_classifier_decision_matrix():
+    classifier = AmbientClassifier()
+
+    base = dict(
+        dbfs=-30.0,
+        noise_floor=-60.0,
+        zcr=0.05,
+        flatness=0.05,
+    )
+
+    assert classifier.classify(is_speech=True, **base) == "speech"
+
+    assert classifier.classify(is_speech=False, **base) == "tonal"
+
+    assert (
+        classifier.classify(
+            is_speech=False,
+            dbfs=-59.0,
+            noise_floor=-60.0,
+            zcr=0.05,
+            flatness=0.05,
+        )
+        == "quiet"
+    )
+
+    assert (
+        classifier.classify(
+            is_speech=False,
+            dbfs=-30.0,
+            noise_floor=-60.0,
+            zcr=0.5,
+            flatness=0.8,
+        )
+        == "noisy"
+    )
+
+    # Ambiguous mid-flatness broadband clatter -> noisy.
+    assert (
+        classifier.classify(
+            is_speech=False,
+            dbfs=-30.0,
+            noise_floor=-60.0,
+            zcr=0.3,
+            flatness=0.28,
+        )
+        == "noisy"
+    )
+
+
+def test_pipeline_populates_ambient_features_and_kind():
+    pipeline = make_pipeline()
+
+    quiet = level_frame(-120.0)
+
+    # Constant loud hum: non-speech under the stub gate, above
+    # the quiet margin, spectrally flat-none -> tonal.
+    hum = level_frame(-25.0)
+
+    t = [0.0]
+
+    def step(pcm):
+        t[0] += 0.03
+
+        return pipeline.process(pcm, now=t[0])
+
+    for _ in range(35):
+        step(quiet)
+
+    assert pipeline.latest_stats["ambient_kind"] == "quiet"
+
+    for _ in range(40):
+        step(hum)
+
+    stats = pipeline.latest_stats
+
+    assert stats["ambient_kind"] == "tonal"
+
+    assert stats["zcr"] == pytest.approx(0.0, abs=1e-6)
+
+    assert stats["flatness"] < 0.1
+
+    # Windowed means: centroid is a finite number.
+    assert stats["centroid_hz"] >= 0.0
+
+    # Broadband noise louder than the adapted floor flips the
+    # ruling... but only transiently: the noise floor tracks
+    # sustained ambience, so a steady hiss becomes the new
+    # normal and the room reads quiet again. Both halves are
+    # contractual.
+    for i in range(6):
+        step(noise_frame(10 + i, amplitude=6000))
+
+    assert pipeline.latest_stats["ambient_kind"] == "noisy"
+
+    for i in range(60):
+        step(noise_frame(50 + i, amplitude=6000))
+
+    assert pipeline.latest_stats["ambient_kind"] == "quiet"
+
+    assert pipeline.tracker.noise_floor > -30.0

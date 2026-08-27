@@ -76,6 +76,8 @@ class AudioModule(Module):
 
     transient_rise_db: float = 18.0
 
+    ambient_window_frames: int = 33
+
     hear_history: int = 8
 
     hear_render_limit: int = 5
@@ -125,6 +127,7 @@ class AudioModule(Module):
             min_utterance_frames=self.min_utterance_frames,
             max_utterance_frames=self.max_utterance_frames,
             transient_rise_db=self.transient_rise_db,
+            ambient_window_frames=self.ambient_window_frames,
         )
 
         self.transcriber = WhisperTranscriber(
@@ -440,26 +443,38 @@ class AudioModule(Module):
 
             heard = list(self._heard)
 
-        lines: list[str] = []
+        # One module, one territory: everything lives under the
+        # module's own header; no module may mint global-looking
+        # sections inside <module>.
+        lines = ["[Audio]"]
 
         if not stats.get("available"):
             reason = stats.get("reason") or "no input"
 
-            return "[Audio]\n" f"- input unavailable: {reason}"
+            lines.append(f"- input unavailable: {reason}")
+
+            return "\n".join(lines)
 
         quiet = stats.get("quiet_s")
 
         if stats.get("speech_active"):
-            hearing_line = "- hearing: speech active"
+            lines.append("- hearing: speech active")
         elif quiet is not None:
-            hearing_line = (
+            lines.append(
                 f"- hearing: quiet {self._fmt_span(quiet)}"
             )
         else:
-            hearing_line = "- hearing: no signal yet"
+            lines.append("- hearing: no signal yet")
 
-        lines.append("[Ambient]")
-        lines.append(hearing_line)
+        ambient_kind = stats.get("ambient_kind")
+
+        if (
+            ambient_kind
+            and not stats.get("speech_active")
+            and ambient_kind != "quiet"
+        ):
+            lines.append(f"- ambient: {ambient_kind}")
+
         lines.append(
             f"- level: {stats.get('level_dbfs')} dBFS "
             f"(noise floor {stats.get('noise_floor_dbfs')})"
@@ -478,20 +493,18 @@ class AudioModule(Module):
 
         heard_lines = self._render_heard(heard)
 
-        body = "\n".join(lines)
+        lines.extend(heard_lines)
 
-        if heard_lines:
-            body += "\n\n[Heard]\n" + "\n".join(heard_lines)
-
-        elif (
-            quiet is None
-            or quiet >= self.quiet_report_after_s
-        ) and stats.get("transcripts_total", 0) == 0:
+        if (
+            not heard_lines
+            and (quiet is None or quiet >= self.quiet_report_after_s)
+            and stats.get("transcripts_total", 0) == 0
+        ):
             # Nothing has ever been heard and the room is dead:
             # stay silent instead of spamming empty ambience.
             return None
 
-        return body
+        return "\n".join(lines)
 
     def _render_heard(
         self,
@@ -510,7 +523,9 @@ class AudioModule(Module):
 
             tag = "" if confidence >= 0.6 else f" (conf {confidence})"
 
-            out.append(f'- {clock}{tag} "{preview}"')
+            out.append(
+                f'- heard {clock}{tag} "{preview}"'
+            )
 
             if len(out) >= self.hear_render_limit:
                 break

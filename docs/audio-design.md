@@ -20,7 +20,9 @@
 再进代码。本文件只关心系统的形状。
 
 MVP 摘要：L1 能量（RMS/噪声底）+ L4 事件（VAD/静默/瞬态）
-+ L7 内容（STT/置信度/语言）。其余层按 features 文档的 W2–W6 波次推进。
++ L7 内容（STT/置信度/语言）+ W2 已并入 L2 特征（ZCR/质心/平坦度）
+与 L6 启发式环境三分类（speech/tonal/noisy/quiet）。
+其余层按 features 文档的 W3–W6 波次推进。
 
 ## 2. MVP 范围（本次实现）
 
@@ -49,19 +51,24 @@ TranscriptRing(deque maxlen=hear_history)
 - **on_turn(record)**：仅记录回合时间戳（maxlen=20），供未来把"听到的话"归属到对话上下文；不触发任何计算。
 - **持久化**：serialize 只存计数器与噪声底初始化值；话语环属于瞬态感知，重启即清空（人重新睁眼也会忘记梦里的话）。
 
-## 3. 渲染契约
+## 3. 渲染契约（领地规则）
+
+`<module>` 是所有模块共享的空间，但**框架不做任何模块标注**——
+因此每个模块的全部输出必须收拢在自己的领地头（模块 id）之下，
+禁止铸造看似全局的 section（如 `[Ambient]`、`[Heard]`）；
+领地内部用普通行表达子结构。这是多模块共存时命名空间的唯一防线。
 
 ```
-[Ambient]
+[Audio]
 - hearing: speech active / quiet 42s
+- ambient: tonal / noisy            # 仅非语音且非安静时出现
 - level: -38.2 dBFS (noise floor -55.1)
-
-[Heard]
-- 14:32 "嘿 NAN，帮我看下这个报错"
-- 14:31 (conf 0.42) "……什么东西响了一声"
+- sharp sound detected at 14:31     # 仅 60s 内出现过瞬态
+- heard 14:32 "嘿 NAN，帮我看下这个报错"
+- heard 14:31 (conf 0.42) "……什么东西响了一声"
 ```
 
-不可用时：
+不可用时（仍在本模块领地内，一行）：
 
 ```
 [Audio]
@@ -84,6 +91,7 @@ TranscriptRing(deque maxlen=hear_history)
 | min_utterance_ms | 250 | 过短丢弃 |
 | max_utterance_ms | 25000 | 强制收句 |
 | transient_rise_db | 18 | 瞬态触发阈值（相对噪声底） |
+| ambient_window_frames | 33 | 环境特征滑动窗口（≈1s，30ms 帧） |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |
 | quiet_report_after_s | 120 | 安静多久后不再输出 query |
