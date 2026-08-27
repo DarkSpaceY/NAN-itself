@@ -192,9 +192,4 @@ class SystemModule(Module):
 
             line += f" | battery {battery}% {state}"
 
-        net = facts.get("net_up")
-
-        if net is not None:
-            line += " | net up" if net else " | net down"
-
         return line

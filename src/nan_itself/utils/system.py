@@ -255,14 +255,6 @@ def _psutil_metrics() -> dict[str, Any]:
 
         out["charging"] = battery.power_plugged
 
-    nets = [
-        stats.isup
-        for name, stats in psutil.net_if_stats().items()
-        if name != "lo" and not name.startswith("lo")
-    ]
-
-    out["net_up"] = any(nets) if nets else None
-
     out["uptime"] = time.time() - psutil.boot_time()
 
     me = psutil.Process()
@@ -326,7 +318,6 @@ class SystemProbe:
         focus_fn: Callable[
             [], tuple[str, str] | None
         ] = foreground_app,
-        ssid_fn: Callable[[], str | None] = wifi_ssid,
         displays_fn: Callable[[], int | None] = display_count,
         metrics_fn: Callable[
             [], dict[str, Any]
@@ -346,8 +337,6 @@ class SystemProbe:
 
         self.focus_fn = focus_fn
 
-        self.ssid_fn = ssid_fn
-
         self.displays_fn = displays_fn
 
         self.metrics_fn = metrics_fn
@@ -365,8 +354,6 @@ class SystemProbe:
         )
 
         self._clock_offset: float | None = None
-
-        self._ssid: str | None = None
 
         self._focus: tuple[str, str] | None = None
 
@@ -408,15 +395,6 @@ class SystemProbe:
         else:
             if self._last_sample_mono is not None:
                 self.work_seconds += min(dt, 30.0)
-
-    def _check_ssid(self) -> None:
-        ssid = self.ssid_fn()
-
-        if ssid and self._ssid is not None and ssid != self._ssid:
-            self._emit(f'wifi -> "{ssid}"')
-
-        if ssid:
-            self._ssid = ssid
 
     def _check_focus(self, focus) -> None:
         if (
@@ -493,8 +471,6 @@ class SystemProbe:
         idle = self.idle_fn()
 
         self._check_work(idle, dt)
-
-        self._check_ssid()
 
         focus = self.focus_fn()
 

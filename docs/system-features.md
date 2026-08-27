@@ -56,7 +56,7 @@
 - now: 14:22 周四 (UTC+8)
 - focus: Code (NAN-itself — audio.py)
 - idle: 12s | work 25m | awake 6.2h
-- cpu 34% | mem 62% | disk 71% | battery 78% charging | net up
+- cpu 34% | mem 62% | disk 71% | battery 78% charging
 - events: woke 14:02 | wifi -> "Home-5G" | runaway: Xcode 95%
 - self: nan cpu 2.1% mem 310MB
 ```

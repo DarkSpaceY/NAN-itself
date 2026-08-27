@@ -89,10 +89,15 @@ async def run_agent_process() -> None:
             SystemModule,
         )
 
+        from src.nan_itself.modules.builtin.network import (
+            NetworkModule,
+        )
+
         builtin_modules = (
             MemoryModule,
             AudioModule,
             SystemModule,
+            NetworkModule,
         )
 
         logger.info("audio module enabled")

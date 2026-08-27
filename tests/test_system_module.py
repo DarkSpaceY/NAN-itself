@@ -66,7 +66,6 @@ def make_probe(
     focus=None,
     metrics=None,
     procs=None,
-    ssid="Home",
     displays=1,
     metrics_fn=None,
     procs_fn=None,
@@ -78,7 +77,6 @@ def make_probe(
         mono=clock.mono,
         idle_fn=idle if callable(idle) else Holder(idle),
         focus_fn=focus if callable(focus) else Holder(focus),
-        ssid_fn=ssid if callable(ssid) else Holder(ssid),
         displays_fn=displays if callable(displays) else Holder(displays),
         metrics_fn=metrics_fn or (lambda: dict(metrics or BASE_METRICS)),
         procs_fn=procs_fn or (lambda cache: list(procs or [])),
@@ -128,22 +126,6 @@ def test_wake_event_on_wall_clock_jump():
     probe.sample()
 
     assert sum("woke" in text for _, text in probe.events) == 1
-
-
-def test_ssid_change_event():
-    holder = Holder("Home")
-
-    probe, clock = make_probe(ssid=holder)
-
-    probe.sample()
-
-    holder.value = "Office-5G"
-
-    clock.advance(wall=10.0, mono=10.0)
-
-    probe.sample()
-
-    assert any('wifi -> "Office-5G"' in t for _, t in probe.events)
 
 
 def test_display_change_event():
@@ -274,7 +256,6 @@ def base_facts(**overrides):
         "disk": 40.0,
         "battery": 80,
         "charging": True,
-        "net_up": True,
         "uptime": 22500.0,
         "self_cpu": 2.1,
         "self_mem_mb": 310,
