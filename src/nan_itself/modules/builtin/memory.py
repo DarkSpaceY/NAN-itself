@@ -1546,7 +1546,15 @@ class MemoryModule(Module):
         sections = []
 
         if core_body:
-            sections.append("[Core]\n" + core_body)
+            # Core projection stays inside this module's single
+            # territory: an indented sub-block, never a header.
+            sections.append("- core:")
+
+            for core_line in core_body.splitlines():
+                stripped = core_line.strip()
+
+                if stripped:
+                    sections.append(f"  {stripped}")
 
         sections.extend(
             e.brief(self.entry_cap) for e in scored
@@ -1559,28 +1567,23 @@ class MemoryModule(Module):
 
         user_input = getattr(turn, "user_input", "") or ""
 
-        work_lines = []
+        lines = ["[Memory]"]
+
+        body_lines = []
 
         for item in work_items:
             content = (item.content or "")[: self.preview_cap]
 
-            work_lines.append(
-                f"- {item.id} ({item.kind}) {content}"
-            )
-
-        sections = []
-
-        if work_lines:
-            sections.append(
-                "[Workstate]\n" + "\n".join(work_lines)
+            body_lines.append(
+                f"- workstate {item.id} ({item.kind}) {content}"
             )
 
         memory_body = self._render_memory_body(user_input)
 
         if memory_body:
-            sections.append("[Memory]\n" + memory_body)
+            body_lines.append(memory_body)
 
-        if not sections:
+        if not body_lines:
             return None
 
-        return "\n\n".join(sections)
+        return "\n".join(lines + body_lines)

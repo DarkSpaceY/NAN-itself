@@ -162,13 +162,16 @@ core block = 高重要性（≥8）且有效条目的压缩投影，≤12 行。
 
 ```
 <module>
-[Workstate]
-- w-0007 (task, 3d) 调研 A 方案——已完成初步对比，待整理结论
 [Memory]
+- workstate w-0007 (task) 调研 A 方案——已完成初步对比，待整理结论
 - (pref) 回答要简洁
 - ……
 </module>
 ```
+
+渲染领地契约：本模块输出收拢于 `[Memory]` 单一头下；
+workstate 行加 `workstate` 前缀，core 投影以缩进子块呈现，
+禁止铸造 `[Workstate]`/`[Core]` 之类看似全局的 section。
 
 分阶段：
 

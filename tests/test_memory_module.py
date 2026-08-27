@@ -441,8 +441,11 @@ def test_query_renders_workstate_and_memory(tmp_path):
     finally:
         loop.close()
 
-    assert "[Workstate]" in body
-    assert "整理周报" in body
+    # Territory contract: one [Memory] header, workstate items
+    # render as prefixed lines inside it.
+    assert body.startswith("[Memory]\n")
+
+    assert "- workstate w-000001 (task) 整理周报" in body
 
 
 # ============================================================================
