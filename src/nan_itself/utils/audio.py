@@ -1345,3 +1345,174 @@ class SherpaSpeakerEmbedder:
             return None
 
         return np.asarray(vector, dtype=np.float32)
+
+
+# ======================================================================
+# W5/W6: audio tagging (AudioSet) + speech emotion (emotion2vec)
+# ======================================================================
+
+
+class SherpaAudioTagger:
+    """
+    CED audio tagging via sherpa-onnx: PCM -> top-k AudioSet
+    events with probabilities. Inference is ~20ms per 10s clip
+    (int8 tiny), cheap enough to run inside the capture thread.
+    """
+
+    def __init__(
+        self,
+        model_path: str | Path,
+        labels_path: str | Path,
+        top_k: int = 5,
+    ) -> None:
+        self.model_path = str(model_path)
+
+        self.labels_path = str(labels_path)
+
+        self.top_k = top_k
+
+        self._tagger: Any = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._tagger is not None
+
+    def load(self) -> None:
+        if self._tagger is not None:
+            return
+
+        import sherpa_onnx
+
+        config = sherpa_onnx.AudioTaggingConfig(
+            model=sherpa_onnx.AudioTaggingModelConfig(
+                ced=self.model_path,
+                num_threads=2,
+            ),
+            labels=self.labels_path,
+            top_k=self.top_k,
+        )
+
+        self._tagger = sherpa_onnx.AudioTagging(config)
+
+    def tag(self, pcm: bytes) -> list[tuple[str, float]]:
+        import numpy as np
+
+        self.load()
+
+        samples = np.frombuffer(
+            bytes(pcm),
+            dtype=np.int16,
+        ).astype(np.float32) / 32768.0
+
+        if samples.size == 0:
+            return []
+
+        stream = self._tagger.create_stream()
+
+        stream.accept_waveform(SAMPLE_RATE, samples)
+
+        events = self._tagger.compute(stream)
+
+        return [
+            (event.name, float(event.prob))
+            for event in events
+        ]
+
+
+class OnnxEmotionRecognizer:
+    """
+    emotion2vec ONNX (raw-waveform frontend baked in):
+
+        waveform -> [1, T, 768] embedding -> mean-pool
+                 -> linear head (W, B from head JSON) -> softmax
+
+    Trained on zh+en emotional speech; 9 classes by default.
+    """
+
+    def __init__(
+        self,
+        model_path: str | Path,
+        head_path: str | Path,
+    ) -> None:
+        self.model_path = str(model_path)
+
+        self.head_path = str(head_path)
+
+        self._session: Any = None
+
+        self.head: dict[str, Any] = {}
+
+    @property
+    def loaded(self) -> bool:
+        return self._session is not None
+
+    def load(self) -> None:
+        if self._session is not None:
+            return
+
+        import json as _json
+
+        import numpy as np
+        import onnxruntime as ort
+
+        self._session = ort.InferenceSession(
+            self.model_path,
+            providers=["CPUExecutionProvider"],
+        )
+
+        head = _json.load(
+            open(self.head_path, encoding="utf-8"),
+        )
+
+        self.head = {
+            "labels": list(head["labels"]),
+            "weight": np.asarray(
+                head["weight"], dtype=np.float32,
+            ),
+            "bias": np.asarray(
+                head["bias"], dtype=np.float32,
+            ),
+        }
+
+    def recognize(self, pcm: bytes) -> dict | None:
+        import numpy as np
+
+        self.load()
+
+        samples = np.frombuffer(
+            bytes(pcm),
+            dtype=np.int16,
+        ).astype(np.float32) / 32768.0
+
+        if samples.size == 0:
+            return None
+
+        input_name = self._session.get_inputs()[0].name
+
+        feats = self._session.run(
+            None,
+            {input_name: samples.reshape(1, -1)},
+        )[0]
+
+        pooled = feats[0].mean(axis=0)
+
+        logits = (
+            self.head["weight"] @ pooled + self.head["bias"]
+        )
+
+        exp = np.exp(logits - logits.max())
+
+        probs = exp / exp.sum()
+
+        order = np.argsort(-probs)
+
+        labels = self.head["labels"]
+
+        return {
+            "emotion": labels[int(order[0])],
+            "prob": round(float(probs[order[0]]), 3),
+            "probs": [
+                (labels[int(i)], round(float(probs[i]), 3))
+                for i in order[:3]
+            ],
+        }

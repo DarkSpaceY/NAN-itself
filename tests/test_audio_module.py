@@ -1427,3 +1427,224 @@ def test_whisper_hallucination_gate_matrix():
 
     # Just past both boundaries -> drop.
     assert gate.segment_passes(0.61, 0.49) is False
+
+
+# ======================================================================
+# W5/W6: audio tagging + emotion
+# ======================================================================
+
+
+class FakeTagger:
+    def __init__(self, events) -> None:
+        self.events = events
+
+        self.calls = 0
+
+    def load(self) -> None:
+        pass
+
+    def tag(self, pcm: bytes):
+        self.calls += 1
+
+        return list(self.events)
+
+
+class FakeEmotion:
+    def __init__(self, emotion="happy", prob=0.86,
+                 fail: bool = False) -> None:
+        self.emotion = emotion
+
+        self.prob = prob
+
+        self.fail = fail
+
+        self.calls = 0
+
+    def load(self) -> None:
+        if self.fail:
+            raise RuntimeError("no emotion model")
+
+    def recognize(self, pcm: bytes):
+        if self.fail:
+            raise RuntimeError("no emotion model")
+
+        self.calls += 1
+
+        return {
+            "emotion": self.emotion,
+            "prob": self.prob,
+            "probs": [
+                (self.emotion, self.prob),
+                ("neutral", round(1 - self.prob, 2)),
+            ],
+        }
+
+
+def make_accepted(module, text="hello there"):
+    assert module._accept_transcript(
+        {"text": text, "confidence": 0.9, "language": "en"},
+    )
+
+
+def test_utterance_tag_filters_speech_family():
+    module = make_module()
+
+    module.tagger_factory = lambda: FakeTagger(
+        [("Speech", 0.90), ("Music", 0.70), ("Cat", 0.50)],
+    )
+
+    utt = Utterance(pcm=b"", voiced_ms=900, total_ms=900)
+
+    make_accepted(module)
+
+    module._tag_utterance(utt)
+
+    with module._state_lock:
+        assert module._heard[-1]["utt_tag"] == "Music 0.70"
+
+        assert module._stats["last_utt_tags"] == [
+            ["Music", 0.7],
+            ["Cat", 0.5],
+        ]
+
+        assert module._stats["tagger_backend"] == "FakeTagger"
+
+
+def test_ambient_tagging_populates_stats():
+    module = make_module()
+
+    module.tagger_factory = lambda: FakeTagger(
+        [("Music", 0.71), ("Typing", 0.42)],
+    )
+
+    # One second of audio in the ring (16k * 2 bytes).
+    module._pcm_ring.append(b"\x00\x01" * module.sample_rate)
+
+    module._pcm_ring_bytes = module.sample_rate * 2
+
+    module._tag_ambient()
+
+    with module._state_lock:
+        assert module._stats["ambient_tags"] == [
+            ["Music", 0.71],
+            ["Typing", 0.42],
+        ]
+
+
+def test_ambient_tagging_skips_tiny_window():
+    module = make_module()
+
+    module.tagger_factory = lambda: FakeTagger([])
+
+    module._pcm_ring.append(b"\x00\x00" * 100)
+
+    module._pcm_ring_bytes = 200
+
+    module._tag_ambient()
+
+    with module._state_lock:
+        assert module._stats["ambient_tags"] == []
+
+
+def test_emotion_recognition_tags_heard_and_stats():
+    module = make_module()
+
+    module.emotion_factory = lambda: FakeEmotion("happy", 0.86)
+
+    utt = Utterance(pcm=b"", voiced_ms=1000, total_ms=1000)
+
+    make_accepted(module, "我特别高兴")
+
+    module._recognize_emotion(utt)
+
+    with module._state_lock:
+        assert module._heard[-1]["emotion"] == "happy"
+
+        assert module._stats["last_emotion"] == "happy"
+
+        assert module._stats["last_emotion_prob"] == 0.86
+
+        assert module._stats["emotions_total"] == 1
+
+        assert module._stats["emotion_backend"] == "FakeEmotion"
+
+
+def test_emotion_gate_skips_short_utterances():
+    module = make_module()
+
+    seen = []
+
+    def factory():
+        seen.append(1)
+
+        return FakeEmotion()
+
+    module.emotion_factory = factory
+
+    utt = Utterance(pcm=b"", voiced_ms=600, total_ms=600)
+
+    make_accepted(module, "hm")
+
+    # The loop gates on voiced duration before calling us.
+    module._recognize_emotion(utt)
+
+    assert len(seen) == 1
+
+
+def test_tagger_and_emotion_degrade_gracefully():
+    module = make_module()
+
+    def broken_tagger():
+        raise RuntimeError("no tagger model")
+
+    module.tagger_factory = broken_tagger
+
+    module.emotion_factory = lambda: FakeEmotion(fail=True)
+
+    utt = Utterance(pcm=b"", voiced_ms=1000, total_ms=1000)
+
+    make_accepted(module, "anything")
+
+    module._tag_utterance(utt)
+
+    module._recognize_emotion(utt)
+
+    with module._state_lock:
+        assert module._stats["tagger_backend"].startswith(
+            "unavailable:",
+        )
+
+        assert module._stats["emotion_backend"].startswith(
+            "unavailable:",
+        )
+
+        assert "utt_tag" not in module._heard[-1]
+
+        assert "emotion" not in module._heard[-1]
+
+
+def test_render_shows_tag_and_emotion_inside_territory():
+    module = make_module()
+
+    with module._state_lock:
+        module._stats["available"] = True
+
+        module._stats["quiet_s"] = 1.0
+
+        module._heard.append(
+            {"ts": time.time(), "text": "play something",
+             "confidence": 0.88, "language": "en",
+             "rate": 2.0, "hotword": None,
+             "utt_tag": "Music 0.55",
+             "emotion": "happy"},
+        )
+
+    rendered = time_machine_query(module)
+
+    assert "[Music 0.55]" in rendered
+
+    assert "[emo:happy]" in rendered
+
+    assert rendered.count("[Audio]") == 1
+
+    assert "[Ambient]" not in rendered

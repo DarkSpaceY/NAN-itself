@@ -22,9 +22,11 @@
 MVP 摘要：L1 能量（RMS/噪声底）+ L4 事件（VAD/静默/瞬态）
 + L7 内容（STT/置信度/语言/词级时间戳）+ W2 已并入 L2 特征
 （ZCR/质心/平坦度）与 L6 启发式环境四态分类；W3 已并入 L3
-（F0/音高轮廓/语速）与热词通道；W4 已并入 L5（声纹注册/识别
-+ 流式逐句说话人分离，CAM++ via sherpa-onnx，零 torch）。
-其余按 features 文档 W5–W6 推进。
+（F0/音高轮廓/语速）与热词通道；W4 已并入 L5（声纹全自动注册
++ 流式逐句说话人分离，CAM++ via sherpa-onnx，零 torch）；W5 已并入
+L6（CED-tiny AudioSet 527 类环境打标，环境窗+逐句）；W6 已并入
+L8 音频侧（emotion2vec_plus_base 9 类情绪，onnxruntime，专业音频
+模型——情绪永远不走 LLM）。语义意图归 agent 层。
 
 ## 2. MVP 范围（本次实现）
 
@@ -112,6 +114,11 @@ TranscriptRing(deque maxlen)   SpeakerEmbedder(CAM++, lazy)
 | speaker_threshold | 0.62 | 余弦判同阈值 |
 | promote_min_utterances / promote_min_voiced_ms | 5 / 20000 | 自动转正阈值（句数×发声时长） |
 | registry_save_throttle_s | 60 | 日常学习落盘节流；转正立即写穿 |
+| NAN_AUDIO_TAGGER_MODEL / _LABELS | models/audio_tag/{model.int8.onnx, class_labels_indices.csv} | CED 环境打标 |
+| ambient_tag_interval_s / _window_s | 10 / 8 | 环境打标节奏与回看窗口 |
+| utt_tag_min_prob | 0.4 | 逐句标签上渲染的最低概率 |
+| NAN_AUDIO_EMOTION_MODEL / _HEAD | models/emotion/{emotion2vec_plus_base.onnx, emotion2vec_head.json} | 9 类情绪 |
+| emotion_min_voiced_ms | 800 | 短于此不做情绪（不可靠） |
 | embed_min_voiced_ms | 400 | 低于此发声时长不做声纹归属 |
 | hear_history | 8 | Heard 环深度 |
 | hear_preview_cap | 200 | 单条话语预览字符上限 |

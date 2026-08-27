@@ -43,6 +43,8 @@ from src.nan_itself.modules.model import (
 
 from src.nan_itself.utils.audio import (
     AudioPipeline,
+    OnnxEmotionRecognizer,
+    SherpaAudioTagger,
     SherpaSpeakerEmbedder,
     SoundDeviceMicSource,
     SpeakerMatcher,
@@ -113,6 +115,16 @@ class AudioModule(Module):
 
     registry_save_throttle_s: float = 60.0
 
+    tagger_top_k: int = 5
+
+    ambient_tag_interval_s: float = 10.0
+
+    ambient_tag_window_s: float = 8.0
+
+    utt_tag_min_prob: float = 0.4
+
+    emotion_min_voiced_ms: int = 800
+
     def __init__(self) -> None:
         self.sample_rate = int(
             os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
@@ -176,6 +188,82 @@ class AudioModule(Module):
         self._embedder: Any = None
 
         self._embedder_failed = False
+
+        tagger_model = os.getenv("NAN_AUDIO_TAGGER_MODEL")
+
+        self.tagger_model_path = (
+            Path(tagger_model)
+            if tagger_model
+            else _repo_root()
+            / "models"
+            / "audio_tag"
+            / "model.int8.onnx"
+        )
+
+        tagger_labels = os.getenv("NAN_AUDIO_TAGGER_LABELS")
+
+        self.tagger_labels_path = (
+            Path(tagger_labels)
+            if tagger_labels
+            else _repo_root()
+            / "models"
+            / "audio_tag"
+            / "class_labels_indices.csv"
+        )
+
+        self.tagger_factory = lambda: SherpaAudioTagger(
+            self.tagger_model_path,
+            self.tagger_labels_path,
+            top_k=self.tagger_top_k,
+        )
+
+        self._tagger: Any = None
+
+        self._tagger_failed = False
+
+        emotion_model = os.getenv("NAN_AUDIO_EMOTION_MODEL")
+
+        self.emotion_model_path = (
+            Path(emotion_model)
+            if emotion_model
+            else _repo_root()
+            / "models"
+            / "emotion"
+            / "emotion2vec_plus_base.onnx"
+        )
+
+        emotion_head = os.getenv("NAN_AUDIO_EMOTION_HEAD")
+
+        self.emotion_head_path = (
+            Path(emotion_head)
+            if emotion_head
+            else _repo_root()
+            / "models"
+            / "emotion"
+            / "emotion2vec_head.json"
+        )
+
+        self.emotion_factory = lambda: OnnxEmotionRecognizer(
+            self.emotion_model_path,
+            self.emotion_head_path,
+        )
+
+        self._emotion: Any = None
+
+        self._emotion_failed = False
+
+        # Rolling raw-PCM window for periodic ambient tagging.
+        self._pcm_ring: deque[bytes] = deque()
+
+        self._pcm_ring_bytes = 0
+
+        self._pcm_ring_budget = int(
+            self.ambient_tag_window_s
+            * self.sample_rate
+            * 2
+        )
+
+        self._last_ambient_tag = 0.0
 
         models_dir = os.getenv("NAN_AUDIO_MODELS_DIR")
 
@@ -243,6 +331,13 @@ class AudioModule(Module):
             "last_speaker_score": None,
             "voices_known": 0,
             "voices_session": 0,
+            "tagger_backend": "not loaded",
+            "ambient_tags": [],
+            "last_utt_tags": [],
+            "emotion_backend": "not loaded",
+            "last_emotion": None,
+            "last_emotion_prob": None,
+            "emotions_total": 0,
         }
 
         self._last_normalized_text: str = ""
@@ -350,6 +445,23 @@ class AudioModule(Module):
 
             now = time.monotonic()
 
+            self._pcm_ring.append(pcm)
+
+            self._pcm_ring_bytes += len(pcm)
+
+            while self._pcm_ring_bytes > self._pcm_ring_budget:
+                dropped = self._pcm_ring.popleft()
+
+                self._pcm_ring_bytes -= len(dropped)
+
+            if (
+                now - self._last_ambient_tag
+                >= self.ambient_tag_interval_s
+            ):
+                self._last_ambient_tag = now
+
+                self._tag_ambient()
+
             with self._state_lock:
                 stats = self.pipeline.latest_stats.copy()
 
@@ -439,10 +551,17 @@ class AudioModule(Module):
             if not self._accept_transcript(result):
                 continue
 
+            self._tag_utterance(utt)
+
             # W4: attribute the utterance to a voice when it is
             # long enough to carry a stable embedding.
             if utt.voiced_ms >= self.embed_min_voiced_ms:
                 self._attribute_speaker(utt)
+
+            # W6: paralinguistic emotion needs more audio than
+            # speaker identity to mean anything.
+            if utt.voiced_ms >= self.emotion_min_voiced_ms:
+                self._recognize_emotion(utt)
 
     # ------------------------------------------------------------------
     # Speaker identity (W4)
@@ -640,6 +759,176 @@ class AudioModule(Module):
         self._maybe_save_registry(promoted)
 
     # ------------------------------------------------------------------
+    # W5: audio tagging (ambient window + per-utterance)
+    # ------------------------------------------------------------------
+
+    def _get_tagger(self) -> Any | None:
+        if self._tagger is not None:
+            return self._tagger
+
+        if self._tagger_failed:
+            return None
+
+        try:
+            tagger = self.tagger_factory()
+
+            tagger.load()
+
+        except Exception as exc:
+            self._tagger_failed = True
+
+            with self._state_lock:
+                self._stats["tagger_backend"] = (
+                    f"unavailable: {exc}"
+                )
+
+            logger.warning("audio tagger unavailable: {}", exc)
+
+            return None
+
+        self._tagger = tagger
+
+        with self._state_lock:
+            self._stats["tagger_backend"] = type(tagger).__name__
+
+        return tagger
+
+    def _tag_ambient(self) -> None:
+        """
+        Tag the rolling PCM window. CED-tiny int8 infers ~20ms
+        per 10s clip, so this runs inline on the capture thread.
+        """
+        if self._pcm_ring_bytes < self.sample_rate:  # <1s audio
+            return
+
+        tagger = self._get_tagger()
+
+        if tagger is None:
+            return
+
+        window = b"".join(self._pcm_ring)
+
+        try:
+            events = tagger.tag(window)
+
+        except Exception as exc:
+            logger.warning("ambient tagging failed: {}", exc)
+
+            return
+
+        with self._state_lock:
+            self._stats["ambient_tags"] = [
+                [name, round(prob, 2)]
+                for name, prob in events[:2]
+            ]
+
+    def _tag_utterance(self, utt: Utterance) -> None:
+        tagger = self._get_tagger()
+
+        if tagger is None:
+            return
+
+        try:
+            events = tagger.tag(utt.pcm)
+
+        except Exception as exc:
+            logger.warning("utterance tagging failed: {}", exc)
+
+            return
+
+        # "Speech"/"Male speech"/"Silence" are redundant here --
+        # the interesting part is what rides ON the speech.
+        filtered = [
+            (name, prob)
+            for name, prob in events
+            if "speech" not in name.lower()
+            and "silence" not in name.lower()
+        ]
+
+        with self._state_lock:
+            self._stats["last_utt_tags"] = [
+                [name, round(prob, 2)]
+                for name, prob in filtered[:2]
+            ]
+
+            if self._heard:
+                for name, prob in filtered:
+                    if prob >= self.utt_tag_min_prob:
+                        self._heard[-1]["utt_tag"] = (
+                            f"{name} {prob:.2f}"
+                        )
+
+                        break
+
+    # ------------------------------------------------------------------
+    # W6: paralinguistic emotion (emotion2vec)
+    # ------------------------------------------------------------------
+
+    def _get_emotion(self) -> Any | None:
+        if self._emotion is not None:
+            return self._emotion
+
+        if self._emotion_failed:
+            return None
+
+        try:
+            recognizer = self.emotion_factory()
+
+            recognizer.load()
+
+        except Exception as exc:
+            self._emotion_failed = True
+
+            with self._state_lock:
+                self._stats["emotion_backend"] = (
+                    f"unavailable: {exc}"
+                )
+
+            logger.warning(
+                "emotion backend unavailable: {}", exc
+            )
+
+            return None
+
+        self._emotion = recognizer
+
+        with self._state_lock:
+            self._stats["emotion_backend"] = type(
+                recognizer
+            ).__name__
+
+        return recognizer
+
+    def _recognize_emotion(self, utt: Utterance) -> None:
+        recognizer = self._get_emotion()
+
+        if recognizer is None:
+            return
+
+        try:
+            result = recognizer.recognize(utt.pcm)
+
+        except Exception as exc:
+            logger.warning("emotion recognition failed: {}", exc)
+
+            return
+
+        if not result:
+            return
+
+        with self._state_lock:
+            if self._heard:
+                self._heard[-1]["emotion"] = result["emotion"]
+
+            self._stats["last_emotion"] = result["emotion"]
+
+            self._stats["last_emotion_prob"] = result["prob"]
+
+            self._stats["emotions_total"] = (
+                self._stats.get("emotions_total", 0) + 1
+            )
+
+    # ------------------------------------------------------------------
     # Transcript bookkeeping (extracted for direct unit driving)
     # ------------------------------------------------------------------
 
@@ -798,7 +1087,21 @@ class AudioModule(Module):
             and not stats.get("speech_active")
             and ambient_kind != "quiet"
         ):
-            lines.append(f"- ambient: {ambient_kind}")
+            ambient_line = f"- ambient: {ambient_kind}"
+
+            tags = stats.get("ambient_tags") or []
+
+            if tags:
+                ambient_line += (
+                    " ("
+                    + ", ".join(
+                        f"{name} {prob:.2f}"
+                        for name, prob in tags
+                    )
+                    + ")"
+                )
+
+            lines.append(ambient_line)
 
         lines.append(
             f"- level: {stats.get('level_dbfs')} dBFS "
@@ -857,6 +1160,16 @@ class AudioModule(Module):
 
             if confidence < 0.6:
                 tags += f" (conf {confidence})"
+
+            utt_tag = item.get("utt_tag")
+
+            if utt_tag:
+                tags += f" [{utt_tag}]"
+
+            emotion = item.get("emotion")
+
+            if emotion:
+                tags += f" [emo:{emotion}]"
 
             hotword = item.get("hotword")
 
