@@ -242,8 +242,12 @@ def parse_plan(text: str) -> tuple[dict[str, PlanEntry], int]:
         else:
             raise ValueError(f"unknown plan field: {key!r}")
 
+    # An empty PLAN.md is a valid blank slate. The disk loader may
+    # normalize a physically empty file to the canonical empty
+    # representation, but parsing must accept both forms so an empty
+    # plan can never enter degraded mode.
     if not entries:
-        raise ValueError("plan file has no entries")
+        return {}, next_id
 
     # Referential integrity: parents exist, no cycles.
 
@@ -615,6 +619,24 @@ class PlanModule(Module):
             logger.warning("plan read failed: {}", exc)
 
             return False
+
+        # A physically empty/whitespace-only PLAN.md is a valid blank
+        # slate. Normalize it to the canonical empty representation so
+        # the file is immediately self-describing and ready for the
+        # first planner cycle. Importantly, we do NOT create PLAN.md
+        # when it is absent: explicit deletion remains a blank slate.
+        if not text.strip():
+            try:
+                canonical_empty = serialize_plan({}, 1)
+                _atomic_write(self.plan_path, canonical_empty)
+                stat = self.plan_path.stat()
+                self._file_sig = (stat.st_mtime_ns, stat.st_size)
+                text = canonical_empty
+            except OSError as exc:
+                logger.warning(
+                    "empty PLAN.md initialization failed: {}", exc
+                )
+                return False
 
         try:
             entries, next_id = parse_plan(text)
@@ -1365,6 +1387,19 @@ class PlanModule(Module):
                 if not batch_user_inputs:
                     return fail(
                         index, op, "需要本批含用户输入"
+                    )
+
+                # plant_root is exclusively the transition from a blank
+                # slate to the first task. Once a root exists, planning
+                # must continue with expand/open_substack/close/etc.
+                if any(
+                    entry.parent is None
+                    for entry in sim.values()
+                ):
+                    return fail(
+                        index,
+                        op,
+                        "PLAN 已有根条目；plant_root 只允许从空计划创建首个根",
                     )
 
                 title = str(action.get("title", "")).strip()
