@@ -56,7 +56,7 @@ def bind_instance(
 ) -> None:
     record.instance.data = record.data
 
-    from src.nan_itself.modules.model import (
+    from .model import (
         DataSpaceReader,
     )
 

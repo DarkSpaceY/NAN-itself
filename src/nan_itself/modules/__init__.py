@@ -10,7 +10,7 @@ Layering (dependencies point downward only):
 Import from this package, never from sibling modules.
 """
 
-from src.nan_itself.modules.model import (
+from .model import (
     DataSpace,
     DataSpaceReader,
     MODULE_HEADER,
@@ -22,7 +22,7 @@ from src.nan_itself.modules.model import (
     DuplicateModuleError,
 )
 
-from src.nan_itself.modules.runtime import (
+from .runtime import (
     BUILTIN_MODULES,
     Facade,
 )

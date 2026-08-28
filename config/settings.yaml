@@ -1,0 +1,44 @@
+llm:
+  provider: openai
+  api_key: xxx
+  model: qwen2.5:7b
+  base_url: http://127.0.0.1:11434/v1
+  timeout: 600
+  max_retries: 2
+
+gateway:
+  host: 127.0.0.1
+  port: 8765
+
+agent:
+  max_subagent_depth: 3
+
+runtime:
+  inbox:
+    max_size: 256
+
+  turn:
+    grace: 5.0
+
+  retry:
+    backoff:
+      - 1.0
+      - 2.0
+      - 4.0
+      - 8.0
+      - 15.0
+      - 30.0
+      - 60.0
+
+modules:
+  retry_interval: 1.0
+  scan_interval: 1.0
+
+providers:
+  scan_interval: 1.0
+  tool_timeout: 300.0
+
+events:
+  history_limit: 500
+  subscriber_queue_size: 2000
+  input_dedup_cache_size: 256

@@ -33,10 +33,10 @@ from pydantic import BaseModel, create_model
 
 import mcp.types as types
 
-from src.nan_itself.tools.provider import (
+from .provider import (
     Provider,
 )
-from src.nan_itself.tools.spec import (
+from .spec import (
     LOCAL_TOOL_HEADER,
     LOCAL_TOOL_HEADER_SCAN_LINES,
     PROVIDER_KIND_LOCAL,

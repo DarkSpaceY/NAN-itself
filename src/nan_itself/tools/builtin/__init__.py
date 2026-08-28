@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.nan_itself.tools.local import (
+from ..local import (
     LocalToolProvider,
 )
 
@@ -29,7 +29,7 @@ BUILTIN_MCP_CONFIG = BUILTIN_DIR / "mcp" / "tools.yaml"
 #
 # Example:
 #
-# from src.nan_itself.tools.builtin.local.example import ExampleTools
+# from .builtin.local.example import ExampleTools
 #
 # BUILTIN_TOOLS = (ExampleTools,)
 BUILTIN_TOOLS: tuple[

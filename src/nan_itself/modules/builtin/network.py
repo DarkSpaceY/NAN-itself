@@ -12,13 +12,14 @@ from __future__ import annotations
 import asyncio
 
 from loguru import logger
+import time
 
-from src.nan_itself.modules.model import (
+from ..model import (
     Module,
     ModuleTurn,
 )
 
-from src.nan_itself.utils.network import (
+from ...utils.network import (
     NetworkProbe,
     _fmt_bps,
 )
@@ -171,8 +172,6 @@ class NetworkModule(Module):
 
 
 def _since(ts: float | None) -> str:
-    import time
-
     if ts is None:
         return ""
 

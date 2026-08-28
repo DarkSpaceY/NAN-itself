@@ -17,21 +17,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from src.nan_itself.agent.model import (
+from .model import (
     ChildSubagent,
 )
-from src.nan_itself.agent.runtime import (
+from .runtime import (
     SubagentLimitError,
 )
-from src.nan_itself.skills import (
+from ..skills import (
     UnknownSkillError,
 )
-from src.nan_itself.utils.llm import (
+from ..utils.llm import (
     ToolDefinition,
 )
 
 if TYPE_CHECKING:
-    from src.nan_itself.agent.role import (
+    from .role import (
         RolePolicy,
     )
 

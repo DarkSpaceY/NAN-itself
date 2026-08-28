@@ -21,12 +21,12 @@ import mcp.types as types
 from loguru import logger
 from pydantic import ValidationError
 
-from src.nan_itself.tools.results import (
+from .results import (
     error_result,
     serialize_value,
     text_result,
 )
-from src.nan_itself.tools.spec import (
+from .spec import (
     PROVIDER_KIND_LOCAL,
     ProviderSpec,
 )

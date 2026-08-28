@@ -24,10 +24,10 @@ from loguru import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from src.nan_itself.tools.provider import (
+from .provider import (
     Provider,
 )
-from src.nan_itself.tools.spec import (
+from .spec import (
     PROVIDER_KIND_MCP,
     ProviderOrigin,
     ProviderSpec,

@@ -22,16 +22,16 @@ from mcp.server.lowlevel import (
 )
 from mcp.server.models import InitializationOptions
 
-from src.nan_itself.tools.builtin import (
+from .builtin import (
     BUILTIN_MCP_CONFIG,
 )
-from src.nan_itself.tools.results import (
+from .results import (
     error_result,
 )
-from src.nan_itself.tools.runtime import (
+from .runtime import (
     ProviderRuntime,
 )
-from src.nan_itself.tools.view import (
+from .view import (
     AgentToolView,
 )
 

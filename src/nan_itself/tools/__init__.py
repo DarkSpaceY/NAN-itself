@@ -14,22 +14,22 @@ Layering (dependencies point downward only):
 Import from this package, never from sibling modules.
 """
 
-from src.nan_itself.tools.local import (
+from .local import (
     LocalToolMethod,
     LocalToolProvider,
     tool,
 )
-from src.nan_itself.tools.provider import (
+from .provider import (
     Provider,
 )
-from src.nan_itself.tools.runtime import (
+from .runtime import (
     BUILTIN_TOOLS,
     ProviderRuntime,
 )
-from src.nan_itself.tools.server import (
+from .server import (
     MCPFacade,
 )
-from src.nan_itself.tools.spec import (
+from .spec import (
     DEFAULT_TOOL_TIMEOUT,
     LOCAL_TOOL_HEADER,
     LOCAL_TOOL_HEADER_SCAN_LINES,
@@ -39,7 +39,7 @@ from src.nan_itself.tools.spec import (
     ProviderOrigin,
     ProviderSpec,
 )
-from src.nan_itself.tools.view import (
+from .view import (
     ROUTE_TOOL_ARGUMENT,
     ROUTE_TOOL_NAME,
     AgentToolView,

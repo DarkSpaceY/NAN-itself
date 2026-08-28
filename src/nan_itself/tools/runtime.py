@@ -23,25 +23,25 @@ from loguru import logger
 
 import mcp.types as types
 
-from src.nan_itself.tools import local as local_backend
-from src.nan_itself.tools import mcp as mcp_backend
-from src.nan_itself.tools.spec import (
+from . import local as local_backend
+from . import mcp as mcp_backend
+from .spec import (
     PROVIDER_KIND_LOCAL,
     DEFAULT_TOOL_TIMEOUT,
     ProviderSpec,
 )
-from src.nan_itself.tools.provider import (
+from .provider import (
     Provider,
 )
-from src.nan_itself.tools.results import (
+from .results import (
     error_result,
 )
-from src.nan_itself.tools.watcher import (
+from .watcher import (
     SourceTracker,
     file_fingerprint,
 )
 
-from src.nan_itself.tools.builtin import (
+from .builtin import (
     BUILTIN_MCP_CONFIG,
     BUILTIN_TOOLS,
 )
@@ -284,18 +284,25 @@ class ProviderRuntime:
     async def _close_provider(
         provider: Provider,
     ) -> None:
+        
         if provider.stack is None:
-            # Local providers hold no external resources.
             return
 
         try:
-            await provider.stack.aclose()
+            proc = None
+            if hasattr(provider, 'session') and provider.session is not None:
+                if hasattr(provider.session, '_process'):
+                    proc = provider.session._process
+                elif hasattr(provider.session, 'process'):
+                    proc = provider.session.process
 
+            if proc and hasattr(proc, 'poll') and proc.poll() is None:
+                proc.terminate()
+                await asyncio.sleep(0.2)
+                if proc.poll() is None:
+                    proc.kill()
         except Exception:
-            logger.exception(
-                "Failed to close MCP provider '{}'",
-                provider.spec.name,
-            )
+            pass
 
     # ==================================================================
     # Builtin sources

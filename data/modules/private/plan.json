@@ -1,8 +1,8 @@
 {
-  "decision_seq": 0,
+  "decision_seq": 2,
   "entries": [],
   "next_id": 1,
-  "record_seq": 0,
-  "status": "manual",
-  "status_at": null
+  "record_seq": 1,
+  "status": "degraded",
+  "status_at": "2026-08-28T22:42:51+08:00"
 }

@@ -23,12 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from src.nan_itself.skills.model import (
+from .model import (
     SKILL_FILENAME,
     SkillMetadata,
     SkillValidationError,
 )
-from src.nan_itself.skills.parsing import (
+from .parsing import (
     fingerprint,
     read_metadata,
 )

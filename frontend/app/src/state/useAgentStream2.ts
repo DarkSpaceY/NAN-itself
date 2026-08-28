@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClientEvent, ServerEvent } from '../protocol';
 import { fold, initialSnapshot, type Snapshot } from './store';
-import { createMockDriver, type Driver } from '../mock/driver';
 
 // 真实网关:ws://host/ws(vite proxy → 127.0.0.1:8765)
 //
@@ -22,6 +21,12 @@ const PONG_TIMEOUT_MS = 4000;
 const ACK_TIMEOUT_MS = 5000;
 
 export type ConnState = 'connected' | 'reconnecting';
+
+interface Driver {
+  start(onEvent: (e: ServerEvent) => void): void;
+  send(text: string): void;
+  stop(): void;
+}
 
 interface WsCallbacks {
   onEvent: (e: ServerEvent) => void;
@@ -206,19 +211,14 @@ export function useAgentStream(): {
   const driverRef = useRef<Driver | null>(null);
 
   useEffect(() => {
-    const mode = new URLSearchParams(location.search).get('ws') !== null ? 'ws' : 'mock';
-
-    const driver =
-      mode === 'ws'
-        ? createWsDriver(
-            `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
-            {
-              onEvent: (e) => setSnap((s) => fold(s, e)),
-              onReset: () => setSnap({ ...initialSnapshot, items: [] }),
-              onConn: setConn,
-            },
-          )
-        : createMockDriver();
+    const driver = createWsDriver(
+      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
+      {
+        onEvent: (e) => setSnap((s) => fold(s, e)),
+        onReset: () => setSnap({ ...initialSnapshot, items: [] }),
+        onConn: setConn,
+      },
+    );
 
     driverRef.current = driver;
     driver.start((e) => setSnap((s) => fold(s, e)));

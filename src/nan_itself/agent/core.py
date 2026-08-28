@@ -19,19 +19,19 @@ from __future__ import annotations
 
 from typing import Callable
 
-from src.nan_itself.agent.engine import (
+from .engine import (
     StepEngine,
 )
-from src.nan_itself.agent.model import (
+from .model import (
     AgentResult,
 )
-from src.nan_itself.agent.reports import (
+from .reports import (
     LateReportBuffer,
 )
-from src.nan_itself.agent.runtime import (
+from .runtime import (
     AgentRuntime,
 )
-from src.nan_itself.events import (
+from ..events import (
     EventBus,
     StreamSink,
 )

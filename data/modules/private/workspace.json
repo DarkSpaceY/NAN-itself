@@ -16,6 +16,10 @@
       "mtime_ns": 1787022641029003695,
       "size": 0
     },
+    "config/settings.yaml": {
+      "mtime_ns": 1787927698382067683,
+      "size": 570
+    },
     "docs/audio-design.md": {
       "mtime_ns": 1787804880603223350,
       "size": 8978
@@ -41,7 +45,7 @@
       "size": 3347
     },
     "frontend/.DS_Store": {
-      "mtime_ns": 1787842442894172235,
+      "mtime_ns": 1787920598366532590,
       "size": 6148
     },
     "frontend/DESIGN.md": {
@@ -60,16 +64,16 @@
       "mtime_ns": 1787845782181563079,
       "size": 1315
     },
-    "frontend/app/dist/assets/index-CcaUngdQ.js": {
-      "mtime_ns": 1787899091002202934,
-      "size": 203722
+    "frontend/app/dist/assets/index-C7oeNefX.js": {
+      "mtime_ns": 1787920978613223292,
+      "size": 320527
     },
     "frontend/app/dist/assets/index-U3BUg4n1.css": {
-      "mtime_ns": 1787899091002353852,
+      "mtime_ns": 1787920978613328667,
       "size": 4434
     },
     "frontend/app/dist/index.html": {
-      "mtime_ns": 1787899091002187142,
+      "mtime_ns": 1787920978613210000,
       "size": 371
     },
     "frontend/app/index.html": {
@@ -11160,12 +11164,8 @@
       "mtime_ns": 1787845586417734160,
       "size": 163
     },
-    "frontend/app/src/mock/driver.ts": {
-      "mtime_ns": 1787845728048961412,
-      "size": 4993
-    },
     "frontend/app/src/protocol.ts": {
-      "mtime_ns": 1787905609993180782,
+      "mtime_ns": 1787919275447020001,
       "size": 1421
     },
     "frontend/app/src/shell/Composer.tsx": {
@@ -11181,8 +11181,8 @@
       "size": 4887
     },
     "frontend/app/src/state/useAgentStream2.ts": {
-      "mtime_ns": 1787905677454418383,
-      "size": 6828
+      "mtime_ns": 1787920590508760395,
+      "size": 6688
     },
     "frontend/app/src/styles/index.css": {
       "mtime_ns": 1787898846019094693,
@@ -11195,38 +11195,6 @@
     "frontend/app/vite.config.ts": {
       "mtime_ns": 1787845101916870410,
       "size": 247
-    },
-    "frontend/samples/a-mission-control.html": {
-      "mtime_ns": 1787838612086023429,
-      "size": 13257
-    },
-    "frontend/samples/b-crt-terminal.html": {
-      "mtime_ns": 1787838612106618232,
-      "size": 14183
-    },
-    "frontend/samples/c-glass-console.html": {
-      "mtime_ns": 1787838612127852328,
-      "size": 14798
-    },
-    "frontend/samples/d-linear-terminal-indigo.html": {
-      "mtime_ns": 1787841059044933039,
-      "size": 18817
-    },
-    "frontend/samples/d-linear-terminal.html": {
-      "mtime_ns": 1787841059042050770,
-      "size": 18860
-    },
-    "frontend/samples/e-minimal-lab.html": {
-      "mtime_ns": 1787842853468543278,
-      "size": 15815
-    },
-    "frontend/samples/f-primitives.html": {
-      "mtime_ns": 1787844083744475003,
-      "size": 12034
-    },
-    "frontend/samples/index.html": {
-      "mtime_ns": 1787843216858168449,
-      "size": 10117
     },
     "models/.cache/huggingface/.gitignore": {
       "mtime_ns": 1787141053307407389,
@@ -11385,7 +11353,7 @@
       "size": 145217532
     },
     "models/whisper/models--Systran--faster-whisper-base/refs/main": {
-      "mtime_ns": 1787911569112183529,
+      "mtime_ns": 1787928189286268673,
       "size": 40
     },
     "models/whisper/models--Systran--faster-whisper-base/snapshots/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/config.json": {
@@ -11409,104 +11377,108 @@
       "size": 836
     },
     "pyproject.toml": {
-      "mtime_ns": 1787817809407383982,
-      "size": 964
+      "mtime_ns": 1787922515172685318,
+      "size": 989
     },
     "src/__init__.py": {
       "mtime_ns": 1787368382337446567,
       "size": 0
     },
     "src/nan_itself/__init__.py": {
-      "mtime_ns": 1787577766815970564,
-      "size": 139
+      "mtime_ns": 1787921638892451688,
+      "size": 125
     },
     "src/nan_itself/agent/__init__.py": {
-      "mtime_ns": 1787715673792344236,
-      "size": 1099
+      "mtime_ns": 1787921746373038245,
+      "size": 919
     },
     "src/nan_itself/agent/core.py": {
-      "mtime_ns": 1787895249886834629,
-      "size": 3913
+      "mtime_ns": 1787921773348090057,
+      "size": 3820
     },
     "src/nan_itself/agent/engine.py": {
-      "mtime_ns": 1787894958267397536,
-      "size": 18980
+      "mtime_ns": 1787927219831412619,
+      "size": 18560
     },
     "src/nan_itself/agent/loop.py": {
-      "mtime_ns": 1787896064096969030,
+      "mtime_ns": 1787926663122969308,
       "size": 10289
     },
     "src/nan_itself/agent/model.py": {
-      "mtime_ns": 1787715711778632989,
-      "size": 1160
+      "mtime_ns": 1787921804886290782,
+      "size": 1140
     },
     "src/nan_itself/agent/prompts.py": {
-      "mtime_ns": 1787724709905359124,
-      "size": 4009
+      "mtime_ns": 1787924187939701758,
+      "size": 3969
     },
     "src/nan_itself/agent/reports.py": {
-      "mtime_ns": 1787715111395529431,
-      "size": 2209
+      "mtime_ns": 1787923348250464844,
+      "size": 2205
     },
     "src/nan_itself/agent/role.py": {
       "mtime_ns": 1787724747322397294,
       "size": 1188
     },
     "src/nan_itself/agent/runtime.py": {
-      "mtime_ns": 1787896333374386226,
+      "mtime_ns": 1787923654972573046,
       "size": 8583
     },
     "src/nan_itself/agent/verbs.py": {
-      "mtime_ns": 1787896064098697752,
-      "size": 7438
+      "mtime_ns": 1787921865289111746,
+      "size": 7352
     },
     "src/nan_itself/app.py": {
-      "mtime_ns": 1787905784369943673,
-      "size": 7501
+      "mtime_ns": 1787926737576431883,
+      "size": 7660
+    },
+    "src/nan_itself/config.py": {
+      "mtime_ns": 1787927725445663977,
+      "size": 2515
     },
     "src/nan_itself/events.py": {
-      "mtime_ns": 1787902143976128254,
-      "size": 5070
+      "mtime_ns": 1787926703313178056,
+      "size": 5188
     },
     "src/nan_itself/gateway.py": {
-      "mtime_ns": 1787905763652002223,
-      "size": 5979
+      "mtime_ns": 1787921689705672680,
+      "size": 7318
     },
     "src/nan_itself/modules/__init__.py": {
-      "mtime_ns": 1787730425183966384,
-      "size": 792
+      "mtime_ns": 1787922294711993634,
+      "size": 748
     },
     "src/nan_itself/modules/builtin/__init__.py": {
-      "mtime_ns": 1787830393897568067,
-      "size": 782
+      "mtime_ns": 1787922265404028925,
+      "size": 701
     },
     "src/nan_itself/modules/builtin/audio.py": {
-      "mtime_ns": 1787811567222889235,
-      "size": 37867
+      "mtime_ns": 1787923545850738868,
+      "size": 37782
     },
     "src/nan_itself/modules/builtin/memory.py": {
-      "mtime_ns": 1787800425260302240,
-      "size": 41952
+      "mtime_ns": 1787927232251998340,
+      "size": 41895
     },
     "src/nan_itself/modules/builtin/network.py": {
-      "mtime_ns": 1787820495662181150,
-      "size": 4012
+      "mtime_ns": 1787922038557664537,
+      "size": 3974
     },
     "src/nan_itself/modules/builtin/plan.py": {
-      "mtime_ns": 1787835353916059026,
-      "size": 65294
+      "mtime_ns": 1787927243778233255,
+      "size": 65237
     },
     "src/nan_itself/modules/builtin/system.py": {
-      "mtime_ns": 1787820216381801772,
-      "size": 4681
+      "mtime_ns": 1787922058490290493,
+      "size": 4648
     },
     "src/nan_itself/modules/deps.py": {
-      "mtime_ns": 1787669817270816375,
-      "size": 3756
+      "mtime_ns": 1787921896913585221,
+      "size": 3734
     },
     "src/nan_itself/modules/loading.py": {
-      "mtime_ns": 1787671758910652673,
-      "size": 4115
+      "mtime_ns": 1787921905403055852,
+      "size": 4093
     },
     "src/nan_itself/modules/model.py": {
       "mtime_ns": 1787731487720743379,
@@ -11517,40 +11489,40 @@
       "size": 3671
     },
     "src/nan_itself/modules/reload.py": {
-      "mtime_ns": 1787673330392290140,
-      "size": 7155
+      "mtime_ns": 1787921926340667412,
+      "size": 7133
     },
     "src/nan_itself/modules/runtime.py": {
-      "mtime_ns": 1787894958263427972,
-      "size": 27649
+      "mtime_ns": 1787921962384915570,
+      "size": 27570
     },
     "src/nan_itself/skills/__init__.py": {
-      "mtime_ns": 1787653544414678766,
-      "size": 651
+      "mtime_ns": 1787922085319397414,
+      "size": 609
     },
     "src/nan_itself/skills/model.py": {
       "mtime_ns": 1787653325975976331,
       "size": 2087
     },
     "src/nan_itself/skills/parsing.py": {
-      "mtime_ns": 1787653325976201496,
-      "size": 4528
+      "mtime_ns": 1787922099843978353,
+      "size": 4507
     },
     "src/nan_itself/skills/registry.py": {
-      "mtime_ns": 1787653376561726402,
-      "size": 6925
+      "mtime_ns": 1787922110647781330,
+      "size": 6883
     },
     "src/nan_itself/skills/runtime.py": {
-      "mtime_ns": 1787653419778786281,
-      "size": 4780
+      "mtime_ns": 1787922123045361706,
+      "size": 4717
     },
     "src/nan_itself/tools/__init__.py": {
-      "mtime_ns": 1787643224805547778,
-      "size": 1648
+      "mtime_ns": 1787922154110436039,
+      "size": 1528
     },
     "src/nan_itself/tools/builtin/__init__.py": {
-      "mtime_ns": 1787643335507239933,
-      "size": 911
+      "mtime_ns": 1787922495617948223,
+      "size": 872
     },
     "src/nan_itself/tools/builtin/local/__init__.py": {
       "mtime_ns": 1787643342049548436,
@@ -11561,36 +11533,36 @@
       "size": 537
     },
     "src/nan_itself/tools/local.py": {
-      "mtime_ns": 1787672559455374741,
-      "size": 13104
+      "mtime_ns": 1787922163516823892,
+      "size": 13064
     },
     "src/nan_itself/tools/mcp.py": {
-      "mtime_ns": 1787727044809501243,
-      "size": 6653
+      "mtime_ns": 1787922181279087440,
+      "size": 6613
     },
     "src/nan_itself/tools/provider.py": {
-      "mtime_ns": 1787641921940955210,
-      "size": 3226
+      "mtime_ns": 1787922461162110151,
+      "size": 3186
     },
     "src/nan_itself/tools/results.py": {
       "mtime_ns": 1787641876138656737,
       "size": 960
     },
     "src/nan_itself/tools/runtime.py": {
-      "mtime_ns": 1787645058844731646,
-      "size": 21335
+      "mtime_ns": 1787922226184559440,
+      "size": 21197
     },
     "src/nan_itself/tools/server.py": {
-      "mtime_ns": 1787644992745423152,
-      "size": 4460
+      "mtime_ns": 1787922302165579052,
+      "size": 4380
     },
     "src/nan_itself/tools/spec.py": {
       "mtime_ns": 1787641866339661891,
       "size": 1391
     },
     "src/nan_itself/tools/view.py": {
-      "mtime_ns": 1787724747322706917,
-      "size": 5875
+      "mtime_ns": 1787922306705514549,
+      "size": 5835
     },
     "src/nan_itself/tools/watcher.py": {
       "mtime_ns": 1787643127982323382,
@@ -11613,8 +11585,8 @@
       "size": 2425
     },
     "src/nan_itself/utils/llm.py": {
-      "mtime_ns": 1787742547380842149,
-      "size": 26740
+      "mtime_ns": 1787927268386613599,
+      "size": 26621
     },
     "src/nan_itself/utils/network.py": {
       "mtime_ns": 1787820768794031073,
@@ -11725,17 +11697,17 @@
       "size": 3946
     },
     "uv.lock": {
-      "mtime_ns": 1787223216800050167,
-      "size": 509417
+      "mtime_ns": 1787922515192973168,
+      "size": 517289
     },
     "workspace/modules/workspace.py": {
-      "mtime_ns": 1787668062156390209,
+      "mtime_ns": 1787927929316837324,
       "size": 4210
     },
     "workspace/persona.md": {
-      "mtime_ns": 1787724747323117248,
+      "mtime_ns": 1787927949209193954,
       "size": 3322
     }
   },
-  "scan_count": 115
+  "scan_count": 355
 }

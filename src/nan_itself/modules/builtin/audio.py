@@ -35,13 +35,13 @@ from typing import Any
 
 from loguru import logger
 
-from src.nan_itself.modules.model import (
+from ..model import (
     Module,
     ModuleTurn,
     TurnRecord,
 )
 
-from src.nan_itself.utils.audio import (
+from ...utils.audio import (
     AudioPipeline,
     estimate_bpm,
     lpc_formants,
@@ -133,9 +133,7 @@ class AudioModule(Module):
     whisper_result_timeout: float = 30.0
 
     def __init__(self) -> None:
-        self.sample_rate = int(
-            os.getenv("NAN_AUDIO_SAMPLE_RATE", "16000"),
-        )
+        self.sample_rate = 16000
 
         self.device: int | str | None = (
             os.getenv("NAN_AUDIO_DEVICE") or None

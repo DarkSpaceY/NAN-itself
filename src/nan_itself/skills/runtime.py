@@ -20,17 +20,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from src.nan_itself.skills.model import (
+from .model import (
     SKILL_FILENAME,
     Skill,
     SkillMetadata,
     UnknownSkillError,
 )
-from src.nan_itself.skills.parsing import (
+from .parsing import (
     read_instructions,
     resource_files,
 )
-from src.nan_itself.skills.registry import (
+from .registry import (
     SkillRegistry,
 )
 

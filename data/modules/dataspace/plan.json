@@ -5,6 +5,6 @@
   "next_id": 1,
   "open_count": 0,
   "root_count": 0,
-  "status": "manual",
-  "status_at": null
+  "status": "degraded",
+  "status_at": "2026-08-28T22:42:51+08:00"
 }

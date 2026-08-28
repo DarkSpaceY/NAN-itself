@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import mcp.types as types
 
-from src.nan_itself.tools.results import (
+from .results import (
     error_result,
     text_result,
 )
@@ -22,7 +22,7 @@ from src.nan_itself.tools.results import (
 if TYPE_CHECKING:
     # Import cycle guard: the runtime instantiates views;
     # views only reference it for typing.
-    from src.nan_itself.tools.runtime import (
+    from .runtime import (
         ProviderRuntime,
     )
 

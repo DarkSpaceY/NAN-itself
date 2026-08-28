@@ -21,41 +21,41 @@ from typing import Any, Callable
 import mcp.types as mcp_types
 from loguru import logger
 
-from src.nan_itself.agent.model import (
+from .model import (
     AgentResult,
     AgentTurn,
 )
-from src.nan_itself.agent.prompts import (
+from .prompts import (
     build_messages,
     format_skill_section,
     render_running_subagents,
 )
-from src.nan_itself.agent.reports import (
+from .reports import (
     collect_finished_children,
     format_child_report,
 )
-from src.nan_itself.agent.role import (
+from .role import (
     RolePolicy,
 )
-from src.nan_itself.agent.verbs import (
+from .verbs import (
     ACTIVATE_SKILL_TOOL_NAME,
     DISPATCH_SUBAGENT_TOOL_NAME,
     VERBS,
     ExecutionState,
 )
-from src.nan_itself.modules import (
+from ..modules import (
     TurnRecord,
 )
-from src.nan_itself.skills import (
+from ..skills import (
     Skill,
 )
-from src.nan_itself.tools import (
+from ..tools import (
     AgentToolView,
 )
-from src.nan_itself.events import (
+from ..events import (
     StreamSink,
 )
-from src.nan_itself.utils.llm import (
+from ..utils.llm import (
     LLMRequest,
     LLMResponse,
     Message,
@@ -236,8 +236,6 @@ class StepEngine:
                 response = await self._generate(
                     LLMRequest(
                         messages=request_messages,
-                        temperature=0.7,
-                        max_tokens=4096,
                         tools=tool_definitions,
                     ),
                     sink=sink,
@@ -592,12 +590,8 @@ def _pretty_args(arguments: Any) -> list[str]:
         return [str(arguments)[:200]]
 
 
-def _result_lines(text: str, max_lines: int = 40) -> list[str]:
+def _result_lines(text: str) -> list[str]:
     lines = (text or "").splitlines()
-
-    if len(lines) > max_lines:
-        return lines[:max_lines] + ["… (truncated)"]
-
     return lines
 
 
@@ -627,7 +621,7 @@ def _skill_structure(skill: Any) -> list[str]:
     return lines
 
 
-def _compact_result(text: str, limit: int = 96) -> str:
+def _compact_result(text: str) -> str:
     flat = (text or "").replace("\n", " ").strip()
 
     # MCP CallToolResult JSON: surface the human text, not the envelope.
@@ -648,7 +642,7 @@ def _compact_result(text: str, limit: int = 96) -> str:
         except Exception:
             pass
 
-    return flat[:limit] + ("…" if len(flat) > limit else "")
+    return flat
 
 
 def _serialize_tool_result(result: Any) -> str:

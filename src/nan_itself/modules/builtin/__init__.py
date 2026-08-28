@@ -18,17 +18,17 @@ Example:
 
 from __future__ import annotations
 
-from src.nan_itself.modules.model import (
+from ..model import (
     Module,
 )
 
 
 # Register builtin module classes here.
-from src.nan_itself.modules.builtin.memory import (
+from .memory import (
     MemoryModule,
 )
 
-from src.nan_itself.modules.builtin.plan import (
+from .plan import (
     PlanModule,
 )
 

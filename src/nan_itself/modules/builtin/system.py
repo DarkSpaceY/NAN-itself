@@ -18,12 +18,12 @@ from datetime import datetime
 
 from loguru import logger
 
-from src.nan_itself.modules.model import (
+from ..model import (
     Module,
     ModuleTurn,
 )
 
-from src.nan_itself.utils.system import (
+from ...utils.system import (
     HAS_PSUTIL,
     SystemProbe,
 )

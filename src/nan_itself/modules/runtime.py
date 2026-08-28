@@ -10,15 +10,15 @@ from typing import Any, Mapping
 
 
 
-from src.nan_itself.modules import (
+from ..modules import (
     deps as _deps,
     loading as _loading,
     persistence as _persistence,
 )
-from src.nan_itself.modules.reload import (
+from .reload import (
     hot_reload,
 )
-from src.nan_itself.modules.model import (  # noqa: F401
+from .model import (  # noqa: F401
     DataSpace,
     DuplicateModuleError,
     Module,
@@ -27,7 +27,7 @@ from src.nan_itself.modules.model import (  # noqa: F401
     ModuleTurn,
 )
 
-from src.nan_itself.modules.builtin import (
+from .builtin import (
     BUILTIN_MODULES,
 )
 

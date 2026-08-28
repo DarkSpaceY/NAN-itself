@@ -44,12 +44,12 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.nan_itself.modules.model import (
+from ..model import (
     Module,
     TurnRecord,
 )
 
-from src.nan_itself.utils.llm import (
+from ...utils.llm import (
     LLMRequest,
     Message,
 )
@@ -1127,7 +1127,6 @@ class PlanModule(Module):
                 Message(role="user", content=user),
             ],
             temperature=0.2,
-            max_tokens=4096,
             response_format={"type": "json_object"},
         )
 

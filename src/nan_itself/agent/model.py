@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.nan_itself.agent.runtime import (
+    from .runtime import (
         SubagentHandle,
     )
 

@@ -1,37 +1,37 @@
-from src.nan_itself.agent.core import (
+from .core import (
     CoreAgent,
 )
-from src.nan_itself.agent.engine import (
+from .engine import (
     StepEngine,
 )
-from src.nan_itself.agent.loop import (
+from .loop import (
     DEFAULT_BACKOFF,
     DEFAULT_TURN_GRACE,
     AgentLoop,
     Inbox,
 )
-from src.nan_itself.agent.model import (
+from .model import (
     AgentResult,
     AgentTurn,
     ChildSubagent,
 )
-from src.nan_itself.agent.prompts import (
+from .prompts import (
     build_messages,
     format_skill_section,
 )
-from src.nan_itself.agent.reports import (
+from .reports import (
     LateReportBuffer,
 )
-from src.nan_itself.agent.role import (
+from .role import (
     RolePolicy,
 )
-from src.nan_itself.agent.runtime import (
+from .runtime import (
     AgentContext,
     AgentRuntime,
     SubagentHandle,
     SubagentLimitError,
 )
-from src.nan_itself.agent.verbs import (
+from .verbs import (
     VERBS,
 )
 

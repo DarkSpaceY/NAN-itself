@@ -14,14 +14,14 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 
-from src.nan_itself.agent.model import (
+from .model import (
     ChildSubagent,
 )
 
 
 REPORT_PREFIX = "[Subagent Report]"
 
-TASK_PREVIEW_LIMIT = 200
+# TASK_PREVIEW_LIMIT = 200
 
 
 class LateReportBuffer:
@@ -93,13 +93,13 @@ async def format_child_report(
 
     task_preview = child.task
 
-    if len(task_preview) > TASK_PREVIEW_LIMIT:
-        task_preview = (
-            task_preview[
-                :TASK_PREVIEW_LIMIT
-            ]
-            + "..."
-        )
+    # if len(task_preview) > TASK_PREVIEW_LIMIT:
+    #     task_preview = (
+    #         task_preview[
+    #             :TASK_PREVIEW_LIMIT
+    #         ]
+    #         + "..."
+    #     )
 
     return (
         f"{REPORT_PREFIX}\n"

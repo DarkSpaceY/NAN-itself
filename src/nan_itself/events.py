@@ -21,9 +21,10 @@ _SUB_QUEUE_SIZE = 2000
 
 
 class EventBus:
-    def __init__(self, history_limit: int = HISTORY_LIMIT) -> None:
+    def __init__(self, history_limit: int = HISTORY_LIMIT, subscriber_queue_size: int = _SUB_QUEUE_SIZE) -> None:
         self._subs: set[asyncio.Queue] = set()
         self._history: deque[dict] = deque(maxlen=history_limit)
+        self._subscriber_queue_size = subscriber_queue_size
         self._seq = 0
 
     def emit(self, event: dict[str, Any]) -> None:
@@ -51,7 +52,7 @@ class EventBus:
                 pass
 
     def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=_SUB_QUEUE_SIZE)
+        q: asyncio.Queue = asyncio.Queue(maxsize=self._subscriber_queue_size)
         self._subs.add(q)
         return q
 

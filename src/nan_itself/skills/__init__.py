@@ -8,7 +8,7 @@ Layering (dependencies point downward only):
 Import from this package, never from sibling modules.
 """
 
-from src.nan_itself.skills.model import (
+from .model import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
     SKILL_FILENAME,
@@ -17,7 +17,7 @@ from src.nan_itself.skills.model import (
     SkillValidationError,
     UnknownSkillError,
 )
-from src.nan_itself.skills.runtime import (
+from .runtime import (
     SkillRuntime,
 )
 

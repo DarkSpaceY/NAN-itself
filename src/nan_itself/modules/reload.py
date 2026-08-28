@@ -26,7 +26,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.nan_itself.modules.model import (
+from .model import (
     Module,
     ModuleRecord,
     ModuleState,

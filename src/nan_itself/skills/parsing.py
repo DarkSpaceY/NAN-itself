@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from src.nan_itself.skills.model import (
+from .model import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
     SKILL_FILENAME,

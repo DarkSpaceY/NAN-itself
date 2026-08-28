@@ -14,7 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from src.nan_itself.modules.model import (
+from .model import (
     MODULE_HEADER,
     Module,
 )

@@ -20,15 +20,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.nan_itself.utils.llm import (
+from ..utils.llm import (
     Message,
 )
 
 if TYPE_CHECKING:
-    from src.nan_itself.agent.model import (
+    from .model import (
         ChildSubagent,
     )
-    from src.nan_itself.skills import (
+    from ..skills import (
         Skill,
     )
 
@@ -39,7 +39,7 @@ MODULE_TAG = "module"
 
 RUNNING_SUBAGENTS_TAG = "running_subagents"
 
-RUNNING_TASK_PREVIEW_LIMIT = 80
+# RUNNING_TASK_PREVIEW_LIMIT = 80
 
 _AMBIENT_PREAMBLE = (
     "The following information is supplied by background "
@@ -162,8 +162,8 @@ def render_running_subagents(
     for child in children:
         task = child.task
 
-        if len(task) > RUNNING_TASK_PREVIEW_LIMIT:
-            task = task[:RUNNING_TASK_PREVIEW_LIMIT] + "..."
+        # if len(task) > RUNNING_TASK_PREVIEW_LIMIT:
+        #     task = task[:RUNNING_TASK_PREVIEW_LIMIT] + "..."
 
         lines.append(
             f"- id: {child.id} | task: {task}"

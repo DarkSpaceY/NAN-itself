@@ -79,7 +79,6 @@ class LLMRequest(BaseModel):
     messages: list[Message]
 
     temperature: float = 0.7
-    max_tokens: int = 4096
 
     tools: list[ToolDefinition] = Field(
         default_factory=list,
@@ -308,7 +307,6 @@ class LLMProvider:
             "model": self.model,
             "messages": messages,
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
             "stream": True,
             "stream_options": {
                 "include_usage": True,
@@ -527,7 +525,6 @@ class LLMProvider:
             "messages": messages,
             "system": system_prompt,
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
         }
 
         if tools:

@@ -10,36 +10,33 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.nan_itself.agent.core import CoreAgent
-from src.nan_itself.agent.loop import (
+from .agent.core import CoreAgent
+from .agent.loop import (
     AgentLoop,
     DEFAULT_TURN_GRACE,
     Inbox,
 )
-from src.nan_itself.modules import (
+from .modules import (
     Facade as ModuleFacade,
 )
-from src.nan_itself.skills import SkillRuntime
-from src.nan_itself.tools import ProviderRuntime
-from src.nan_itself.events import EventBus
-from src.nan_itself.gateway import Gateway
-from src.nan_itself.utils.llm import LLMProvider
+from .skills import SkillRuntime
+from .tools import ProviderRuntime
+from .events import EventBus
+from .gateway import Gateway
+from .utils.llm import LLMProvider
+from .config import get_settings
+
+settings = get_settings()
 
 
-def _llm_from_env() -> LLMProvider:
-    """
-    Local-first defaults: any OpenAI-compatible server works.
-    """
+def _llm_from_config(settings: Settings) -> LLMProvider:
     return LLMProvider(
-        provider=os.getenv("NAN_LLM_PROVIDER", "openai"),
-        api_key=os.getenv("NAN_LLM_API_KEY", "local"),
-        model=os.getenv("NAN_LLM_MODEL", "local-model"),
-        base_url=os.getenv(
-            "NAN_LLM_BASE_URL",
-            "http://127.0.0.1:11434/v1",
-        ),
-        timeout=float(os.getenv("NAN_LLM_TIMEOUT", "600")),
-        max_retries=int(os.getenv("NAN_LLM_MAX_RETRIES", "2")),
+        provider=settings.llm.provider,
+        api_key=settings.llm.api_key,
+        model=settings.llm.model,
+        base_url=settings.llm.base_url,
+        timeout=settings.llm.timeout,
+        max_retries=settings.llm.max_retries,
     )
 
 
@@ -72,11 +69,14 @@ async def run_agent_process() -> None:
     ):
         os.environ.pop(key, None)
 
-    llm = _llm_from_env()
+    llm = _llm_from_config(settings)
 
-    providers = ProviderRuntime()
+    providers = ProviderRuntime(
+        scan_interval=settings.providers.scan_interval,
+        tool_timeout=settings.providers.tool_timeout,
+    )
 
-    from src.nan_itself.modules.builtin import (
+    from .modules.builtin import (
         MemoryModule,
         PlanModule,
     )
@@ -89,15 +89,15 @@ async def run_agent_process() -> None:
     # Hearing is hardware-dependent; the composition root decides
     # whether it mounts at all.
     if os.getenv("NAN_AUDIO_ENABLED", "1") != "0":
-        from src.nan_itself.modules.builtin.audio import (
+        from .modules.builtin.audio import (
             AudioModule,
         )
 
-        from src.nan_itself.modules.builtin.system import (
+        from .modules.builtin.system import (
             SystemModule,
         )
 
-        from src.nan_itself.modules.builtin.network import (
+        from .modules.builtin.network import (
             NetworkModule,
         )
 
@@ -111,11 +111,16 @@ async def run_agent_process() -> None:
 
         logger.info("audio module enabled")
 
-    bus = EventBus()
+    bus = EventBus(
+        history_limit=settings.events.history_limit,
+        subscriber_queue_size=settings.events.subscriber_queue_size,
+    )
 
     modules = ModuleFacade(
         llm=llm,
         builtin_modules=builtin_modules,
+        retry_interval=settings.modules.retry_interval,
+        scan_interval=settings.modules.scan_interval,
     )
 
     skills = SkillRuntime()
@@ -130,15 +135,10 @@ async def run_agent_process() -> None:
 
     skills.discover()
 
-    persona_path = Path(
-        os.getenv(
-            "NAN_PERSONA",
-            str(
-                Path(__file__).resolve().parents[2]
-                / "workspace"
-                / "persona.md"
-            ),
-        )
+    persona_path = (
+        Path(__file__).resolve().parents[2]
+        / "workspace"
+        / "persona.md"
     )
 
     if not persona_path.is_file():
@@ -167,15 +167,23 @@ async def run_agent_process() -> None:
         skills=skills,
         persona_source=read_persona,
         bus=bus,
+        max_subagent_depth=settings.agent.max_subagent_depth,
     )
 
-    inbox = Inbox()
+    inbox = Inbox(
+        maxsize=settings.runtime.inbox.max_size,
+    )
 
     agent.agent_runtime.set_interrupt_event(
         inbox.wake_event(),
     )
 
-    loop = AgentLoop(agent, inbox)
+    loop = AgentLoop(
+        agent,
+        inbox,
+        turn_grace=settings.runtime.turn.grace,
+        backoff=settings.runtime.retry.backoff,
+    )
 
     stop_received = asyncio.Event()
 
@@ -216,15 +224,16 @@ async def run_agent_process() -> None:
 
     gateway = Gateway(
         bus=bus,
+        host=settings.gateway.host,
+        port=settings.gateway.port,
         on_input=ingest,
-        state_provider=lambda: {
-            "boot": boot_id,
-            "model": llm.model,
-            "base_url": os.getenv(
-                "NAN_LLM_BASE_URL",
-                "http://127.0.0.1:11434/v1",
-            ),
-        },
+        state_provider=...,
+        frontend_dir=(
+            Path(__file__).resolve().parents[2]
+            / "frontend"
+            / "app"
+            / "dist"
+        ),
     )
 
     gateway_task = asyncio.create_task(
