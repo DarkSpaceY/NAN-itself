@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>极简实验室 · α β γ δ</title>
+<style>
+  :root{
+    --bg:#161514; --side:#1c1b1a; --raise:#262420;
+    --line:rgba(232,227,221,.07); --line-hi:rgba(232,227,221,.14);
+    --ink:#e8e3dd; --dim:#8a8580; --faint:#5c5751;
+    --accent:#d97757; --accent-2:#e8a860;
+    --accent-soft:rgba(217,119,87,.10); --accent-line:rgba(217,119,87,.30);
+    --ok:#8fbe6d;
+    --sans:-apple-system,"SF Pro Text","PingFang SC","Helvetica Neue",sans-serif;
+    --mono:"Sarasa Mono SC","JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;overflow:hidden}
+  ::selection{background:rgba(217,119,87,.28)}
+  ::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:rgba(232,227,221,.09);border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+
+  /* ── 实验室切换器(定稿后移除)──────── */
+  .lab{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99;display:flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:999px;background:rgba(22,21,20,.85);backdrop-filter:blur(10px)}
+  .lab button{background:none;border:none;color:var(--faint);font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:999px;cursor:pointer}
+  .lab button:hover{color:var(--dim)}
+  .lab button.on{background:var(--accent-soft);color:var(--accent)}
+  .lab .rp{border-left:1px solid var(--line);border-radius:0}
+
+  main{height:100%;overflow-y:auto}
+  .col{transition:max-width .25s ease, padding .25s ease}
+
+  /* 各模式的列形态 */
+  body.m-alpha main .col{max-width:920px;margin:0;padding:56px 30px 30px}
+  body.m-beta  main .col{max-width:720px;margin:0 auto;padding:64px 28px 130px}
+  body.m-gamma main .col{max-width:700px;margin:0 auto;padding:56px 28px 120px}
+  body.m-delta main .col{max-width:660px;margin:0 auto;padding:56px 28px 120px}
+
+  .stamp{font-family:var(--mono);font-size:11px;color:var(--faint);margin-bottom:22px}
+  body.m-alpha .stamp{text-align:left}
+  body:not(.m-alpha) .stamp{text-align:center}
+
+  /* ── 流内容(同 D)────────────────── */
+  .row{margin-bottom:20px;animation:rise .35s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .user{display:flex;justify-content:flex-end}
+  .bubble{max-width:76%;background:rgba(232,227,221,.075);border:1px solid var(--line);border-radius:16px;padding:10px 15px;line-height:1.7}
+  .meta{display:flex;gap:9px;align-items:center;margin-bottom:7px}
+  .avatar{width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,#d97757,#e8a860)}
+  .who{font-weight:600;font-size:13px}
+  .t{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .prose{line-height:1.85;white-space:pre-wrap;max-width:64ch}
+  .caret{display:inline-block;width:7px;height:15px;border-radius:2px;background:var(--accent);vertical-align:-2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .machine{font-family:var(--mono);font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:8px;background:var(--raise);border:1px solid var(--line);border-radius:999px;padding:5px 12px;color:var(--dim);cursor:pointer;transition:.15s}
+  .pill:hover{border-color:var(--line-hi)}
+  .pill .tri{color:var(--accent);font-size:10px;transition:transform .2s}
+  .pill.open .tri{transform:rotate(90deg)}
+  .pill .fn{color:var(--ink)} .pill .arr{color:var(--faint)}
+  .pill .res b{color:var(--ok);font-weight:500}
+  .detail{margin:6px 0 0 10px;border-left:1px solid var(--line);padding:2px 0 2px 14px;color:var(--faint);line-height:1.9}
+  .detail .f{color:var(--dim)} .detail b{color:var(--ok);font-weight:500}
+  .agent-card{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:10px;padding:9px 13px;margin-top:4px}
+  .agent-card .ahead{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--accent)}
+  .agent-card .ahead .tag{font-size:9.5px;letter-spacing:.12em;border:1px solid var(--accent-line);border-radius:4px;padding:1px 6px}
+  .agent-card .abody{margin-top:5px;color:var(--dim);line-height:1.8}
+  .report-card{border:1px solid var(--line);background:var(--raise);border-radius:10px;padding:9px 13px;margin:8px 0 0 14px}
+  .report-card .rhead{font-family:var(--mono);font-size:11.5px;color:var(--ok)}
+  .report-card .rbody{margin-top:4px;color:var(--dim);font-family:var(--mono);font-size:12px;line-height:1.8}
+
+  /* ── Σ1:光标即状态 ───────────────── */
+  .statusline{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:26px}
+  .blk{display:inline-block;width:9px;height:16px;border-radius:2px;background:var(--faint);animation:blink 1.2s steps(1) infinite}
+  body.working .blk{background:var(--accent);animation:breathe 1.1s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1;transform:scaleY(1)}50%{opacity:.45;transform:scaleY(.82)}}
+
+  /* ── I2:流末提示符(α)──────────── */
+  .chrome-flow{display:none;align-items:center;gap:10px;margin-top:14px;font-family:var(--mono)}
+  body.m-alpha .chrome-flow{display:flex}
+  .chrome-flow .ps{color:var(--accent)}
+  .chrome-flow input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-family:var(--mono);font-size:13px;caret-color:var(--accent)}
+  .chrome-flow input::placeholder{color:var(--faint)}
+
+  /* ── I1:底部固定条(β/δ)────────── */
+  .chrome-bottom{display:none;position:fixed;bottom:0;left:0;right:0;border-top:1px solid var(--line);background:rgba(22,21,20,.92);backdrop-filter:blur(12px);padding:12px 20px 14px}
+  body.m-beta .chrome-bottom,body.m-delta .chrome-bottom{display:block}
+  .cb-in{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px}
+  body.m-delta .cb-in{max-width:660px}
+  .cb-in .ps{color:var(--accent);font-family:var(--mono);font-size:13px}
+  .cb-in input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:13.5px;font-family:var(--sans);caret-color:var(--accent)}
+  .cb-in input::placeholder{color:var(--faint)}
+  .cb-in kbd{font-family:var(--mono);font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+  /* β 的状态区:底条右侧 */
+  .cb-status{font-family:var(--mono);font-size:10.5px;color:var(--faint);white-space:nowrap}
+  .cb-status .st-ok{color:var(--ok)} .cb-status .st-run{color:var(--accent)}
+
+  /* β 顶栏 */
+  .topbar{display:none;position:fixed;top:0;left:0;right:0;z-index:50;display:none;align-items:center;gap:12px;padding:0 18px;height:40px;border-bottom:1px solid var(--line);background:rgba(22,21,20,.92);backdrop-filter:blur(12px);font-family:var(--mono);font-size:11px;color:var(--faint)}
+  body.m-beta .topbar{display:flex}
+  .topbar .brand{color:var(--ink);font-weight:700;letter-spacing:.06em;font-family:var(--sans);font-size:13px}
+  .topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  body.working .topbar .dot{background:var(--accent);animation:breathe 1.1s infinite}
+  .topbar .sp{flex:1}
+
+  /* ── I3:悬浮胶囊(γ)────────────── */
+  .chrome-float{display:none;position:fixed;bottom:26px;left:50%;transform:translateX(-50%);width:min(700px,92vw);align-items:center;gap:10px;padding:10px 16px;border:1px solid var(--line);border-radius:999px;background:rgba(38,36,32,.88);backdrop-filter:blur(12px);opacity:.45;transition:opacity .2s}
+  body.m-gamma .chrome-float{display:flex}
+  .chrome-float:focus-within{opacity:1;border-color:var(--line-hi)}
+  .chrome-float .blk{width:7px;height:13px}
+  .chrome-float input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:13.5px;caret-color:var(--accent)}
+  .chrome-float input::placeholder{color:var(--faint)}
+
+  /* ── δ 密度:机器过程退成脚注 ─────── */
+  body.m-delta .bubble{background:none;border:none;padding:0;color:var(--dim);font-size:13.5px}
+  body.m-delta .machine .pill{background:none;border:none;padding:0;color:var(--faint);font-size:11px}
+  body.m-delta .machine .pill .fn{color:var(--faint)}
+  body.m-delta .machine .pill .res{color:var(--faint)}
+  body.m-delta .machine .detail{display:none}
+  body.m-delta .agent-card{background:none;border:none;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px}
+  body.m-delta .agent-card .ahead{color:var(--faint)}
+  body.m-delta .agent-card .ahead .tag{display:none}
+  body.m-delta .agent-card .abody{color:var(--faint);font-size:11.5px}
+  body.m-delta .report-card{background:none;border:none;border-left:2px solid var(--line);border-radius:0;padding:2px 0 2px 12px;margin-left:12px}
+  body.m-delta .report-card .rhead{color:var(--faint)}
+  body.m-delta .report-card .rbody{color:var(--faint);font-size:11.5px}
+  body.m-delta .meta .avatar{width:14px;height:14px;border-radius:4px;opacity:.75}
+  body.m-delta .who{font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body class="m-alpha">
+
+  <div class="lab">
+    <button data-m="alpha" class="on">α 裸</button>
+    <button data-m="beta">β 三明治</button>
+    <button data-m="gamma">γ 沉浸</button>
+    <button data-m="delta">δ 静默</button>
+    <button class="rp" onclick="replay()">↻</button>
+  </div>
+
+  <div class="topbar">
+    <span class="brand">NAN</span>
+    <span class="dot"></span>
+    <span id="tb-status">● 空闲 · sleep 15s</span>
+    <span class="sp"></span>
+    <span>local-model · 127.0.0.1:11434</span>
+  </div>
+
+  <main>
+    <div class="col" id="stream">
+      <div class="stamp">turn #042 · 2026-08-26 22:40:58 · depth 0</div>
+    </div>
+  </main>
+
+  <!-- I2:流末提示符(α,在流内滚动) -->
+  <div class="chrome-flow" id="flowInput">
+    <span class="blk"></span><span class="ps">❯</span>
+    <input placeholder="输入消息…" autocomplete="off">
+  </div>
+
+  <!-- I3:悬浮胶囊(γ) -->
+  <div class="chrome-float">
+    <span class="blk"></span>
+    <input placeholder="输入消息,⌘K 命令…" autocomplete="off">
+  </div>
+
+  <!-- I1:底部固定条(β/δ) -->
+  <div class="chrome-bottom">
+    <div class="cb-in">
+      <span class="ps">❯</span>
+      <input placeholder="输入消息…" autocomplete="off">
+      <kbd>⏎</kbd>
+      <span class="cb-status" id="cb-status">● 空闲 · sleep 15s</span>
+    </div>
+  </div>
+
+<script>
+  const stream = document.getElementById('stream');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const scroll = () => { const m=document.querySelector('main'); m.scrollTop = m.scrollHeight; };
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+  /* I2 提示符必须始终在流末:每次追加行后把它移到最后 */
+  const flowInput = document.getElementById('flowInput');
+  const keepFlowLast = () => {
+    if(!document.body.classList.contains('m-alpha')) return;
+    if(stream.lastElementChild !== flowInput) stream.appendChild(flowInput);
+  };
+  new MutationObserver(keepFlowLast).observe(stream, {childList:true});
+
+  const SCRIPT = [
+    {k:'user',  t:'帮我看看最近 workspace 改了哪些文件,顺便确认我的时区偏好还在记忆里。'},
+    {k:'tool',  fn:'workspace.scan()', res:'<b>103 files</b> · <b>+3</b> changed',
+                out:['<b>103 files</b> · changed <b>3</b> · deleted 0','· <span class="f">src/nan_itself/app.py</span>','· <span class="f">workspace/persona.md</span>','· <span class="f">docs/memory-design.md</span>']},
+    {k:'disp',  fn:'dispatch_subagent · memory-review', out:'简报:核对记忆中「UTC+8」「极简回答」两条的有效性'},
+    {k:'rep',   head:'✓ Subagent Report · memory-review · 1m12s', out:'两条记忆均有效,无冲突,未新增。'},
+    {k:'nano',  t:'最近改动 3 个文件:app.py、persona.md、memory-design.md。\n记忆确认:时区 UTC+8、偏好极简回答,均有效,未新增。'},
+  ];
+
+  let running = false;
+  function setStatus(work){
+    document.body.classList.toggle('working', work);
+    const txt = work ? '<span class="st-run">● 工作中 · 工具 1 · 子代理 1</span>'
+                     : '<span class="st-ok">● 空闲</span> · sleep 15s';
+    document.getElementById('tb-status').innerHTML = txt;
+    document.getElementById('cb-status').innerHTML = txt;
+  }
+
+  async function replay(){
+    if(running) return; running = true;
+    [...stream.querySelectorAll('.row')].forEach(n => n.remove());
+    setStatus(true);
+    await sleep(400);
+
+    for(const s of SCRIPT){
+      const row = document.createElement('div');
+      if(s.k==='user'){
+        row.className='row user';
+        row.innerHTML = `<div class="bubble"></div>`;
+        stream.appendChild(row); scroll();
+        await type(row.querySelector('.bubble'), s.t);
+      }
+      else if(s.k==='tool'){
+        row.className='row machine';
+        row.innerHTML = `<span class="pill open"><span class="tri">▶</span><span class="fn">${s.fn}</span><span class="arr">→</span><span class="res">${s.res}</span></span><div class="detail"></div>`;
+        stream.appendChild(row); scroll(); await sleep(500);
+        const detail=row.querySelector('.detail'), pill=row.querySelector('.pill');
+        pill.onclick=()=>{const o=detail.style.display!=='none';detail.style.display=o?'none':'block';pill.classList.toggle('open',!o);};
+        for(const line of s.out){const d=document.createElement('div');d.innerHTML=line;detail.appendChild(d);scroll();await sleep(200);}
+        await sleep(500);
+        detail.style.display='none';pill.classList.remove('open');scroll();
+      }
+      else if(s.k==='disp'){
+        row.className='row machine';
+        row.innerHTML = `<div class="agent-card"><div class="ahead"><span class="tag">SUBAGENT</span><span>${s.fn}</span></div><div class="abody">${s.out}</div></div>`;
+        stream.appendChild(row); scroll(); await sleep(800);
+      }
+      else if(s.k==='rep'){
+        row.className='row machine';
+        row.innerHTML = `<div class="report-card"><div class="rhead">${s.head}</div><div class="rbody">${s.out}</div></div>`;
+        stream.appendChild(row); scroll(); await sleep(700);
+      }
+      else if(s.k==='nano'){
+        row.className='row';
+        row.innerHTML = `<div class="meta"><span class="avatar"></span><span class="who">NAN</span><span class="t">22:41:40</span></div><div class="prose"></div>`;
+        stream.appendChild(row); scroll();
+        await type(row.querySelector('.prose'), s.t);
+      }
+    }
+    setStatus(false);
+    running = false;
+  }
+
+  async function type(el, text){
+    for(let i=0;i<text.length;){
+      el.innerHTML = esc(text.slice(0, i+=2)) + '<span class="caret"></span>';
+      scroll(); await sleep(24);
+    }
+    el.textContent = text;
+  }
+
+  /* 模式切换 */
+  const NAMES={alpha:'α 裸',beta:'β 三明治',gamma:'γ 沉浸',delta:'δ 静默'};
+  function setMode(m){
+    document.body.className = 'm-'+m + (document.body.classList.contains('working')?' working':'');
+    document.querySelectorAll('.lab button[data-m]').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+    if(m==='alpha') keepFlowLast();
+    scroll();
+  }
+  document.querySelectorAll('.lab button[data-m]').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+  document.addEventListener('keydown', e=>{
+    if(/input/i.test(e.target.tagName)) return;
+    const map={'1':'alpha','2':'beta','3':'gamma','4':'delta'};
+    if(map[e.key]) setMode(map[e.key]);
+  });
+
+  keepFlowLast();
+  replay();
+</script>
+</body>
+</html>

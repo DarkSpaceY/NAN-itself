@@ -224,7 +224,7 @@ class MemoryModule(Module):
     entry_cap: int = 120
 
     def __init__(self):
-        base = os.getenv("NAN_MEMORY_DIR", "workspace/memory")
+        base = os.getenv("NAN_MEMORY_DIR", "data/databases/memory")
 
         self.base = Path(base)
 

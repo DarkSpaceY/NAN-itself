@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -123,6 +124,10 @@ class AgentRuntime:
         self.max_subagent_depth = max_subagent_depth
 
         self._agents: dict[str, AgentContext] = {}
+
+        # Set by the composition root: new-input wake signal used
+        # by sleep() so idle naps yield to pending messages.
+        self.interrupt_event: asyncio.Event | None = None
 
     # ------------------------------------------------------------------
     # Root Agent
@@ -250,16 +255,54 @@ class AgentRuntime:
     # Waiting
     # ------------------------------------------------------------------
 
-    @staticmethod
+    def set_interrupt_event(self, event: asyncio.Event | None) -> None:
+        self.interrupt_event = event
+
     async def sleep(
+        self,
         seconds: float,
-    ) -> None:
+    ) -> tuple[float, bool]:
+        """
+        Sleep for `seconds`, OR until the interrupt event fires
+        (new input arrived). Returns (waited, interrupted).
+        """
         if seconds < 0:
             raise ValueError(
                 "seconds must be >= 0"
             )
 
-        await asyncio.sleep(seconds)
+        event = self.interrupt_event
+
+        if event is None:
+            await asyncio.sleep(seconds)
+            return seconds, False
+
+        started = time.time()
+
+        sleeper = asyncio.create_task(
+            asyncio.sleep(seconds),
+            name="agent-sleep",
+        )
+
+        waiter = asyncio.create_task(
+            event.wait(),
+            name="agent-sleep-interrupt",
+        )
+
+        done, pending = await asyncio.wait(
+            {sleeper, waiter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        return time.time() - started, waiter in done
 
     @staticmethod
     async def wait(

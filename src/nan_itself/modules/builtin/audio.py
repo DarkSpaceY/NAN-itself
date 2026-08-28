@@ -170,7 +170,7 @@ class AudioModule(Module):
         self.registry_path = (
             Path(registry)
             if registry
-            else _repo_root() / "data" / "audio" / "voices.json"
+            else _repo_root() / "data" / "databases" / "audio" / "voices.json"
         )
 
         self.matcher = SpeakerMatcher(

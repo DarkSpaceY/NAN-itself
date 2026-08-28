@@ -114,9 +114,16 @@ class SleepVerb:
         if seconds < 0:
             return "'seconds' must be >= 0."
 
-        await engine.agent_runtime.sleep(
+        waited, interrupted = await engine.agent_runtime.sleep(
             float(seconds)
         )
+
+        if interrupted:
+            return (
+                f"Sleep interrupted after {waited:.1f}s: "
+                "new input arrived. End your turn now so it "
+                "can be processed."
+            )
 
         return (
             f"Waited {float(seconds):g} seconds."

@@ -28,9 +28,13 @@ from src.nan_itself.modules.builtin.memory import (
     MemoryModule,
 )
 
+from src.nan_itself.modules.builtin.plan import (
+    PlanModule,
+)
+
 BUILTIN_MODULES: tuple[
     type[Module],
     ...,
 ] = ()
 
-__all__ = ["BUILTIN_MODULES", "MemoryModule"]
+__all__ = ["BUILTIN_MODULES", "MemoryModule", "PlanModule"]

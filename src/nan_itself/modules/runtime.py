@@ -322,6 +322,9 @@ class Facade:
             str,
             Mapping[str, Any],
         ],
+        *,
+        on_start: Any = None,
+        on_result: Any = None,
     ) -> list[str]:
         """
         Query all RUNNING Modules against an existing snapshot.
@@ -343,12 +346,38 @@ class Facade:
             is ModuleState.RUNNING
         ]
 
-        results = await asyncio.gather(
-            *(
-                self._query_record(
-                    record,
+        async def run_one(record: Any) -> Any:
+            if on_start is not None:
+                on_start(record.id)
+
+            started = time.time()
+
+            try:
+                result = await record.instance.query(
                     module_turn,
                 )
+                failed = False
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    f"Module query failed: {record.id}[generation={record.generation}]",
+                )
+                result, failed = None, True
+
+            if on_result is not None:
+                on_result(
+                    record.id,
+                    result,
+                    time.time() - started,
+                    failed,
+                )
+
+            return result
+
+        results = await asyncio.gather(
+            *(
+                run_one(record)
                 for record in records
             ),
         )

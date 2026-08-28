@@ -1,0 +1,33 @@
+{
+  "battery": 100,
+  "charging": true,
+  "cpu": 25.0,
+  "disk": 22.0,
+  "events": [
+    [
+      1787911601.225575,
+      "focus -> Google Chrome"
+    ],
+    [
+      1787911621.694218,
+      "focus -> Code"
+    ],
+    [
+      1787911626.789474,
+      "focus -> Google Chrome"
+    ]
+  ],
+  "focus": [
+    "Google Chrome",
+    ""
+  ],
+  "idle": 0.0758751,
+  "mem": 78.9,
+  "net_up": null,
+  "now": 1787911672.8329768,
+  "self_cpu": 0.0,
+  "self_mem_mb": 730,
+  "swap": 89.3,
+  "uptime": 1192056.916620016,
+  "work_seconds": 122.75290091696661
+}

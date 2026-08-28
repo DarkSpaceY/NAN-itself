@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import uuid
 import sys
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -19,6 +21,8 @@ from src.nan_itself.modules import (
 )
 from src.nan_itself.skills import SkillRuntime
 from src.nan_itself.tools import ProviderRuntime
+from src.nan_itself.events import EventBus
+from src.nan_itself.gateway import Gateway
 from src.nan_itself.utils.llm import LLMProvider
 
 
@@ -39,7 +43,7 @@ def _llm_from_env() -> LLMProvider:
     )
 
 
-async def _read_stdin(inbox: Inbox) -> None:
+async def _read_stdin(inbox: Inbox, ingest) -> None:
     loop = asyncio.get_running_loop()
 
     while True:
@@ -55,7 +59,7 @@ async def _read_stdin(inbox: Inbox) -> None:
         text = line.strip()
 
         if text:
-            inbox.put(text)
+            ingest(text, None)
 
 
 async def run_agent_process() -> None:
@@ -74,9 +78,13 @@ async def run_agent_process() -> None:
 
     from src.nan_itself.modules.builtin import (
         MemoryModule,
+        PlanModule,
     )
 
-    builtin_modules: tuple[type, ...] = (MemoryModule,)
+    builtin_modules: tuple[type, ...] = (
+        MemoryModule,
+        PlanModule,
+    )
 
     # Hearing is hardware-dependent; the composition root decides
     # whether it mounts at all.
@@ -95,12 +103,15 @@ async def run_agent_process() -> None:
 
         builtin_modules = (
             MemoryModule,
+            PlanModule,
             AudioModule,
             SystemModule,
             NetworkModule,
         )
 
         logger.info("audio module enabled")
+
+    bus = EventBus()
 
     modules = ModuleFacade(
         llm=llm,
@@ -155,9 +166,14 @@ async def run_agent_process() -> None:
         providers=providers,
         skills=skills,
         persona_source=read_persona,
+        bus=bus,
     )
 
     inbox = Inbox()
+
+    agent.agent_runtime.set_interrupt_event(
+        inbox.wake_event(),
+    )
 
     loop = AgentLoop(agent, inbox)
 
@@ -168,8 +184,56 @@ async def run_agent_process() -> None:
         name="agent-loop",
     )
 
+    boot_id = uuid.uuid4().hex[:12]
+
+    # 回执去重:客户端断线重连会以同一 mid 补发(可能已投递过),
+    # 这里按 mid 保证恰好一次;容量有界,旧 mid 随 LRU 淘汰。
+    seen_mids: dict[str, None] = {}
+
+    def ingest(text: str, mid: str | None = None) -> None:
+        # 唯一的接收点:进入 Inbox 的同时立刻回显,
+        # 用户消息不因 sleep/长回合而"消失"。
+        if mid:
+            if mid in seen_mids:
+                logger.info("duplicate input dropped (mid={})", mid)
+                return
+            seen_mids[mid] = None
+            if len(seen_mids) > 256:
+                for key in list(seen_mids)[:128]:
+                    seen_mids.pop(key, None)
+
+        inbox.put(text)
+
+        if text.strip():
+            echo: dict[str, Any] = {
+                "t": "user_input",
+                "id": f"u{time.time_ns()}",
+                "text": text,
+            }
+            if mid:
+                echo["mid"] = mid
+            bus.emit(echo)
+
+    gateway = Gateway(
+        bus=bus,
+        on_input=ingest,
+        state_provider=lambda: {
+            "boot": boot_id,
+            "model": llm.model,
+            "base_url": os.getenv(
+                "NAN_LLM_BASE_URL",
+                "http://127.0.0.1:11434/v1",
+            ),
+        },
+    )
+
+    gateway_task = asyncio.create_task(
+        gateway.serve(),
+        name="ws-gateway",
+    )
+
     stdin_task = asyncio.create_task(
-        _read_stdin(inbox),
+        _read_stdin(inbox, ingest),
         name="stdin-reader",
     )
 
@@ -215,6 +279,8 @@ async def run_agent_process() -> None:
         pass
 
     await loop_task
+
+    await gateway.close()
 
     logger.info("Stopping tool providers and modules")
 

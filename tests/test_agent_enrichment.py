@@ -350,6 +350,7 @@ class RecordingRuntime:
 
     async def sleep(self, seconds):
         self.slept.append(seconds)
+        return seconds, False
 
 
 class FakeEngine:

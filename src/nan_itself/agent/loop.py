@@ -61,6 +61,14 @@ class Inbox:
     def empty(self) -> bool:
         return not self._items
 
+    def wake_event(self) -> asyncio.Event:
+        """
+        Public handle for interruptible waits: set on every put,
+        cleared when the inbox drains empty. Sleep-like waits can
+        race against this so new input interrupts them.
+        """
+        return self._event
+
     async def wait_not_empty(self) -> None:
         """
         Wait until at least one item is present, without

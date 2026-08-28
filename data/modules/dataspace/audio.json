@@ -1,0 +1,76 @@
+{
+  "ambient_kind": "quiet",
+  "ambient_tags": [
+    [
+      "Writing",
+      0.7
+    ],
+    [
+      "Animal",
+      0.11
+    ]
+  ],
+  "available": true,
+  "bandwidth_hz": 1369.0,
+  "bpm": null,
+  "centroid_hz": 861.3,
+  "clip_total": 1,
+  "dedup_skipped_total": 0,
+  "dropped_frames_total": 0,
+  "dropped_utterances_total": 0,
+  "dynamic_range_db": 5.9,
+  "emotion_backend": "OnnxEmotionRecognizer",
+  "emotions_total": 3,
+  "f0_hz": 0.0,
+  "flatness": 0.23,
+  "hotwords_total": 0,
+  "last_emotion": "sad",
+  "last_emotion_prob": 0.994,
+  "last_formants": [
+    366.2,
+    366.2,
+    1113.0
+  ],
+  "last_heard_ts": 1787911863.438457,
+  "last_hotword": null,
+  "last_pauses": 6,
+  "last_register": "high (500Hz)",
+  "last_speaker": "voice-1",
+  "last_speaker_score": 0.791,
+  "last_speech_rate": 1.14,
+  "last_transient_ts": 1787911550.68802,
+  "last_translation": null,
+  "last_utt_tags": [
+    [
+      "Writing",
+      0.78
+    ],
+    [
+      "Inside, small room",
+      0.08
+    ]
+  ],
+  "level_dbfs": -47.0,
+  "load_error": null,
+  "mode": "webrtcvad",
+  "noise_floor_dbfs": -47.8,
+  "peak_dbfs": -37.1,
+  "pitch_strength": 0.244,
+  "pitch_trend": "",
+  "quiet_s": 0.0,
+  "reason": "",
+  "rolloff_hz": 1534.3,
+  "snr_db": null,
+  "speaker_backend": "SherpaSpeakerEmbedder",
+  "speech_active": false,
+  "tagger_backend": "SherpaAudioTagger",
+  "transcripts_total": 4,
+  "transients_total": 1,
+  "utterances_total": 28,
+  "vad_mode": "unknown",
+  "voices_known": 0,
+  "voices_session": 1,
+  "whisper_restarts": 0,
+  "whisper_timeouts": 0,
+  "zcr": 0.036
+}

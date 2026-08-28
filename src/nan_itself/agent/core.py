@@ -31,6 +31,10 @@ from src.nan_itself.agent.reports import (
 from src.nan_itself.agent.runtime import (
     AgentRuntime,
 )
+from src.nan_itself.events import (
+    EventBus,
+    StreamSink,
+)
 
 
 class CoreAgent:
@@ -43,6 +47,7 @@ class CoreAgent:
         skills,
         persona_source: Callable[[], str],
         max_subagent_depth: int = 3,
+        bus: EventBus | None = None,
     ) -> None:
         self.llm = llm
         self.modules = modules
@@ -51,6 +56,8 @@ class CoreAgent:
         self.persona_source = persona_source
 
         self.max_subagent_depth = max_subagent_depth
+
+        self.bus = bus
 
         self.agent_runtime = AgentRuntime(
             max_subagent_depth=max_subagent_depth,
@@ -101,13 +108,23 @@ class CoreAgent:
 
         seed_reports = self._pending_reports.drain()
 
-        return await self.engine.execute(
-            context=root,
-            user_input=user_input,
-            persona=persona,
-            seed_reports=seed_reports,
-            report_sink=self._pending_reports.park,
-        )
+        sink = StreamSink(self.bus) if self.bus is not None else None
+
+        if sink is not None:
+            sink.status_working()
+
+        try:
+            return await self.engine.execute(
+                context=root,
+                user_input=user_input,
+                persona=persona,
+                seed_reports=seed_reports,
+                report_sink=self._pending_reports.park,
+                sink=sink,
+            )
+        finally:
+            if sink is not None:
+                sink.status_idle()
 
     # ==================================================================
     # Pending late reports (consumed by AgentLoop / tests)
