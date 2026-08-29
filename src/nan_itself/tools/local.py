@@ -468,6 +468,9 @@ def load_class_from_file(
 
     module.__file__ = str(path)
 
+    module.__dict__["LocalToolProvider"] = LocalToolProvider
+    module.__dict__["tool"] = tool
+
     sys.modules[
         module_name
     ] = module

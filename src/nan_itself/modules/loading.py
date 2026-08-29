@@ -166,6 +166,8 @@ def import_module_class(
 
     module.__file__ = str(path)
 
+    module.__dict__["Module"] = Module
+
     sys.modules[
         module_name
     ] = module
