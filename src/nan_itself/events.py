@@ -14,6 +14,7 @@ import time
 import uuid
 from collections import deque
 from typing import Any
+from loguru import logger
 
 HISTORY_LIMIT = 500
 
@@ -37,6 +38,8 @@ class EventBus:
         }
 
         self._history.append(stamped)
+
+        logger.info(f"[Debug] Event Sent: {event}")
 
         for q in self._subs:
             if q.full():
