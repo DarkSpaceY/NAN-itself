@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Item } from '../state/store';
+import { GLYPH_BY_KIND } from '../protocol';
 
 const BRAILLE = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -25,9 +26,13 @@ export function RecordItem({ item }: { item: Rec }) {
   return (
     <div className={`rec ${item.state}${open ? ' open' : ''}`} onClick={() => setOpen(!open)}>
       <div className="rrow">
-        <span className="glyph">{running ? BRAILLE[spin % BRAILLE.length] : item.glyph}</span>
+        <span className="glyph">
+          {running 
+            ? BRAILLE[spin % BRAILLE.length] 
+            : (GLYPH_BY_KIND[item.kind] || item.glyph || '•')}
+        </span>
         <span className="rname">{item.name}</span>
-        {item.summary ? <span className="rsum">{highlight(item.summary)}</span> : null}
+        {/* {item.summary ? <span className="rsum">{highlight(item.summary)}</span> : null} */}
         <span className="note">{item.note ?? ''}</span>
         <span className="chev">▸</span>
       </div>

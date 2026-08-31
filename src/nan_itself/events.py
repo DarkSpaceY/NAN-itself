@@ -9,12 +9,13 @@ timestamp. A bounded history ring supports reconnect snapshots.
 from __future__ import annotations
 
 import asyncio
-import json
+from datetime import datetime
 import time
 import uuid
 from collections import deque
 from typing import Any
 from loguru import logger
+import re
 
 HISTORY_LIMIT = 500
 
@@ -39,7 +40,7 @@ class EventBus:
 
         self._history.append(stamped)
 
-        logger.info(f"[Debug] Event Sent: {event}")
+        # logger.info(f"[Debug] Event Sent: {event}")
 
         for q in self._subs:
             if q.full():
@@ -74,8 +75,60 @@ def local_ts() -> str:
     return time.strftime("%H:%M:%S")
 
 
-def local_date_label(ts: float | None = None) -> str:
-    t = time.localtime(ts if ts is not None else time.time())
+def local_date_label(ts: float | str | None = None) -> str:
+    """
+    将时间转换为本地日期标签（年/月/日）。
+    支持：
+    - None: 当前时间
+    - int/float: Unix 时间戳
+    - str: 尝试自动解析：
+        - 纯数字字符串 → 转为 float 解析
+        - 完整日期时间 → 解析为 datetime
+        - 纯时间（如 "19:30:00"）→ 视为今天
+        - 其他格式 → 返回当前日期并记录警告
+    """
+    t = None  # struct_time
+    
+    if ts is None:
+        t = time.localtime()
+    elif isinstance(ts, (int, float)):
+        t = time.localtime(ts)
+    elif isinstance(ts, str):
+        ts_str = ts.strip()
+        # 1. 尝试解析为纯数字（时间戳字符串）
+        if re.match(r'^[0-9]+(\.[0-9]+)?$', ts_str):
+            try:
+                t = time.localtime(float(ts_str))
+            except Exception:
+                pass
+        # 2. 尝试解析为日期时间（标准格式）
+        if t is None:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(ts_str, fmt)
+                    t = dt.timetuple()
+                    break
+                except ValueError:
+                    continue
+        # 3. 尝试解析为纯时间（如 "19:30:00"）→ 视为今天
+        if t is None:
+            for fmt in ("%H:%M:%S", "%H:%M"):
+                try:
+                    time_obj = datetime.strptime(ts_str, fmt).time()
+                    now = datetime.now()
+                    dt = datetime.combine(now.date(), time_obj)
+                    t = dt.timetuple()
+                    break
+                except ValueError:
+                    continue
+        # 4. 均失败，使用当前时间并记录警告
+        if t is None:
+            logger.warning(f"Unrecognized timestamp format: '{ts}', using current time")
+            t = time.localtime()
+    else:
+        logger.warning(f"Unsupported timestamp type: {type(ts)}, using current time")
+        t = time.localtime()
+    
     return f"{t.tm_year}年{t.tm_mon}月{t.tm_mday}日"
 
 

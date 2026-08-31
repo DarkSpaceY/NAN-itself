@@ -3,8 +3,7 @@ import { useAgentStream } from './state/useAgentStream2';
 import { TopBar } from './shell/TopBar';
 import { Composer } from './shell/Composer';
 import { RecordItem } from './design/RecordItem';
-import { UserMessage } from './design/Message';
-import { NanoMessage } from './design/Message2';
+import { UserMessage, NanoMessage } from './design/Message2';
 import type { Item } from './state/store';
 
 // memo:流式增量每秒触发几十次 fold,未受影响的行靠引用相等跳过重渲染

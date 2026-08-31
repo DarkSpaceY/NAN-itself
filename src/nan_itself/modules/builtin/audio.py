@@ -72,6 +72,8 @@ class AudioModule(Module):
 
     sample_rate: int = 16000
 
+    confidence_threshold: float = 0.6  # 低于此值的转录将被丢弃
+
     vad_aggressiveness: int = 2
 
     preroll_frames: int = 10
@@ -1066,6 +1068,11 @@ class AudioModule(Module):
         text = (result.get("text") or "").strip()
 
         if not text:
+            return False
+
+        confidence = float(result.get("confidence", 0.0))
+        if confidence < self.confidence_threshold:
+            logger.debug(f"Transcription below confidence threshold: {confidence:.2f} < {self.confidence_threshold}")
             return False
 
         normalized = self._normalize_text(text)

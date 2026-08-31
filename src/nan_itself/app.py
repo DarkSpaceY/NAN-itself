@@ -227,7 +227,7 @@ async def run_agent_process() -> None:
         host=settings.gateway.host,
         port=settings.gateway.port,
         on_input=ingest,
-        state_provider=...,
+        state_provider=None,
         frontend_dir=(
             Path(__file__).resolve().parents[2]
             / "frontend"

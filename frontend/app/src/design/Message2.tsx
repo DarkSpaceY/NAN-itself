@@ -1,5 +1,4 @@
 import ReactMarkdown from 'react-markdown';
-import { useEffect, useRef, useState } from 'react';
 import type { Item } from '../state/store';
 
 type Nano = Extract<Item, { k: 'nano' }>;
@@ -27,28 +26,10 @@ export function NanoMessage({ item }: { item: Nano }) {
   );
 }
 
-export function UserMessage({ item }: Extract<Item, { k: 'user' }> extends never ? never : { item: Extract<Item, { k: 'user' }> }) {
-  return <UserMessageInner item={item} />;
-}
-
-function UserMessageInner({ item }: { item: Extract<Item, { k: 'user' }> }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const first = useRef(true);
-
-  // 入场轻微高亮一次
-  useEffect(() => {
-    if (!first.current) return;
-    first.current = false;
-    ref.current?.classList.add('fresh');
-    const t = setTimeout(() => ref.current?.classList.remove('fresh'), 1200);
-    return () => clearTimeout(t);
-  }, []);
-
+export function UserMessage({ item }: { item: Extract<Item, { k: 'user' }> }) {
   return (
     <div className="row user">
-      <div ref={ref} className="bubble">
-        {item.text}
-      </div>
+      <div className={`bubble${item.queued ? ' queued' : ''}`}>{item.text}</div>
     </div>
   );
 }
