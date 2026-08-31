@@ -11,6 +11,7 @@ Discovery policies enforced here:
 
     - workspace skills cannot override builtin ones
     - one name may only be claimed by one source directory
+    - one workspace directory owns exactly one Skill
     - an unchanged broken skill directory is never retried
 
 This module does not parse file contents beyond delegating to
@@ -76,9 +77,13 @@ class SkillRegistry:
         builtin_roots: Iterable[Path],
         workspace_root: Path,
     ) -> None:
-        self.discover_builtin(builtin_roots)
+        self.discover_builtin(
+            builtin_roots
+        )
 
-        self.discover_workspace(workspace_root)
+        self.discover_workspace(
+            workspace_root
+        )
 
     def discover_builtin(
         self,
@@ -93,21 +98,23 @@ class SkillRegistry:
                     f"Builtin Skill root is not a directory: {root}"
                 )
 
-            # Allow either:
-            #
-            # builtin_root/foo/SKILL.md
-            #
-            # or:
-            #
-            # builtin_root/SKILL.md
-            #
-            if (root / SKILL_FILENAME).is_file():
-                self.register(root, origin="builtin")
+            if (
+                root / SKILL_FILENAME
+            ).is_file():
+                self.register(
+                    root,
+                    origin="builtin",
+                )
                 continue
 
-            for child in sorted(root.iterdir()):
+            for child in sorted(
+                root.iterdir()
+            ):
                 if child.is_dir():
-                    self.register(child, origin="builtin")
+                    self.register(
+                        child,
+                        origin="builtin",
+                    )
 
     def discover_workspace(
         self,
@@ -121,16 +128,31 @@ class SkillRegistry:
         current = {
             path.resolve()
             for path in root.iterdir()
-            if path.is_dir()
-            and not path.name.startswith("_")
-            and (path / SKILL_FILENAME).is_file()
+            if (
+                path.is_dir()
+                and not path.name.startswith("_")
+                and (
+                    path / SKILL_FILENAME
+                ).is_file()
+            )
         }
 
-        known = set(self.fingerprints)
+        known = set(
+            self.fingerprints
+        )
 
+        # --------------------------------------------------------------
         # Removed Skills.
-        for skill_dir in known - current:
-            record = self.record_by_workspace_dir(skill_dir)
+        # --------------------------------------------------------------
+
+        for skill_dir in (
+            known - current
+        ):
+            record = (
+                self.record_by_workspace_dir(
+                    skill_dir
+                )
+            )
 
             if record is not None:
                 self.records.pop(
@@ -138,41 +160,76 @@ class SkillRegistry:
                     None,
                 )
 
-            self.fingerprints.pop(skill_dir, None)
+            self.fingerprints.pop(
+                skill_dir,
+                None,
+            )
 
-            self.errors.pop(skill_dir, None)
+            self.errors.pop(
+                skill_dir,
+                None,
+            )
 
+        # --------------------------------------------------------------
         # New / changed Skills.
-        for skill_dir in sorted(current):
-            skill_file = skill_dir / SKILL_FILENAME
+        # --------------------------------------------------------------
 
-            fp = fingerprint(skill_file)
+        for skill_dir in sorted(
+            current
+        ):
+            skill_file = (
+                skill_dir / SKILL_FILENAME
+            )
 
-            previous = self.fingerprints.get(skill_dir)
+            fp = fingerprint(
+                skill_file
+            )
 
-            previous_error = self.errors.get(skill_dir)
+            previous = (
+                self.fingerprints.get(
+                    skill_dir
+                )
+            )
 
+            previous_error = (
+                self.errors.get(
+                    skill_dir
+                )
+            )
+
+            # Don't repeatedly retry an unchanged broken Skill.
             if (
                 previous == fp
                 and previous_error is not None
             ):
                 continue
 
+            # Nothing changed.
             if (
                 previous == fp
                 and skill_dir in self.fingerprints
             ):
                 continue
 
-            self.fingerprints[skill_dir] = fp
+            self.fingerprints[
+                skill_dir
+            ] = fp
 
-            self.errors.pop(skill_dir, None)
+            self.errors.pop(
+                skill_dir,
+                None,
+            )
 
             try:
-                self.register(skill_dir, origin="workspace")
+                self.register(
+                    skill_dir,
+                    origin="workspace",
+                )
 
             except Exception as exc:
-                self.errors[skill_dir] = exc
+                self.errors[
+                    skill_dir
+                ] = exc
 
     # ==================================================================
     # Registration
@@ -184,29 +241,100 @@ class SkillRegistry:
         *,
         origin: str,
     ) -> None:
+        root = root.resolve()
+
+        # --------------------------------------------------------------
+        # Parse candidate FIRST.
+        #
+        # Nothing in registry state is mutated until metadata parsing
+        # succeeds.
+        # --------------------------------------------------------------
+
         metadata = read_metadata(
             root,
             origin=origin,
         )
 
-        existing = self.records.get(metadata.name)
+        # --------------------------------------------------------------
+        # Find the Skill currently owned by this workspace directory.
+        # --------------------------------------------------------------
+
+        previous = (
+            self.record_by_workspace_dir(
+                root
+            )
+            if origin == "workspace"
+            else None
+        )
+
+        existing = self.records.get(
+            metadata.name
+        )
+
+        # --------------------------------------------------------------
+        # Validate the candidate name BEFORE removing the old record.
+        #
+        # This is critical for transactional reload.
+        #
+        # Example:
+        #
+        #   alpha/ -> alpha
+        #   beta/  -> beta
+        #
+        # If alpha/ changes to name=beta, beta already belongs to
+        # another source. The old alpha record MUST remain intact.
+        # --------------------------------------------------------------
 
         if existing is not None:
-            if existing.metadata.origin == "builtin":
+            if (
+                existing.metadata.origin
+                == "builtin"
+            ):
                 if origin == "workspace":
-                    raise SkillValidationError(
-                        f"Workspace Skill '{metadata.name}' "
-                        f"cannot override builtin Skill"
-                    )
+                    # If the existing builtin is literally the same
+                    # record this is impossible for workspace origin,
+                    # but keeping this branch explicit makes the
+                    # ownership rule obvious.
+                    if existing is not previous:
+                        raise SkillValidationError(
+                            f"Workspace Skill '{metadata.name}' "
+                            f"cannot override builtin Skill"
+                        )
 
-            if existing.metadata.source.resolve() != (
-                metadata.source.resolve()
+            if (
+                existing is not previous
+                and existing.metadata.source.resolve()
+                != metadata.source.resolve()
             ):
                 raise SkillValidationError(
                     f"Duplicate Skill name '{metadata.name}': "
                     f"{existing.metadata.source} and "
                     f"{metadata.source}"
                 )
+
+        # --------------------------------------------------------------
+        # All validation has passed.
+        #
+        # NOW it is safe to replace the old record owned by this
+        # workspace directory if its Skill name changed.
+        # --------------------------------------------------------------
+
+        if (
+            previous is not None
+            and previous.metadata.name
+            != metadata.name
+        ):
+            self.records.pop(
+                previous.metadata.name,
+                None,
+            )
+
+        # --------------------------------------------------------------
+        # Generation.
+        #
+        # The counter is maintained by Skill name and intentionally
+        # survives removal/reappearance.
+        # --------------------------------------------------------------
 
         generation = (
             self.generations.get(
@@ -243,13 +371,19 @@ class SkillRegistry:
         self,
         name: str,
     ) -> SkillRecord | None:
-        return self.records.get(name)
+        return self.records.get(
+            name
+        )
 
-    def all_records(self) -> tuple[SkillRecord, ...]:
+    def all_records(
+        self,
+    ) -> tuple[SkillRecord, ...]:
         return tuple(
             sorted(
                 self.records.values(),
-                key=lambda item: item.metadata.name,
+                key=lambda item: (
+                    item.metadata.name
+                ),
             )
         )
 
@@ -257,13 +391,23 @@ class SkillRegistry:
         self,
         directory: Path,
     ) -> SkillRecord | None:
-        directory = directory.resolve()
+        directory = (
+            directory.resolve()
+        )
 
-        for record in self.records.values():
-            if record.metadata.origin != "workspace":
+        for record in (
+            self.records.values()
+        ):
+            if (
+                record.metadata.origin
+                != "workspace"
+            ):
                 continue
 
-            if record.root.resolve() == directory:
+            if (
+                record.root.resolve()
+                == directory
+            ):
                 return record
 
         return None

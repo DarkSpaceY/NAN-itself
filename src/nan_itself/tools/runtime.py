@@ -44,6 +44,19 @@ That task is responsible for:
 
 This prevents multiple mcp.client.stdio AnyIO cancel scopes from
 being nested inside one task and later being torn down out of order.
+
+HOT RELOAD IMPORTANT:
+
+A replacement MCP worker is first created as an unregistered candidate:
+
+    old worker: active mapping
+    new worker: candidate only
+
+Only after the candidate is ready is it committed into the live
+provider / worker mappings. The old worker is then asked to stop.
+
+This allows old and new generations with the same provider name to
+coexist during the transaction.
 """
 
 from __future__ import annotations
@@ -84,7 +97,7 @@ class _MCPWorker:
 
     The worker also tracks in-flight calls so shutdown can stop
     accepting new calls and wait for current calls to drain before
-    exiting the MCP context.
+    exiting.
     """
 
     def __init__(
@@ -93,7 +106,9 @@ class _MCPWorker:
     ) -> None:
         self.spec = spec
 
-        self.stop_event = asyncio.Event()
+        self.stop_event = (
+            asyncio.Event()
+        )
 
         loop = asyncio.get_running_loop()
 
@@ -138,7 +153,9 @@ class _MCPWorker:
 
             return provider
 
-    async def release(self) -> None:
+    async def release(
+        self,
+    ) -> None:
         """
         Release an active operation.
         """
@@ -149,7 +166,9 @@ class _MCPWorker:
             if self.active_calls == 0:
                 self._condition.notify_all()
 
-    async def begin_stop(self) -> None:
+    async def begin_stop(
+        self,
+    ) -> None:
         """
         Prevent new calls and tell the worker to exit normally.
         """
@@ -158,7 +177,9 @@ class _MCPWorker:
 
         self.stop_event.set()
 
-    async def wait_calls_drained(self) -> None:
+    async def wait_calls_drained(
+        self,
+    ) -> None:
         """
         Wait until all in-flight tool calls have completed.
         """
@@ -176,26 +197,39 @@ class ProviderRuntime:
         workspace_local_dir: str | Path | None = None,
         *,
         builtin_tools: (
-            tuple[type[local_backend.LocalToolProvider], ...]
+            tuple[
+                type[
+                    local_backend.LocalToolProvider
+                ],
+                ...,
+            ]
             | None
         ) = None,
         scan_interval: float = 1.0,
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
         mcp_start_timeout: float = 30.0,
     ) -> None:
-        project_root = Path(__file__).resolve().parents[3]
+        project_root = (
+            Path(__file__).resolve().parents[3]
+        )
 
         self.tool_timeout = tool_timeout
-        self.mcp_start_timeout = mcp_start_timeout
+        self.mcp_start_timeout = (
+            mcp_start_timeout
+        )
 
         self.builtin_config_path = (
-            Path(builtin_config_path).resolve()
+            Path(
+                builtin_config_path
+            ).resolve()
             if builtin_config_path is not None
             else BUILTIN_MCP_CONFIG
         )
 
         self.workspace_mcp_dir = (
-            Path(workspace_mcp_dir).resolve()
+            Path(
+                workspace_mcp_dir
+            ).resolve()
             if workspace_mcp_dir is not None
             else (
                 project_root
@@ -206,7 +240,9 @@ class ProviderRuntime:
         )
 
         self.workspace_local_dir = (
-            Path(workspace_local_dir).resolve()
+            Path(
+                workspace_local_dir
+            ).resolve()
             if workspace_local_dir is not None
             else (
                 project_root
@@ -216,7 +252,9 @@ class ProviderRuntime:
             ).resolve()
         )
 
-        self.scan_interval = scan_interval
+        self.scan_interval = (
+            scan_interval
+        )
 
         self.builtin_tools = (
             BUILTIN_TOOLS
@@ -229,12 +267,24 @@ class ProviderRuntime:
         # ----------------------------------------------------------
 
         # Provider name -> live provider.
-        self.providers: dict[str, Provider] = {}
+        #
+        # Candidate MCP workers are deliberately NOT placed here
+        # until their reload transaction commits.
+        self.providers: dict[
+            str,
+            Provider,
+        ] = {}
 
         # Provider name -> MCP worker.
         #
         # Local providers do not have workers.
-        self._mcp_workers: dict[str, _MCPWorker] = {}
+        #
+        # Candidate MCP workers are deliberately NOT placed here
+        # until their reload transaction commits.
+        self._mcp_workers: dict[
+            str,
+            _MCPWorker,
+        ] = {}
 
         # ----------------------------------------------------------
         # Workspace bookkeeping.
@@ -243,35 +293,49 @@ class ProviderRuntime:
         self._mcp_tracker = SourceTracker()
 
         # Workspace MCP source file -> provider names from it.
-        self._mcp_sources: dict[Path, set[str]] = {}
+        self._mcp_sources: dict[
+            Path,
+            set[str],
+        ] = {}
 
         self._local_tracker = SourceTracker()
 
         # Workspace local source file -> provider name from it.
-        self._local_sources: dict[Path, set[str]] = {}
+        self._local_sources: dict[
+            Path,
+            set[str],
+        ] = {}
 
         # Local source file -> imported module name.
-        self._local_imported_names: dict[Path, str] = {}
+        self._local_imported_names: dict[
+            Path,
+            str,
+        ] = {}
 
         # ----------------------------------------------------------
         # Supervisor lifecycle.
         # ----------------------------------------------------------
 
-        # The supervisor scans configuration and starts/stops workers.
-        # It does NOT own MCP AsyncExitStacks.
-        self._supervisor_task: asyncio.Task[None] | None = None
+        self._supervisor_task: (
+            asyncio.Task[None] | None
+        ) = None
 
         # start() waits until the supervisor finishes initial loading.
-        self._startup_future: asyncio.Future[None] | None = None
+        self._startup_future: (
+            asyncio.Future[None] | None
+        ) = None
 
         self._wake = asyncio.Event()
+
         self._stopping = False
 
     # ==================================================================
     # Lifecycle
     # ==================================================================
 
-    async def start(self) -> None:
+    async def start(
+        self,
+    ) -> None:
         """
         Start the runtime.
 
@@ -286,11 +350,17 @@ class ProviderRuntime:
 
         loop = asyncio.get_running_loop()
 
-        self._startup_future = loop.create_future()
+        self._startup_future = (
+            loop.create_future()
+        )
 
-        self._supervisor_task = asyncio.create_task(
-            self._supervisor(),
-            name="provider-runtime-supervisor",
+        self._supervisor_task = (
+            asyncio.create_task(
+                self._supervisor(),
+                name=(
+                    "provider-runtime-supervisor"
+                ),
+            )
         )
 
         try:
@@ -300,7 +370,9 @@ class ProviderRuntime:
             self._stopping = True
             self._wake.set()
 
-            supervisor = self._supervisor_task
+            supervisor = (
+                self._supervisor_task
+            )
 
             if supervisor is not None:
                 try:
@@ -313,7 +385,9 @@ class ProviderRuntime:
 
             raise
 
-    async def stop(self) -> None:
+    async def stop(
+        self,
+    ) -> None:
         """
         Stop the runtime cleanly.
 
@@ -325,14 +399,15 @@ class ProviderRuntime:
         signals each worker's stop event and waits for each worker task
         to exit. The worker itself then closes its own MCP context.
         """
-        supervisor = self._supervisor_task
+        supervisor = (
+            self._supervisor_task
+        )
 
         if supervisor is None:
             return
 
         self._stopping = True
 
-        # Wake the supervisor immediately.
         self._wake.set()
 
         self._supervisor_task = None
@@ -368,14 +443,22 @@ class ProviderRuntime:
     # Provider access
     # ==================================================================
 
-    def provider_names(self) -> tuple[str, ...]:
-        return tuple(sorted(self.providers))
+    def provider_names(
+        self,
+    ) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                self.providers
+            )
+        )
 
     def get_provider(
         self,
         name: str,
     ) -> Provider | None:
-        return self.providers.get(name)
+        return self.providers.get(
+            name
+        )
 
     async def refresh_provider_tools(
         self,
@@ -387,20 +470,23 @@ class ProviderRuntime:
             provider.spec.kind
             == PROVIDER_KIND_LOCAL
         ):
-            # Local tools are fixed at instantiation time.
             return
 
-        worker = self._mcp_workers.get(name)
+        worker = (
+            self._mcp_workers.get(
+                name
+            )
+        )
 
         if worker is None:
             raise RuntimeError(
-                f"MCP provider '{name}' is not running."
+                f"MCP provider '{name}' "
+                f"is not running."
             )
 
         reserved = await worker.acquire()
 
         try:
-            # Make sure the mapping still points at the same provider.
             if reserved is not provider:
                 raise RuntimeError(
                     f"MCP provider '{name}' changed while "
@@ -420,11 +506,14 @@ class ProviderRuntime:
         tool_name: str,
         arguments: dict[str, Any] | None = None,
     ) -> types.CallToolResult:
-        provider = self.providers.get(provider_name)
+        provider = self.providers.get(
+            provider_name
+        )
 
         if provider is None:
             return error_result(
-                f"Unknown tool provider: {provider_name}"
+                f"Unknown tool provider: "
+                f"{provider_name}"
             )
 
         arguments = arguments or {}
@@ -442,8 +531,10 @@ class ProviderRuntime:
                     timeout=self.tool_timeout,
                 )
 
-            worker = self._mcp_workers.get(
-                provider_name
+            worker = (
+                self._mcp_workers.get(
+                    provider_name
+                )
             )
 
             if worker is None:
@@ -455,8 +546,6 @@ class ProviderRuntime:
             reserved = await worker.acquire()
 
             try:
-                # The provider may have been replaced between the
-                # dictionary lookup above and worker acquisition.
                 if reserved is not provider:
                     return error_result(
                         f"MCP provider '{provider_name}' "
@@ -494,7 +583,9 @@ class ProviderRuntime:
                 tool_name,
             )
 
-            return error_result(str(exc))
+            return error_result(
+                str(exc)
+            )
 
     # ==================================================================
     # MCP worker lifecycle
@@ -503,27 +594,53 @@ class ProviderRuntime:
     async def _start_mcp_worker(
         self,
         spec: ProviderSpec,
+        *,
+        register: bool = True,
     ) -> _MCPWorker:
         """
-        Create exactly one worker task for exactly one MCP server.
+        Start exactly one worker for one MCP provider.
 
-        The worker task becomes the sole owner of the MCP connection.
+        By default the worker is installed into the live runtime.
+
+        During hot reload:
+
+            register=False
+
+        creates a candidate worker that owns its own MCP connection
+        but is NOT visible through self.providers or
+        self._mcp_workers until the transaction commits.
+
+        This allows old and new generations with the same provider
+        name to coexist safely during replacement.
         """
-        if spec.name in self._mcp_workers:
+        if (
+            register
+            and spec.name in self._mcp_workers
+        ):
             raise ValueError(
-                f"Duplicate MCP worker: {spec.name}"
+                f"Duplicate MCP worker: "
+                f"{spec.name}"
             )
 
-        worker = _MCPWorker(spec)
+        worker = _MCPWorker(
+            spec
+        )
 
         worker.task = asyncio.create_task(
-            self._run_mcp_worker(worker),
-            name=f"mcp-worker:{spec.name}",
+            self._run_mcp_worker(
+                worker
+            ),
+            name=(
+                f"mcp-worker:"
+                f"{spec.name}"
+            ),
         )
 
         try:
             provider = await asyncio.wait_for(
-                asyncio.shield(worker.ready),
+                asyncio.shield(
+                    worker.ready
+                ),
                 timeout=self.mcp_start_timeout,
             )
 
@@ -535,14 +652,27 @@ class ProviderRuntime:
 
         worker.provider = provider
 
-        self._mcp_workers[spec.name] = worker
+        if register:
+            # The worker is fully ready before it becomes visible
+            # to the rest of the runtime.
+            self._mcp_workers[
+                spec.name
+            ] = worker
 
-        self.providers[spec.name] = provider
+            self.providers[
+                spec.name
+            ] = provider
 
-        logger.info(
-            "MCP worker '{}' started",
-            spec.name,
-        )
+            logger.info(
+                "MCP worker '{}' started",
+                spec.name,
+            )
+
+        else:
+            logger.info(
+                "MCP worker '{}' candidate started",
+                spec.name,
+            )
 
         return worker
 
@@ -565,8 +695,6 @@ class ProviderRuntime:
                 spec.name,
             )
 
-            # mcp_backend.connect() creates and enters its
-            # AsyncExitStack here, in THIS worker task.
             provider = await mcp_backend.connect(
                 spec
             )
@@ -578,8 +706,7 @@ class ProviderRuntime:
                     provider
                 )
 
-            # Stay alive until the runtime asks this specific worker
-            # to stop.
+            # Stay alive until this worker is asked to stop.
             await worker.stop_event.wait()
 
         except BaseException as exc:
@@ -588,7 +715,6 @@ class ProviderRuntime:
                     exc
                 )
 
-            # Do not turn normal cancellation into noisy errors.
             if not isinstance(
                 exc,
                 asyncio.CancelledError,
@@ -620,15 +746,11 @@ class ProviderRuntime:
             # CRITICAL:
             #
             # The worker task itself closes its own AsyncExitStack.
-            #
-            # This is the operation that fixes the original
-            # "cancel scope ... different task" problem.
             # ------------------------------------------------------
 
             if provider is not None:
                 stack = provider.stack
 
-                # Prevent anyone from attempting another close.
                 provider.stack = None
 
                 if stack is not None:
@@ -649,16 +771,26 @@ class ProviderRuntime:
                 provider.session = None
 
             # ------------------------------------------------------
-            # Only remove the mapping if this worker still owns the
-            # current provider.
+            # Only remove mappings if THIS worker still owns them.
             #
-            # During hot reload, an old worker can be shutting down
-            # while a new worker with the same name is already live.
-            # The old worker MUST NOT remove the new mapping.
+            # This is important during hot reload:
+            #
+            # old worker A
+            #     ↓
+            # new worker A installed
+            #     ↓
+            # old worker exits
+            #
+            # old worker must not delete new worker A.
+            #
+            # Candidate workers that were never committed do not
+            # appear in these mappings, so this is naturally safe.
             # ------------------------------------------------------
 
-            current_worker = self._mcp_workers.get(
-                spec.name
+            current_worker = (
+                self._mcp_workers.get(
+                    spec.name
+                )
             )
 
             if current_worker is worker:
@@ -667,8 +799,10 @@ class ProviderRuntime:
                     None,
                 )
 
-            current_provider = self.providers.get(
-                spec.name
+            current_provider = (
+                self.providers.get(
+                    spec.name
+                )
             )
 
             if (
@@ -711,9 +845,6 @@ class ProviderRuntime:
             )
 
         except Exception:
-            # The worker already logged its own failure.
-            # Retrieving the exception here prevents "Task exception
-            # was never retrieved".
             logger.debug(
                 "MCP worker '{}' finished with an exception",
                 worker.spec.name,
@@ -726,8 +857,7 @@ class ProviderRuntime:
         """
         Stop multiple independent workers concurrently.
 
-        Every worker closes its own stack inside its own task, so
-        there is no global FILO relationship between MCP servers.
+        Every worker closes its own stack inside its own task.
         """
         if not workers:
             return
@@ -779,7 +909,6 @@ class ProviderRuntime:
         if not workers:
             return
 
-        # Mark all workers as stopping before waiting for any of them.
         for worker in workers:
             await worker.begin_stop()
 
@@ -795,7 +924,6 @@ class ProviderRuntime:
 
         self._mcp_workers.clear()
 
-        # Local providers are in-process and don't have MCP workers.
         for name, provider in list(
             self.providers.items()
         ):
@@ -808,7 +936,9 @@ class ProviderRuntime:
                     None,
                 )
 
-    async def _reap_dead_workers(self) -> None:
+    async def _reap_dead_workers(
+        self,
+    ) -> None:
         """
         Detect unexpectedly terminated current MCP workers.
 
@@ -818,7 +948,9 @@ class ProviderRuntime:
         Builtin MCPs are simply removed; the existing policy of
         "a broken builtin does not prevent boot" is preserved.
         """
-        dead: list[tuple[str, _MCPWorker]] = []
+        dead: list[
+            tuple[str, _MCPWorker]
+        ] = []
 
         for name, worker in list(
             self._mcp_workers.items()
@@ -835,7 +967,10 @@ class ProviderRuntime:
                 continue
 
             dead.append(
-                (name, worker)
+                (
+                    name,
+                    worker,
+                )
             )
 
         for name, worker in dead:
@@ -854,8 +989,10 @@ class ProviderRuntime:
                         name,
                     )
 
-            current_worker = self._mcp_workers.get(
-                name
+            current_worker = (
+                self._mcp_workers.get(
+                    name
+                )
             )
 
             if current_worker is not worker:
@@ -866,8 +1003,10 @@ class ProviderRuntime:
                 None,
             )
 
-            provider = self.providers.get(
-                name
+            provider = (
+                self.providers.get(
+                    name
+                )
             )
 
             if (
@@ -887,7 +1026,6 @@ class ProviderRuntime:
                     worker.spec.source
                 ).resolve()
 
-                # Force the next scan to reload this source.
                 self._mcp_sources.pop(
                     source,
                     None,
@@ -914,7 +1052,9 @@ class ProviderRuntime:
     # Builtin sources
     # ==================================================================
 
-    async def _load_builtin_config(self) -> None:
+    async def _load_builtin_config(
+        self,
+    ) -> None:
         if not self.builtin_config_path.exists():
             logger.warning(
                 "Builtin MCP config not found: {}",
@@ -926,15 +1066,18 @@ class ProviderRuntime:
             self.builtin_config_path
         )
 
-        specs = mcp_backend.parse_builtin_config(
-            config,
-            self.builtin_config_path,
+        specs = (
+            mcp_backend.parse_builtin_config(
+                config,
+                self.builtin_config_path,
+            )
         )
 
         for spec in specs:
             if spec.name in self.providers:
                 raise ValueError(
-                    f"Duplicate builtin tool provider: {spec.name}"
+                    f"Duplicate builtin tool provider: "
+                    f"{spec.name}"
                 )
 
             try:
@@ -943,27 +1086,32 @@ class ProviderRuntime:
                 )
 
             except Exception:
-                # A single broken builtin must never prevent
-                # the persistent process from booting.
                 logger.exception(
                     "Failed to start builtin MCP "
                     "provider '{}'; skipping",
                     spec.name,
                 )
 
-    def _load_builtin_tools(self) -> None:
+    def _load_builtin_tools(
+        self,
+    ) -> None:
         for cls in self.builtin_tools:
-            local_backend.validate_class(cls)
+            local_backend.validate_class(
+                cls
+            )
 
             if cls.id in self.providers:
                 raise ValueError(
-                    f"Duplicate builtin tool provider: {cls.id}"
+                    f"Duplicate builtin tool provider: "
+                    f"{cls.id}"
                 )
 
-            spec = local_backend.local_provider_spec(
-                name=cls.id,
-                source="<builtin>",
-                origin="builtin",
+            spec = (
+                local_backend.local_provider_spec(
+                    name=cls.id,
+                    source="<builtin>",
+                    origin="builtin",
+                )
             )
 
             self.providers[
@@ -977,11 +1125,15 @@ class ProviderRuntime:
     # Workspace scanning
     # ==================================================================
 
-    async def _scan_workspace(self) -> None:
+    async def _scan_workspace(
+        self,
+    ) -> None:
         await self._scan_workspace_mcps()
         await self._scan_workspace_locals()
 
-    async def _scan_workspace_mcps(self) -> None:
+    async def _scan_workspace_mcps(
+        self,
+    ) -> None:
         self.workspace_mcp_dir.mkdir(
             parents=True,
             exist_ok=True,
@@ -990,10 +1142,12 @@ class ProviderRuntime:
         current_files = {
             path.resolve()
             for path in self.workspace_mcp_dir.iterdir()
-            if path.is_file()
-            and path.suffix.lower()
-            in {".yaml", ".yml"}
-            and not path.name.startswith("_")
+            if (
+                path.is_file()
+                and path.suffix.lower()
+                in {".yaml", ".yml"}
+                and not path.name.startswith("_")
+            )
         }
 
         for path in (
@@ -1004,8 +1158,12 @@ class ProviderRuntime:
                 path
             )
 
-        for path in sorted(current_files):
-            fingerprint = file_fingerprint(path)
+        for path in sorted(
+            current_files
+        ):
+            fingerprint = (
+                file_fingerprint(path)
+            )
 
             loaded = (
                 path in self._mcp_sources
@@ -1040,7 +1198,9 @@ class ProviderRuntime:
                     path,
                 )
 
-    async def _scan_workspace_locals(self) -> None:
+    async def _scan_workspace_locals(
+        self,
+    ) -> None:
         self.workspace_local_dir.mkdir(
             parents=True,
             exist_ok=True,
@@ -1051,9 +1211,13 @@ class ProviderRuntime:
             for path in self.workspace_local_dir.rglob(
                 "*.py"
             )
-            if path.is_file()
-            and not path.name.startswith("_")
-            and local_backend.has_tool_header(path)
+            if (
+                path.is_file()
+                and not path.name.startswith("_")
+                and local_backend.has_tool_header(
+                    path
+                )
+            )
         }
 
         for path in (
@@ -1064,8 +1228,12 @@ class ProviderRuntime:
                 path
             )
 
-        for path in sorted(current_files):
-            fingerprint = file_fingerprint(path)
+        for path in sorted(
+            current_files
+        ):
+            fingerprint = (
+                file_fingerprint(path)
+            )
 
             loaded = (
                 path in self._local_sources
@@ -1115,9 +1283,11 @@ class ProviderRuntime:
             path
         )
 
-        specs = mcp_backend.parse_workspace_config(
-            config,
-            path,
+        specs = (
+            mcp_backend.parse_workspace_config(
+                config,
+                path,
+            )
         )
 
         names = [
@@ -1131,12 +1301,14 @@ class ProviderRuntime:
             )
 
         # --------------------------------------------------------------
-        # Validate name ownership before starting candidates.
+        # Validate ownership before starting candidates.
         # --------------------------------------------------------------
 
         for spec in specs:
-            existing = self.providers.get(
-                spec.name
+            existing = (
+                self.providers.get(
+                    spec.name
+                )
             )
 
             if existing is None:
@@ -1162,10 +1334,17 @@ class ProviderRuntime:
                 )
 
         # --------------------------------------------------------------
-        # Connect every candidate in its OWN worker task.
+        # Connect candidates.
         #
-        # Existing providers stay alive while candidates are built.
-        # If a candidate fails, current source remains untouched.
+        # IMPORTANT:
+        #
+        # Candidate workers are started with register=False.
+        # This permits:
+        #
+        #     old worker: example
+        #     candidate:  example
+        #
+        # to coexist before commit.
         # --------------------------------------------------------------
 
         candidates: dict[
@@ -1175,17 +1354,24 @@ class ProviderRuntime:
 
         try:
             for spec in specs:
-                worker = await self._start_mcp_worker(
-                    spec
+                worker = (
+                    await self._start_mcp_worker(
+                        spec,
+                        register=False,
+                    )
                 )
 
-                candidates[spec.name] = worker
+                candidates[
+                    spec.name
+                ] = worker
 
         except BaseException:
-            # Candidates have independent workers. Stop only those
-            # created for this failed transaction.
+            # Candidates are independent workers. Stop only those
+            # created by this failed transaction.
             await self._stop_mcp_workers(
-                list(candidates.values())
+                list(
+                    candidates.values()
+                )
             )
 
             raise
@@ -1211,17 +1397,23 @@ class ProviderRuntime:
         # Remove stale names from this source.
         # --------------------------------------------------------------
 
-        for name in old_names - new_names:
-            old_worker = self._mcp_workers.get(
-                name
+        for name in (
+            old_names - new_names
+        ):
+            old_worker = (
+                self._mcp_workers.get(
+                    name
+                )
             )
 
             if (
                 old_worker is not None
-                and old_worker.spec.origin == "workspace"
+                and old_worker.spec.origin
+                == "workspace"
                 and Path(
                     old_worker.spec.source
-                ).resolve() == path
+                ).resolve()
+                == path
             ):
                 self._mcp_workers.pop(
                     name,
@@ -1229,7 +1421,9 @@ class ProviderRuntime:
                 )
 
                 current_provider = (
-                    self.providers.get(name)
+                    self.providers.get(
+                        name
+                    )
                 )
 
                 if (
@@ -1247,14 +1441,25 @@ class ProviderRuntime:
                 )
 
         # --------------------------------------------------------------
-        # Install candidates first, then stop old workers.
+        # Install candidates FIRST, then stop old workers.
         #
-        # Each old/new worker owns a completely independent task.
+        # This is the generation handoff point:
+        #
+        #     old provider
+        #          ↓
+        #     candidate provider
+        #
+        # Existing views remember only provider name, so they naturally
+        # see the new generation after this point.
         # --------------------------------------------------------------
 
-        for name, candidate in candidates.items():
-            old_worker = self._mcp_workers.get(
-                name
+        for name, candidate in (
+            candidates.items()
+        ):
+            old_worker = (
+                self._mcp_workers.get(
+                    name
+                )
             )
 
             if (
@@ -1266,8 +1471,10 @@ class ProviderRuntime:
                     None,
                 )
 
-                old_provider = self.providers.get(
-                    name
+                old_provider = (
+                    self.providers.get(
+                        name
+                    )
                 )
 
                 if (
@@ -1284,9 +1491,13 @@ class ProviderRuntime:
                     old_worker
                 )
 
-            self._mcp_workers[name] = candidate
+            self._mcp_workers[
+                name
+            ] = candidate
 
-            provider = candidate.provider
+            provider = (
+                candidate.provider
+            )
 
             if provider is None:
                 raise RuntimeError(
@@ -1294,14 +1505,18 @@ class ProviderRuntime:
                     f"became ready without a provider."
                 )
 
-            self.providers[name] = provider
+            self.providers[
+                name
+            ] = provider
 
-        self._mcp_sources[path] = new_names
+        self._mcp_sources[
+            path
+        ] = new_names
 
         # --------------------------------------------------------------
         # Stop replaced/stale workers concurrently.
         #
-        # The old worker closes the old stack itself.
+        # Old workers close their own stack in their own tasks.
         # --------------------------------------------------------------
 
         await self._stop_mcp_workers(
@@ -1325,11 +1540,15 @@ class ProviderRuntime:
             set(),
         )
 
-        workers: list[_MCPWorker] = []
+        workers: list[
+            _MCPWorker
+        ] = []
 
         for name in names:
-            worker = self._mcp_workers.get(
-                name
+            worker = (
+                self._mcp_workers.get(
+                    name
+                )
             )
 
             if worker is None:
@@ -1351,8 +1570,10 @@ class ProviderRuntime:
                 None,
             )
 
-            provider = self.providers.get(
-                name
+            provider = (
+                self.providers.get(
+                    name
+                )
             )
 
             if (
@@ -1393,9 +1614,11 @@ class ProviderRuntime:
     ) -> None:
         path = path.resolve()
 
-        old_names = self._local_sources.get(
-            path,
-            set(),
+        old_names = (
+            self._local_sources.get(
+                path,
+                set(),
+            )
         )
 
         (
@@ -1411,12 +1634,17 @@ class ProviderRuntime:
 
         provider_name = cls.id
 
-        existing = self.providers.get(
-            provider_name
+        existing = (
+            self.providers.get(
+                provider_name
+            )
         )
 
         if existing is not None:
-            if existing.spec.origin == "builtin":
+            if (
+                existing.spec.origin
+                == "builtin"
+            ):
                 raise ValueError(
                     f"Workspace local tool "
                     f"'{provider_name}' cannot "
@@ -1428,7 +1656,8 @@ class ProviderRuntime:
             ).resolve()
 
             if (
-                existing.spec.origin == "workspace"
+                existing.spec.origin
+                == "workspace"
                 and source != path
             ):
                 raise ValueError(
@@ -1446,10 +1675,11 @@ class ProviderRuntime:
             )
         )
 
-        # Build candidate first.
-        candidate = local_backend.build_provider(
-            candidate_spec,
-            cls,
+        candidate = (
+            local_backend.build_provider(
+                candidate_spec,
+                cls,
+            )
         )
 
         previous_imported = (
@@ -1471,33 +1701,36 @@ class ProviderRuntime:
         for name in (
             old_names - {provider_name}
         ):
-            stale = self.providers.pop(
-                name,
-                None,
+            stale = (
+                self.providers.pop(
+                    name,
+                    None,
+                )
             )
 
-            if stale is not None:
-                # Local provider has no async lifecycle.
-                pass
+            _ = stale
 
-        old = self.providers.get(
-            provider_name
+        old = (
+            self.providers.get(
+                provider_name
+            )
         )
 
         self.providers[
             provider_name
         ] = candidate
 
-        # Old local providers do not own async resources.
         _ = old
 
-        self._local_sources[path] = {
+        self._local_sources[
+            path
+        ] = {
             provider_name,
         }
 
-        self._local_imported_names[path] = (
-            imported_name
-        )
+        self._local_imported_names[
+            path
+        ] = imported_name
 
         logger.info(
             "Loaded workspace local tool source '{}': {}",
@@ -1511,20 +1744,27 @@ class ProviderRuntime:
     ) -> None:
         path = path.resolve()
 
-        names = self._local_sources.pop(
-            path,
-            set(),
+        names = (
+            self._local_sources.pop(
+                path,
+                set(),
+            )
         )
 
         for name in names:
-            provider = self.providers.get(
-                name
+            provider = (
+                self.providers.get(
+                    name
+                )
             )
 
             if provider is None:
                 continue
 
-            if provider.spec.origin != "workspace":
+            if (
+                provider.spec.origin
+                != "workspace"
+            ):
                 continue
 
             if (
@@ -1569,24 +1809,16 @@ class ProviderRuntime:
     # Supervisor
     # ==================================================================
 
-    async def _supervisor(self) -> None:
+    async def _supervisor(
+        self,
+    ) -> None:
         """
         Reconciliation loop.
 
         The supervisor never directly closes an MCP AsyncExitStack.
         It only tells worker tasks when they should stop.
         """
-        startup_future = (
-            self._startup_future
-        )
-
         try:
-            # ----------------------------------------------------------
-            # Initial load.
-            #
-            # All MCP connections are created by dedicated worker tasks.
-            # ----------------------------------------------------------
-
             await self._load_builtin_config()
 
             self._load_builtin_tools()
@@ -1594,16 +1826,12 @@ class ProviderRuntime:
             await self._scan_workspace()
 
             if (
-                startup_future is not None
-                and not startup_future.done()
+                self._startup_future is not None
+                and not self._startup_future.done()
             ):
-                startup_future.set_result(
+                self._startup_future.set_result(
                     None
                 )
-
-            # ----------------------------------------------------------
-            # Hot-reload loop.
-            # ----------------------------------------------------------
 
             while not self._stopping:
                 try:
@@ -1629,6 +1857,10 @@ class ProviderRuntime:
                     self._wake.clear()
 
         except BaseException as exc:
+            startup_future = (
+                self._startup_future
+            )
+
             if (
                 startup_future is not None
                 and not startup_future.done()
@@ -1640,18 +1872,8 @@ class ProviderRuntime:
             raise
 
         finally:
-            # ----------------------------------------------------------
-            # IMPORTANT:
-            #
-            # The supervisor does not close stacks itself.
-            # It signals the workers, and each worker closes its
-            # own stack from its own asyncio task.
-            # ----------------------------------------------------------
-
             await self._stop_all_mcp_workers()
 
-            # Local providers are in-process objects with no MCP
-            # AsyncExitStack to close.
             self.providers.clear()
 
             self._mcp_workers.clear()

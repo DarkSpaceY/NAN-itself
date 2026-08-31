@@ -118,13 +118,17 @@ class StepEngine:
 
         pending_query_records: dict[str, str] = {}
 
-        def on_module_start(module_id: str) -> None:
+        def on_module_start(
+            module_id: str,
+        ) -> None:
             if sink is None:
                 return
 
-            pending_query_records[module_id] = sink.record_started(
-                kind="module",
-                name=module_id,
+            pending_query_records[module_id] = (
+                sink.record_started(
+                    kind="module",
+                    name=module_id,
+                )
             )
 
         def on_module_result(
@@ -136,7 +140,12 @@ class StepEngine:
             if sink is None:
                 return
 
-            record_id = pending_query_records.pop(module_id, None)
+            record_id = (
+                pending_query_records.pop(
+                    module_id,
+                    None,
+                )
+            )
 
             if record_id is None:
                 return
@@ -149,32 +158,46 @@ class StepEngine:
                 return
 
             if not result:
-                sink.record_void(record_id)
+                sink.record_void(
+                    record_id
+                )
                 return
 
             for line in result.splitlines():
-                sink.record_detail(record_id, line)
+                sink.record_detail(
+                    record_id,
+                    line,
+                )
 
             sink.record_done(
                 record_id,
                 note=f"{duration:.1f}s",
             )
 
-        ambient_context = await self.modules.query_snapshot(
-            turn,
-            context.world,
-            **(
-                {"on_start": on_module_start, "on_result": on_module_result}
-                if sink is not None
-                else {}
-            ),
+        ambient_context = (
+            await self.modules.query_snapshot(
+                turn,
+                context.world,
+                **(
+                    {
+                        "on_start": on_module_start,
+                        "on_result": on_module_result,
+                    }
+                    if sink is not None
+                    else {}
+                ),
+            )
         )
 
-        provider_view = AgentToolView(self.providers)
+        provider_view = AgentToolView(
+            self.providers
+        )
 
         current_messages: list[Message] = [
             _user_message(report)
-            for report in (seed_reports or [])
+            for report in (
+                seed_reports or []
+            )
         ]
 
         current_messages.append(
@@ -182,13 +205,14 @@ class StepEngine:
         )
 
         reply_text: str | None = None
-
         error_text: str | None = None
 
         try:
             while True:
-                reports = await collect_finished_children(
-                    state.children
+                reports = (
+                    await collect_finished_children(
+                        state.children
+                    )
                 )
 
                 for report in reports:
@@ -212,21 +236,30 @@ class StepEngine:
                     skill_section=skill_section,
                     ambient_context=ambient_context,
                     current=current_messages,
-                    running_subagents=render_running_subagents(
-                        [
-                            child
-                            for child in state.children
-                            if not child.reported
-                        ]
+                    running_subagents=(
+                        render_running_subagents(
+                            [
+                                child
+                                for child in state.children
+                                if not child.reported
+                            ]
+                        )
                     ),
                 )
 
-                tool_definitions = await self._tool_definitions(
-                    provider_view=provider_view,
-                    depth=context.depth,
+                tool_definitions = (
+                    await self._tool_definitions(
+                        provider_view=provider_view,
+                        depth=context.depth,
+                    )
                 )
 
-                if os.getenv("NAN_TRACE_MESSAGES") == "1":
+                if (
+                    os.getenv(
+                        "NAN_TRACE_MESSAGES"
+                    )
+                    == "1"
+                ):
                     logger.debug(
                         "[turn:{}] system:\n{}",
                         context.agent_hash[:8],
@@ -242,12 +275,9 @@ class StepEngine:
                 )
 
                 if not response.tool_calls:
-                    if not (response.content or "").strip():
-                        # Observed but not corrected: an empty
-                        # reply simply ends the turn. Causes seen
-                        # in the wild: silent tool-call parse
-                        # drop (Ollama), max-tokens truncation,
-                        # immediate EOS.
+                    if not (
+                        response.content or ""
+                    ).strip():
                         logger.warning(
                             "[turn:{}] empty reply "
                             "(finish={})",
@@ -261,16 +291,22 @@ class StepEngine:
                         )
                     )
 
-                    reply_text = response.content or ""
+                    reply_text = (
+                        response.content or ""
+                    )
 
                     return AgentResult(
                         content=reply_text,
-                        messages=tuple(current_messages),
+                        messages=tuple(
+                            current_messages
+                        ),
                         response=response,
                     )
 
                 current_messages.append(
-                    _assistant_message_with_calls(response)
+                    _assistant_message_with_calls(
+                        response
+                    )
                 )
 
                 for call in response.tool_calls:
@@ -278,29 +314,36 @@ class StepEngine:
                         "[turn:{}] tool {} {}",
                         context.agent_hash[:8],
                         call.name,
-                        json.dumps(call.arguments),
+                        json.dumps(
+                            call.arguments
+                        ),
                     )
 
-                    result_text = await self._run_call(
-                        context=context,
-                        state=state,
-                        provider_view=provider_view,
-                        call=call,
-                        sink=sink,
+                    result_text = (
+                        await self._run_call(
+                            context=context,
+                            state=state,
+                            provider_view=provider_view,
+                            call=call,
+                            sink=sink,
+                        )
                     )
 
                     current_messages.append(
-                        _tool_message(call.id, result_text)
+                        _tool_message(
+                            call.id,
+                            result_text,
+                        )
                     )
 
         except asyncio.CancelledError:
             error_text = "cancelled"
-
             raise
 
         except Exception as exc:
-            error_text = f"{type(exc).__name__}: {exc}"
-
+            error_text = (
+                f"{type(exc).__name__}: {exc}"
+            )
             raise
 
         finally:
@@ -332,12 +375,11 @@ class StepEngine:
                 )
                 and report_sink is not None
             ):
-                # The event loop only keeps a weak reference to
-                # tasks; without this registry the archive job
-                # can be garbage-collected mid-flight and the
-                # report silently lost.
                 task = asyncio.create_task(
-                    self._archive_children(pending, report_sink),
+                    self._archive_children(
+                        pending,
+                        report_sink,
+                    ),
                     name="subagent-report-archive",
                 )
 
@@ -364,9 +406,15 @@ class StepEngine:
         started = time.time()
 
         if sink is not None:
-            if call.name == DISPATCH_SUBAGENT_TOOL_NAME:
+            if (
+                call.name
+                == DISPATCH_SUBAGENT_TOOL_NAME
+            ):
                 kind = "agent"
-            elif call.name == ACTIVATE_SKILL_TOOL_NAME:
+            elif (
+                call.name
+                == ACTIVATE_SKILL_TOOL_NAME
+            ):
                 kind = "skill"
             elif call.name in VERBS:
                 kind = "verb"
@@ -378,59 +426,104 @@ class StepEngine:
                 name=call.name,
             )
 
-            for line in _pretty_args(call.arguments):
-                sink.record_detail(record_id, line)
+            for line in _pretty_args(
+                call.arguments
+            ):
+                sink.record_detail(
+                    record_id,
+                    line,
+                )
 
         try:
-            verb = VERBS.get(call.name)
+            verb = VERBS.get(
+                call.name
+            )
 
             if verb is not None:
-                if not verb.visible(context.depth, RolePolicy):
-                    result_text = RolePolicy.hidden_verb_reply(
-                        call.name,
+                if not verb.visible(
+                    context.depth,
+                    RolePolicy,
+                ):
+                    result_text = (
+                        RolePolicy.hidden_verb_reply(
+                            call.name,
+                        )
                     )
                 else:
-                    result_text = await verb.execute(
-                        call=call,
-                        context=context,
-                        state=state,
-                        engine=self,
+                    result_text = (
+                        await verb.execute(
+                            call=call,
+                            context=context,
+                            state=state,
+                            engine=self,
+                        )
                     )
 
                 if (
-                    call.name == ACTIVATE_SKILL_TOOL_NAME
+                    call.name
+                    == ACTIVATE_SKILL_TOOL_NAME
                     and sink is not None
-                    and isinstance(state.active_skill, Skill)
+                    and isinstance(
+                        state.active_skill,
+                        Skill,
+                    )
                 ):
                     for line in _skill_structure(
                         state.active_skill,
                     ):
-                        sink.record_detail(record_id, line)
+                        sink.record_detail(
+                            record_id,
+                            line,
+                        )
+
             else:
-                result = await provider_view.call_tool(
-                    call.name,
-                    call.arguments,
+                result = (
+                    await provider_view.call_tool(
+                        call.name,
+                        call.arguments,
+                    )
                 )
 
-                result_text = _serialize_tool_result(result)
+                result_text = (
+                    _serialize_tool_result(
+                        result
+                    )
+                )
 
         except Exception as exc:
-            if sink is not None and record_id:
+            if (
+                sink is not None
+                and record_id
+            ):
                 sink.record_failed(
                     record_id,
-                    summary=f"{type(exc).__name__}",
+                    summary=(
+                        f"{type(exc).__name__}"
+                    ),
                 )
 
             raise
 
-        if sink is not None and record_id:
-            for line in _result_lines(result_text):
-                sink.record_detail(record_id, line)
+        if (
+            sink is not None
+            and record_id
+        ):
+            for line in _result_lines(
+                result_text
+            ):
+                sink.record_detail(
+                    record_id,
+                    line,
+                )
 
             sink.record_done(
                 record_id,
-                summary=_compact_result(result_text),
-                note=f"{time.time() - started:.1f}s",
+                summary=_compact_result(
+                    result_text
+                ),
+                note=(
+                    f"{time.time() - started:.1f}s"
+                ),
             )
 
         return result_text
@@ -447,7 +540,9 @@ class StepEngine:
         live and withdrawn if tool calls materialize.
         """
         if sink is None:
-            return await self.llm.generate_complete(request)
+            return await self.llm.generate_complete(
+                request
+            )
 
         text_parts: list[str] = []
         tool_calls: list = []
@@ -456,36 +551,48 @@ class StepEngine:
         stream_id: str | None = None
         first_text: float | None = None
 
-        # The live caret appears the moment the request is sent,
-        # not when the first token lands: silence is visible.
-        if sink is not None:
-            stream_id = sink.output_started()
+        stream_id = sink.output_started()
 
-        async for event in self.llm.generate(request):
+        async for event in self.llm.generate(
+            request
+        ):
             if event.kind == "text":
                 if event.text:
                     if first_text is None:
                         first_text = time.time()
 
-                    sink.output_delta(stream_id, event.text)
-                    text_parts.append(event.text)
+                    sink.output_delta(
+                        stream_id,
+                        event.text,
+                    )
+
+                    text_parts.append(
+                        event.text
+                    )
 
             elif event.kind == "tool_call":
                 if event.tool_call is not None:
-                    tool_calls.append(event.tool_call)
+                    tool_calls.append(
+                        event.tool_call
+                    )
 
             elif event.kind == "done":
                 if event.usage is not None:
                     usage = event.usage
 
-                if event.finish_reason is not None:
-                    finish_reason = event.finish_reason
+                if (
+                    event.finish_reason
+                    is not None
+                ):
+                    finish_reason = (
+                        event.finish_reason
+                    )
 
         if stream_id is not None:
             if tool_calls:
-                # Text streamed before tool calls: not the turn's
-                # final output, so withdraw it from the stream.
-                sink.output_cancelled(stream_id)
+                sink.output_cancelled(
+                    stream_id
+                )
 
             else:
                 sink.output_done(
@@ -496,7 +603,10 @@ class StepEngine:
                 )
 
         return LLMResponse(
-            content="".join(text_parts) or None,
+            content=(
+                "".join(text_parts)
+                or None
+            ),
             tool_calls=tool_calls,
             model=self.llm.model,
             usage=usage,
@@ -513,24 +623,39 @@ class StepEngine:
         definitions = [
             ToolDefinition(
                 name=tool.name,
-                description=tool.description or "",
+                description=(
+                    tool.description or ""
+                ),
                 input_schema=tool.inputSchema,
             )
-            for tool in await provider_view.list_tools()
+            for tool in (
+                await provider_view.list_tools()
+            )
         ]
 
         for verb in VERBS.values():
-            if verb.visible(depth, RolePolicy):
-                definitions.append(verb.definition())
+            if verb.visible(
+                depth,
+                RolePolicy,
+            ):
+                definitions.append(
+                    verb.definition()
+                )
 
         return definitions
 
-    async def _archive_children(self, pending, sink) -> None:
+    async def _archive_children(
+        self,
+        pending,
+        sink,
+    ) -> None:
         reports: list[str] = []
 
         for child in pending:
             reports.append(
-                await format_child_report(child)
+                await format_child_report(
+                    child
+                )
             )
 
         if reports:
@@ -542,23 +667,43 @@ class StepEngine:
 # ----------------------------------------------------------------------
 
 
-def _user_message(content: str) -> Message:
-    return Message(role="user", content=content)
+def _user_message(
+    content: str,
+) -> Message:
+    return Message(
+        role="user",
+        content=content,
+    )
 
 
-def _assistant_message(content: str) -> Message:
-    return Message(role="assistant", content=content)
-
-
-def _assistant_message_with_calls(response) -> Message:
+def _assistant_message(
+    content: str,
+) -> Message:
     return Message(
         role="assistant",
-        content=response.content,
+        content=content,
+    )
+
+
+def _assistant_message_with_calls(
+    response,
+) -> Message:
+    """
+    Tool-call-only assistant messages are allowed to have no textual
+    content. Message itself expects a concrete content value, so
+    normalize None to an empty string at the agent boundary.
+    """
+    return Message(
+        role="assistant",
+        content=response.content or "",
         tool_calls=response.tool_calls,
     )
 
 
-def _tool_message(tool_call_id: str, content: str) -> Message:
+def _tool_message(
+    tool_call_id: str,
+    content: str,
+) -> Message:
     return Message(
         role="tool",
         tool_call_id=tool_call_id,
@@ -566,17 +711,25 @@ def _tool_message(tool_call_id: str, content: str) -> Message:
     )
 
 
-def _compact_args(arguments: Any) -> str:
+def _compact_args(
+    arguments: Any,
+) -> str:
     if not arguments:
         return ""
 
     try:
-        return json.dumps(arguments, ensure_ascii=False)
+        return json.dumps(
+            arguments,
+            ensure_ascii=False,
+        )
+
     except Exception:
         return str(arguments)[:96]
 
 
-def _pretty_args(arguments: Any) -> list[str]:
+def _pretty_args(
+    arguments: Any,
+) -> list[str]:
     if not arguments:
         return []
 
@@ -586,16 +739,24 @@ def _pretty_args(arguments: Any) -> list[str]:
             ensure_ascii=False,
             indent=2,
         ).splitlines()
+
     except Exception:
-        return [str(arguments)[:200]]
+        return [
+            str(arguments)[:200]
+        ]
 
 
-def _result_lines(text: str) -> list[str]:
-    lines = (text or "").splitlines()
-    return lines
+def _result_lines(
+    text: str,
+) -> list[str]:
+    return (
+        (text or "").splitlines()
+    )
 
 
-def _skill_structure(skill: Any) -> list[str]:
+def _skill_structure(
+    skill: Any,
+) -> list[str]:
     meta = skill.metadata
 
     lines = [
@@ -604,63 +765,122 @@ def _skill_structure(skill: Any) -> list[str]:
         f"origin: {meta.origin}",
     ]
 
-    resources = getattr(skill, "resources", None) or []
+    resources = (
+        getattr(
+            skill,
+            "resources",
+            None,
+        )
+        or []
+    )
 
     if resources:
-        lines.append(f"resources: {len(resources)}")
+        lines.append(
+            f"resources: {len(resources)}"
+        )
 
         for path in resources:
-            lines.append(f"  · {path}")
+            lines.append(
+                f"  · {path}"
+            )
 
-    body = (skill.instructions or "").strip()
+    body = (
+        skill.instructions or ""
+    ).strip()
 
     if body:
-        lines.append("── body ──")
-        lines.extend(body.splitlines())
+        lines.append(
+            "── body ──"
+        )
+
+        lines.extend(
+            body.splitlines()
+        )
 
     return lines
 
 
-def _compact_result(text: str) -> str:
-    flat = (text or "").replace("\n", " ").strip()
+def _compact_result(
+    text: str,
+) -> str:
+    flat = (
+        (text or "")
+        .replace("\n", " ")
+        .strip()
+    )
 
-    # MCP CallToolResult JSON: surface the human text, not the envelope.
+    # MCP CallToolResult JSON: surface the human text,
+    # not the envelope.
     if flat.startswith("{"):
         try:
             payload = json.loads(flat)
 
-            if isinstance(payload, dict):
+            if isinstance(
+                payload,
+                dict,
+            ):
                 parts = [
-                    str(block.get("text", ""))
-                    for block in payload.get("content", [])
-                    if isinstance(block, dict)
-                    and block.get("type") == "text"
+                    str(
+                        block.get(
+                            "text",
+                            "",
+                        )
+                    )
+                    for block in (
+                        payload.get(
+                            "content",
+                            [],
+                        )
+                    )
+                    if (
+                        isinstance(
+                            block,
+                            dict,
+                        )
+                        and block.get(
+                            "type"
+                        )
+                        == "text"
+                    )
                 ]
 
                 if parts:
-                    flat = " ".join(parts).strip()
+                    flat = (
+                        " ".join(
+                            parts
+                        ).strip()
+                    )
+
         except Exception:
             pass
 
     return flat
 
 
-def _serialize_tool_result(result: Any) -> str:
+def _serialize_tool_result(
+    result: Any,
+) -> str:
     if isinstance(
         result,
         mcp_types.CallToolResult,
     ):
         try:
-            dumped = result.model_dump(mode="json")
+            dumped = result.model_dump(
+                mode="json"
+            )
 
             return json.dumps(
                 dumped,
                 ensure_ascii=False,
             )
+
         except Exception:
             return str(result)
 
-    if isinstance(result, str):
+    if isinstance(
+        result,
+        str,
+    ):
         return result
 
     try:
@@ -669,5 +889,6 @@ def _serialize_tool_result(result: Any) -> str:
             ensure_ascii=False,
             default=str,
         )
+
     except Exception:
         return str(result)

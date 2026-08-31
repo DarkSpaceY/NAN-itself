@@ -87,7 +87,11 @@ class SleepVerb:
             },
         )
 
-    def visible(self, depth: int, policy: "RolePolicy") -> bool:
+    def visible(
+        self,
+        depth: int,
+        policy: "RolePolicy",
+    ) -> bool:
         return True
 
     async def execute(
@@ -114,8 +118,10 @@ class SleepVerb:
         if seconds < 0:
             return "'seconds' must be >= 0."
 
-        waited, interrupted = await engine.agent_runtime.sleep(
-            float(seconds)
+        waited, interrupted = (
+            await engine.agent_runtime.sleep(
+                float(seconds)
+            )
         )
 
         if interrupted:
@@ -131,7 +137,9 @@ class SleepVerb:
 
 
 class DispatchVerb:
-    name: ClassVar[str] = DISPATCH_SUBAGENT_TOOL_NAME
+    name: ClassVar[str] = (
+        DISPATCH_SUBAGENT_TOOL_NAME
+    )
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
@@ -159,7 +167,11 @@ class DispatchVerb:
             },
         )
 
-    def visible(self, depth: int, policy: "RolePolicy") -> bool:
+    def visible(
+        self,
+        depth: int,
+        policy: "RolePolicy",
+    ) -> bool:
         return True
 
     async def execute(
@@ -178,9 +190,14 @@ class DispatchVerb:
                 "a non-empty 'task'."
             )
 
-        async def worker(child_context):
-            # The child inherits its parent's Skill through the
-            # context and may switch it via activate_skill.
+        async def worker(
+            child_context,
+        ):
+            # The child inherits the CURRENT execution Skill.
+            #
+            # AgentContext itself is immutable, while the active
+            # Skill is mutable execution state. Therefore the current
+            # state.active_skill must be passed explicitly.
             return await engine.execute(
                 context=child_context,
                 user_input=task,
@@ -192,6 +209,7 @@ class DispatchVerb:
                 context,
                 task=task,
                 worker=worker,
+                skill=state.active_skill,
             )
 
         except SubagentLimitError as exc:
@@ -203,7 +221,9 @@ class DispatchVerb:
             handle=handle,
         )
 
-        state.children.append(child)
+        state.children.append(
+            child
+        )
 
         return (
             "Subagent dispatched.\n"
@@ -215,7 +235,9 @@ class DispatchVerb:
 
 
 class ActivateSkillVerb:
-    name: ClassVar[str] = ACTIVATE_SKILL_TOOL_NAME
+    name: ClassVar[str] = (
+        ACTIVATE_SKILL_TOOL_NAME
+    )
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
@@ -240,8 +262,14 @@ class ActivateSkillVerb:
             },
         )
 
-    def visible(self, depth: int, policy: "RolePolicy") -> bool:
-        return policy.may_switch_skill(depth)
+    def visible(
+        self,
+        depth: int,
+        policy: "RolePolicy",
+    ) -> bool:
+        return policy.may_switch_skill(
+            depth
+        )
 
     async def execute(
         self,
@@ -261,7 +289,9 @@ class ActivateSkillVerb:
             )
 
         try:
-            skill = engine.skills.activate(name)
+            skill = engine.skills.activate(
+                name
+            )
 
         except UnknownSkillError:
             return (
