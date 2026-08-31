@@ -489,6 +489,25 @@ async def run_agent_process() -> None:
                     )
 
         # ----------------------------------------------------------
+        # Stop all Subagents.
+        #
+        # A Subagent may outlive its parent Agent turn during normal
+        # operation, so it must have an explicit application-level
+        # shutdown boundary.
+        #
+        # This MUST happen before Modules and Providers are stopped,
+        # because a running Subagent may still be using them.
+        # ----------------------------------------------------------
+
+        try:
+            await agent.agent_runtime.shutdown()
+
+        except BaseException:
+            logger.exception(
+                "Subagent runtime shutdown failed; continuing"
+            )
+
+        # ----------------------------------------------------------
         # Gateway.
         # ----------------------------------------------------------
 

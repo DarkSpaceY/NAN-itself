@@ -4,6 +4,7 @@ import asyncio
 import sys
 import time
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from loguru import logger

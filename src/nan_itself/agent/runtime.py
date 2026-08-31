@@ -24,8 +24,10 @@ class AgentContext:
     Runtime context owned by one Agent execution.
 
     `world` is shared by all Agents within the same dispatch tree.
-    `skill` identifies the currently active Skill (subagents may
-    switch it via activate_skill).
+
+    `skill` is the Skill inherited by this execution when the context
+    is created. The context itself is immutable; current execution
+    Skill changes are represented by StepEngine's ExecutionState.
     """
 
     agent_hash: str
@@ -50,6 +52,9 @@ class SubagentHandle:
 
     Dispatching a Subagent never waits for completion.
     The parent Agent can explicitly wait on the handle later.
+
+    The underlying Task is owned by AgentRuntime. The handle is only
+    the caller-facing reference to that execution.
     """
 
     __slots__ = (
@@ -107,8 +112,34 @@ class AgentRuntime:
         - shared world snapshot
         - Subagent dispatch
         - recursive dispatch
+        - Subagent task ownership
         - sleep/wait
         - depth limit
+        - runtime shutdown
+
+    Lifecycle:
+
+        dispatch
+            ->
+        runtime owns Task
+            ->
+        worker executes
+            ->
+        handle may await it
+            ->
+        Task is removed from ownership set
+
+    Runtime shutdown:
+
+        shutdown()
+            ->
+        reject new dispatches
+            ->
+        cancel all live Subagent Tasks
+            ->
+        await every Task
+            ->
+        no live Subagent Tasks remain
     """
 
     def __init__(
@@ -121,13 +152,37 @@ class AgentRuntime:
                 "max_subagent_depth must be >= 0"
             )
 
-        self.max_subagent_depth = max_subagent_depth
+        self.max_subagent_depth = (
+            max_subagent_depth
+        )
 
-        self._agents: dict[str, AgentContext] = {}
+        # Agent identity / context registry.
+        #
+        # Contexts intentionally remain available after execution
+        # completes so reports/debugging/inspection can still resolve
+        # the execution identity.
+        self._agents: dict[
+            str,
+            AgentContext,
+        ] = {}
+
+        # AgentRuntime is the owner of every live Subagent Task.
+        #
+        # This is intentionally separate from `_agents`: AgentContext
+        # is persistent execution metadata, whereas this set represents
+        # actual live async work.
+        self._subagent_tasks: set[
+            asyncio.Task[Any]
+        ] = set()
+
+        # Once shutdown starts, no new Subagent may be dispatched.
+        self._stopping = False
 
         # Set by the composition root: new-input wake signal used
         # by sleep() so idle naps yield to pending messages.
-        self.interrupt_event: asyncio.Event | None = None
+        self.interrupt_event: (
+            asyncio.Event | None
+        ) = None
 
     # ------------------------------------------------------------------
     # Root Agent
@@ -141,7 +196,19 @@ class AgentRuntime:
         task: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> AgentContext:
-        agent_hash = self._new_agent_hash()
+        """
+        Create one root Agent execution context.
+
+        Root creation itself does not create an asyncio Task.
+        """
+        if self._stopping:
+            raise RuntimeError(
+                "AgentRuntime is shutting down."
+            )
+
+        agent_hash = (
+            self._new_agent_hash()
+        )
 
         context = AgentContext(
             agent_hash=agent_hash,
@@ -149,13 +216,17 @@ class AgentRuntime:
             depth=0,
             task=task,
             skill=skill,
-            world=self._freeze_world(world or {}),
+            world=self._freeze_world(
+                world or {}
+            ),
             metadata=MappingProxyType(
                 dict(metadata or {})
             ),
         )
 
-        self._agents[agent_hash] = context
+        self._agents[
+            agent_hash
+        ] = context
 
         return context
 
@@ -178,33 +249,58 @@ class AgentRuntime:
         The new Subagent:
             - gets a new identity
             - inherits the parent's world snapshot
-            - starts with an empty Skill by default
+            - inherits the explicitly supplied Skill when given
+            - otherwise inherits parent.skill
             - increments depth
-        """
-        child_depth = parent.depth + 1
 
-        if child_depth > self.max_subagent_depth:
+        The resulting asyncio Task is owned by this AgentRuntime.
+
+        `skill=None` intentionally means "inherit parent Skill", so
+        callers that represent mutable current execution state should
+        pass the current Skill explicitly.
+        """
+        if self._stopping:
+            raise RuntimeError(
+                "AgentRuntime is shutting down."
+            )
+
+        child_depth = (
+            parent.depth + 1
+        )
+
+        if (
+            child_depth
+            > self.max_subagent_depth
+        ):
             raise SubagentLimitError(
                 "Maximum Subagent depth exceeded: "
                 f"{child_depth} > "
                 f"{self.max_subagent_depth}"
             )
 
-        agent_hash = self._new_agent_hash()
+        agent_hash = (
+            self._new_agent_hash()
+        )
 
         child = AgentContext(
             agent_hash=agent_hash,
             parent_hash=parent.agent_hash,
             depth=child_depth,
             task=task,
-            skill=skill if skill is not None else parent.skill,
+            skill=(
+                skill
+                if skill is not None
+                else parent.skill
+            ),
             world=parent.world,
             metadata=MappingProxyType(
                 dict(metadata or {})
             ),
         )
 
-        self._agents[agent_hash] = child
+        self._agents[
+            agent_hash
+        ] = child
 
         task_handle = asyncio.create_task(
             self._run_worker(
@@ -215,6 +311,14 @@ class AgentRuntime:
                 f"subagent:"
                 f"{agent_hash}"
             ),
+        )
+
+        self._subagent_tasks.add(
+            task_handle
+        )
+
+        task_handle.add_done_callback(
+            self._on_subagent_done
         )
 
         return SubagentHandle(
@@ -230,11 +334,114 @@ class AgentRuntime:
         worker: SubagentWorker,
     ) -> Any:
         try:
-            return await worker(context)
+            return await worker(
+                context
+            )
+
         finally:
             # Keep final context available for inspection after the
-            # execution has completed.
-            self._agents[context.agent_hash] = context
+            # execution has completed, including cancellation.
+            self._agents[
+                context.agent_hash
+            ] = context
+
+    def _on_subagent_done(
+        self,
+        task: asyncio.Task[Any],
+    ) -> None:
+        """
+        Remove a completed Task from runtime ownership.
+
+        Calling task.exception() marks an exception as retrieved so
+        fire-and-forget Subagents do not later produce:
+
+            Task exception was never retrieved
+
+        This does NOT consume the exception from callers awaiting
+        the SubagentHandle. `await handle.wait()` still raises it.
+        """
+        self._subagent_tasks.discard(
+            task
+        )
+
+        if task.cancelled():
+            return
+
+        try:
+            task.exception()
+        except (
+            asyncio.CancelledError,
+        ):
+            pass
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Runtime lifecycle
+    # ------------------------------------------------------------------
+
+    @property
+    def stopping(self) -> bool:
+        return self._stopping
+
+    @property
+    def active_subagent_count(self) -> int:
+        return sum(
+            not task.done()
+            for task in self._subagent_tasks
+        )
+
+    async def shutdown(self) -> None:
+        """
+        Stop every still-running Subagent owned by this runtime.
+
+        Normal parent-turn behavior is intentionally different:
+        a Subagent may outlive its parent's StepEngine execution.
+
+        `shutdown()` is the application/runtime lifecycle boundary
+        where all remaining Subagent work must be cancelled and
+        awaited before dependent runtimes are closed.
+        """
+        if self._stopping:
+            # The first shutdown call owns the actual cleanup.
+            # Subsequent calls wait only for tasks that remain in the
+            # ownership set.
+            tasks = list(
+                self._subagent_tasks
+            )
+
+            if tasks:
+                await asyncio.gather(
+                    *tasks,
+                    return_exceptions=True,
+                )
+
+            return
+
+        self._stopping = True
+
+        # Freeze the ownership boundary before the first await:
+        # dispatch() can no longer create a new Subagent after this
+        # point.
+        tasks = list(
+            self._subagent_tasks
+        )
+
+        if not tasks:
+            return
+
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        await asyncio.gather(
+            *tasks,
+            return_exceptions=True,
+        )
+
+        # The done callbacks should already have discarded these,
+        # but clearing defensively keeps the invariant explicit.
+        self._subagent_tasks.clear()
 
     # ------------------------------------------------------------------
     # Agent state
@@ -244,9 +451,13 @@ class AgentRuntime:
         self,
         agent_hash: str,
     ) -> AgentContext | None:
-        return self._agents.get(agent_hash)
+        return self._agents.get(
+            agent_hash
+        )
 
-    def agents(self) -> tuple[AgentContext, ...]:
+    def agents(
+        self,
+    ) -> tuple[AgentContext, ...]:
         return tuple(
             self._agents.values()
         )
@@ -255,7 +466,10 @@ class AgentRuntime:
     # Waiting
     # ------------------------------------------------------------------
 
-    def set_interrupt_event(self, event: asyncio.Event | None) -> None:
+    def set_interrupt_event(
+        self,
+        event: asyncio.Event | None,
+    ) -> None:
         self.interrupt_event = event
 
     async def sleep(
@@ -264,7 +478,11 @@ class AgentRuntime:
     ) -> tuple[float, bool]:
         """
         Sleep for `seconds`, OR until the interrupt event fires
-        (new input arrived). Returns (waited, interrupted).
+        (new input arrived).
+
+        Returns:
+
+            (waited_seconds, interrupted)
         """
         if seconds < 0:
             raise ValueError(
@@ -274,13 +492,21 @@ class AgentRuntime:
         event = self.interrupt_event
 
         if event is None:
-            await asyncio.sleep(seconds)
-            return seconds, False
+            await asyncio.sleep(
+                seconds
+            )
+
+            return (
+                seconds,
+                False,
+            )
 
         started = time.time()
 
         sleeper = asyncio.create_task(
-            asyncio.sleep(seconds),
+            asyncio.sleep(
+                seconds
+            ),
             name="agent-sleep",
         )
 
@@ -289,20 +515,48 @@ class AgentRuntime:
             name="agent-sleep-interrupt",
         )
 
-        done, pending = await asyncio.wait(
-            {sleeper, waiter},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        try:
+            done, pending = await asyncio.wait(
+                {
+                    sleeper,
+                    waiter,
+                },
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-        for task in pending:
-            task.cancel()
+            for task in pending:
+                task.cancel()
 
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
+            for task in pending:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
 
-        return time.time() - started, waiter in done
+            return (
+                time.time() - started,
+                waiter in done,
+            )
+
+        except asyncio.CancelledError:
+            # If the parent Subagent itself is being cancelled,
+            # never leave helper sleep tasks behind.
+            for task in (
+                sleeper,
+                waiter,
+            ):
+                if not task.done():
+                    task.cancel()
+
+            await asyncio.gather(
+                sleeper,
+                waiter,
+                return_exceptions=True,
+            )
+
+            raise
 
     @staticmethod
     async def wait(
@@ -315,7 +569,10 @@ class AgentRuntime:
         *handles: SubagentHandle,
     ) -> list[Any]:
         return await asyncio.gather(
-            *(handle.wait() for handle in handles)
+            *(
+                handle.wait()
+                for handle in handles
+            )
         )
 
     # ------------------------------------------------------------------
@@ -333,10 +590,18 @@ class AgentRuntime:
         """
         Freeze only the outer mapping.
 
-        The normal producer of `world` should already provide a detached
-        snapshot. We deliberately do not recursively convert arbitrary
-        values here, because the Module/DataSpace layer owns snapshot
-        semantics.
+        The normal producer of `world` should already provide a
+        detached snapshot. We deliberately do not recursively convert
+        arbitrary values here because the Module/DataSpace layer owns
+        snapshot semantics.
+
+        Therefore:
+
+            DataSpace.snapshot()
+                -> deep detached data
+
+            AgentRuntime._freeze_world()
+                -> immutable outer mapping
         """
         return MappingProxyType(
             dict(world)
