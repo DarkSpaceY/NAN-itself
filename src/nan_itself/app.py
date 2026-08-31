@@ -291,17 +291,18 @@ async def run_agent_process() -> None:
 
     await gateway.close()
 
-    logger.info("Stopping tool providers and modules")
+    logger.info("Stopping modules and tool providers")
 
-    # Teardown must never flip the exit code: MCP stdio stacks can
-    # raise CancelledError/anyio errors while their transports die.
-    for stop_step in (providers.stop, modules.stop):
+    for stop_step in (
+        modules.stop,
+        providers.stop,
+    ):
         try:
             await stop_step()
-        except (Exception, asyncio.CancelledError):
-            # CancelledError is BaseException on 3.12+ and anyio's
-            # stdio teardown raises it while transports die.
-            logger.exception("Shutdown step failed; continuing")
+        except BaseException:
+            logger.exception(
+                "Shutdown step failed; continuing"
+            )
 
     logger.info("NAN stopped cleanly")
 

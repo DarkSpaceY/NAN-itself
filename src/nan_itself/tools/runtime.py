@@ -10,6 +10,40 @@ Responsibilities:
 
 This object does NOT know about Agent exposure: per-Agent tool
 visibility lives in AgentToolView, which composes this runtime.
+
+MCP lifecycle model:
+
+    ProviderRuntime
+        |
+        +-- supervisor task
+        |       |
+        |       +-- scans/reconciles configuration
+        |       +-- starts/stops MCP workers
+        |
+        +-- MCP worker: files
+        |       |
+        |       +-- owns stdio_client
+        |       +-- owns ClientSession
+        |       +-- owns AsyncExitStack
+        |
+        +-- MCP worker: playwright
+        |
+        +-- MCP worker: command
+        |
+        +-- local providers
+                |
+                +-- in-process instances
+
+IMPORTANT:
+
+Each MCP server owns its own asyncio task.
+
+That task is responsible for:
+
+    connect -> run -> close
+
+This prevents multiple mcp.client.stdio AnyIO cancel scopes from
+being nested inside one task and later being torn down out of order.
 """
 
 from __future__ import annotations
@@ -19,32 +53,119 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
-
 import mcp.types as types
+from loguru import logger
 
 from . import local as local_backend
 from . import mcp as mcp_backend
+from .builtin import (
+    BUILTIN_MCP_CONFIG,
+    BUILTIN_TOOLS,
+)
+from .provider import Provider
+from .results import error_result
 from .spec import (
-    PROVIDER_KIND_LOCAL,
     DEFAULT_TOOL_TIMEOUT,
+    PROVIDER_KIND_LOCAL,
     ProviderSpec,
-)
-from .provider import (
-    Provider,
-)
-from .results import (
-    error_result,
 )
 from .watcher import (
     SourceTracker,
     file_fingerprint,
 )
 
-from .builtin import (
-    BUILTIN_MCP_CONFIG,
-    BUILTIN_TOOLS,
-)
+
+class _MCPWorker:
+    """
+    Lifecycle owner for exactly one MCP provider.
+
+    The worker task owns the MCP AsyncExitStack. No other task should
+    ever call stack.aclose().
+
+    The worker also tracks in-flight calls so shutdown can stop
+    accepting new calls and wait for current calls to drain before
+    exiting the MCP context.
+    """
+
+    def __init__(
+        self,
+        spec: ProviderSpec,
+    ) -> None:
+        self.spec = spec
+
+        self.stop_event = asyncio.Event()
+
+        loop = asyncio.get_running_loop()
+
+        self.ready: asyncio.Future[Provider] = (
+            loop.create_future()
+        )
+
+        self.task: asyncio.Task[None] | None = None
+
+        self.provider: Provider | None = None
+
+        self.stopping = False
+
+        self.active_calls = 0
+
+        self._condition = asyncio.Condition()
+
+    async def acquire(
+        self,
+    ) -> Provider:
+        """
+        Reserve the provider for one active operation.
+
+        Once shutdown begins, new operations are rejected.
+        """
+        async with self._condition:
+            if self.stopping:
+                raise RuntimeError(
+                    f"MCP provider '{self.spec.name}' "
+                    f"is stopping."
+                )
+
+            provider = self.provider
+
+            if provider is None:
+                raise RuntimeError(
+                    f"MCP provider '{self.spec.name}' "
+                    f"is not ready."
+                )
+
+            self.active_calls += 1
+
+            return provider
+
+    async def release(self) -> None:
+        """
+        Release an active operation.
+        """
+        async with self._condition:
+            if self.active_calls > 0:
+                self.active_calls -= 1
+
+            if self.active_calls == 0:
+                self._condition.notify_all()
+
+    async def begin_stop(self) -> None:
+        """
+        Prevent new calls and tell the worker to exit normally.
+        """
+        async with self._condition:
+            self.stopping = True
+
+        self.stop_event.set()
+
+    async def wait_calls_drained(self) -> None:
+        """
+        Wait until all in-flight tool calls have completed.
+        """
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: self.active_calls == 0
+            )
 
 
 class ProviderRuntime:
@@ -60,10 +181,12 @@ class ProviderRuntime:
         ) = None,
         scan_interval: float = 1.0,
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
+        mcp_start_timeout: float = 30.0,
     ) -> None:
         project_root = Path(__file__).resolve().parents[3]
 
         self.tool_timeout = tool_timeout
+        self.mcp_start_timeout = mcp_start_timeout
 
         self.builtin_config_path = (
             Path(builtin_config_path).resolve()
@@ -101,8 +224,17 @@ class ProviderRuntime:
             else tuple(builtin_tools)
         )
 
+        # ----------------------------------------------------------
+        # Live providers.
+        # ----------------------------------------------------------
+
         # Provider name -> live provider.
         self.providers: dict[str, Provider] = {}
+
+        # Provider name -> MCP worker.
+        #
+        # Local providers do not have workers.
+        self._mcp_workers: dict[str, _MCPWorker] = {}
 
         # ----------------------------------------------------------
         # Workspace bookkeeping.
@@ -121,7 +253,17 @@ class ProviderRuntime:
         # Local source file -> imported module name.
         self._local_imported_names: dict[Path, str] = {}
 
+        # ----------------------------------------------------------
+        # Supervisor lifecycle.
+        # ----------------------------------------------------------
+
+        # The supervisor scans configuration and starts/stops workers.
+        # It does NOT own MCP AsyncExitStacks.
         self._supervisor_task: asyncio.Task[None] | None = None
+
+        # start() waits until the supervisor finishes initial loading.
+        self._startup_future: asyncio.Future[None] | None = None
+
         self._wake = asyncio.Event()
         self._stopping = False
 
@@ -130,47 +272,97 @@ class ProviderRuntime:
     # ==================================================================
 
     async def start(self) -> None:
+        """
+        Start the runtime.
+
+        A dedicated supervisor task owns reconciliation.
+        Every MCP server gets its own dedicated worker task.
+        """
         if self._supervisor_task is not None:
             return
 
         self._stopping = False
+        self._wake.clear()
 
-        await self._load_builtin_config()
-        self._load_builtin_tools()
+        loop = asyncio.get_running_loop()
 
-        await self._scan_workspace()
+        self._startup_future = loop.create_future()
 
         self._supervisor_task = asyncio.create_task(
             self._supervisor(),
             name="provider-runtime-supervisor",
         )
 
+        try:
+            await self._startup_future
+
+        except BaseException:
+            self._stopping = True
+            self._wake.set()
+
+            supervisor = self._supervisor_task
+
+            if supervisor is not None:
+                try:
+                    await supervisor
+                except BaseException:
+                    pass
+
+            self._supervisor_task = None
+            self._startup_future = None
+
+            raise
+
     async def stop(self) -> None:
-        if self._stopping:
+        """
+        Stop the runtime cleanly.
+
+        IMPORTANT:
+
+        Do not cancel MCP worker tasks directly.
+
+        Instead, the supervisor is asked to stop. Its finally block
+        signals each worker's stop event and waits for each worker task
+        to exit. The worker itself then closes its own MCP context.
+        """
+        supervisor = self._supervisor_task
+
+        if supervisor is None:
             return
 
         self._stopping = True
 
-        supervisor = self._supervisor_task
+        # Wake the supervisor immediately.
+        self._wake.set()
+
         self._supervisor_task = None
 
-        if supervisor is not None:
-            supervisor.cancel()
+        try:
+            await supervisor
 
-            try:
-                await supervisor
-            except asyncio.CancelledError:
-                pass
+        except asyncio.CancelledError:
+            logger.warning(
+                "Provider runtime supervisor was cancelled "
+                "during shutdown"
+            )
 
-        for name in list(self.providers):
-            await self._remove_provider(name)
+        except Exception:
+            logger.exception(
+                "Provider runtime supervisor failed during shutdown"
+            )
 
-        self._mcp_sources.clear()
-        self._local_sources.clear()
-        self._local_imported_names.clear()
+        finally:
+            self._startup_future = None
 
-        self._mcp_tracker = SourceTracker()
-        self._local_tracker = SourceTracker()
+            self._mcp_sources.clear()
+            self._local_sources.clear()
+            self._local_imported_names.clear()
+
+            self._mcp_tracker = SourceTracker()
+            self._local_tracker = SourceTracker()
+
+            self.providers.clear()
+            self._mcp_workers.clear()
 
     # ==================================================================
     # Provider access
@@ -198,9 +390,29 @@ class ProviderRuntime:
             # Local tools are fixed at instantiation time.
             return
 
-        await mcp_backend.refresh_tools(
-            provider
-        )
+        worker = self._mcp_workers.get(name)
+
+        if worker is None:
+            raise RuntimeError(
+                f"MCP provider '{name}' is not running."
+            )
+
+        reserved = await worker.acquire()
+
+        try:
+            # Make sure the mapping still points at the same provider.
+            if reserved is not provider:
+                raise RuntimeError(
+                    f"MCP provider '{name}' changed while "
+                    f"refreshing tools."
+                )
+
+            await mcp_backend.refresh_tools(
+                provider
+            )
+
+        finally:
+            await worker.release()
 
     async def call_tool(
         self,
@@ -218,18 +430,53 @@ class ProviderRuntime:
         arguments = arguments or {}
 
         try:
-            return await asyncio.wait_for(
-                provider.call_tool(
-                    tool_name,
-                    arguments,
-                ),
-                timeout=self.tool_timeout,
+            if (
+                provider.spec.kind
+                == PROVIDER_KIND_LOCAL
+            ):
+                return await asyncio.wait_for(
+                    provider.call_tool(
+                        tool_name,
+                        arguments,
+                    ),
+                    timeout=self.tool_timeout,
+                )
+
+            worker = self._mcp_workers.get(
+                provider_name
             )
+
+            if worker is None:
+                return error_result(
+                    f"MCP provider '{provider_name}' "
+                    f"is not running."
+                )
+
+            reserved = await worker.acquire()
+
+            try:
+                # The provider may have been replaced between the
+                # dictionary lookup above and worker acquisition.
+                if reserved is not provider:
+                    return error_result(
+                        f"MCP provider '{provider_name}' "
+                        f"was replaced during the tool call."
+                    )
+
+                return await asyncio.wait_for(
+                    provider.call_tool(
+                        tool_name,
+                        arguments,
+                    ),
+                    timeout=self.tool_timeout,
+                )
+
+            finally:
+                await worker.release()
 
         except asyncio.TimeoutError:
             logger.warning(
-                "Tool call timed out: %s.%s "
-                "(%gs)",
+                "Tool call timed out: %s.%s (%gs)",
                 provider_name,
                 tool_name,
                 self.tool_timeout,
@@ -250,59 +497,418 @@ class ProviderRuntime:
             return error_result(str(exc))
 
     # ==================================================================
-    # Provider lifecycle
+    # MCP worker lifecycle
     # ==================================================================
 
-    async def _connect_mcp(
+    async def _start_mcp_worker(
         self,
         spec: ProviderSpec,
-    ) -> Provider:
-        if spec.name in self.providers:
+    ) -> _MCPWorker:
+        """
+        Create exactly one worker task for exactly one MCP server.
+
+        The worker task becomes the sole owner of the MCP connection.
+        """
+        if spec.name in self._mcp_workers:
             raise ValueError(
-                f"Duplicate tool provider: {spec.name}"
+                f"Duplicate MCP worker: {spec.name}"
             )
 
-        return await mcp_backend.connect(spec)
+        worker = _MCPWorker(spec)
 
-    async def _remove_provider(
-        self,
-        name: str,
-    ) -> None:
-        provider = self.providers.pop(name, None)
-
-        if provider is None:
-            return
-
-        await self._close_provider(provider)
-
-        logger.info(
-            "Tool provider '{}' removed",
-            name,
+        worker.task = asyncio.create_task(
+            self._run_mcp_worker(worker),
+            name=f"mcp-worker:{spec.name}",
         )
 
-    @staticmethod
-    async def _close_provider(
-        provider: Provider,
+        try:
+            provider = await asyncio.wait_for(
+                asyncio.shield(worker.ready),
+                timeout=self.mcp_start_timeout,
+            )
+
+        except BaseException:
+            await self._stop_mcp_worker(
+                worker
+            )
+            raise
+
+        worker.provider = provider
+
+        self._mcp_workers[spec.name] = worker
+
+        self.providers[spec.name] = provider
+
+        logger.info(
+            "MCP worker '{}' started",
+            spec.name,
+        )
+
+        return worker
+
+    async def _run_mcp_worker(
+        self,
+        worker: _MCPWorker,
     ) -> None:
-        
-        if provider.stack is None:
+        """
+        Own one MCP connection from creation to destruction.
+
+        This function MUST keep the MCP AsyncExitStack inside this
+        worker task for its entire lifetime.
+        """
+        spec = worker.spec
+        provider: Provider | None = None
+
+        try:
+            logger.info(
+                "Connecting MCP worker '{}'",
+                spec.name,
+            )
+
+            # mcp_backend.connect() creates and enters its
+            # AsyncExitStack here, in THIS worker task.
+            provider = await mcp_backend.connect(
+                spec
+            )
+
+            worker.provider = provider
+
+            if not worker.ready.done():
+                worker.ready.set_result(
+                    provider
+                )
+
+            # Stay alive until the runtime asks this specific worker
+            # to stop.
+            await worker.stop_event.wait()
+
+        except BaseException as exc:
+            if not worker.ready.done():
+                worker.ready.set_exception(
+                    exc
+                )
+
+            # Do not turn normal cancellation into noisy errors.
+            if not isinstance(
+                exc,
+                asyncio.CancelledError,
+            ):
+                logger.exception(
+                    "MCP worker '{}' exited unexpectedly",
+                    spec.name,
+                )
+
+            raise
+
+        finally:
+            # No new calls are allowed from this point.
+            async with worker._condition:
+                worker.stopping = True
+
+            # Wait for already-running tool calls to leave.
+            try:
+                await worker.wait_calls_drained()
+
+            except BaseException:
+                logger.exception(
+                    "Failed while draining calls for "
+                    "MCP worker '{}'",
+                    spec.name,
+                )
+
+            # ------------------------------------------------------
+            # CRITICAL:
+            #
+            # The worker task itself closes its own AsyncExitStack.
+            #
+            # This is the operation that fixes the original
+            # "cancel scope ... different task" problem.
+            # ------------------------------------------------------
+
+            if provider is not None:
+                stack = provider.stack
+
+                # Prevent anyone from attempting another close.
+                provider.stack = None
+
+                if stack is not None:
+                    try:
+                        logger.info(
+                            "Closing MCP worker '{}'",
+                            spec.name,
+                        )
+
+                        await stack.aclose()
+
+                    except BaseException:
+                        logger.exception(
+                            "Failed to close MCP worker '{}'",
+                            spec.name,
+                        )
+
+                provider.session = None
+
+            # ------------------------------------------------------
+            # Only remove the mapping if this worker still owns the
+            # current provider.
+            #
+            # During hot reload, an old worker can be shutting down
+            # while a new worker with the same name is already live.
+            # The old worker MUST NOT remove the new mapping.
+            # ------------------------------------------------------
+
+            current_worker = self._mcp_workers.get(
+                spec.name
+            )
+
+            if current_worker is worker:
+                self._mcp_workers.pop(
+                    spec.name,
+                    None,
+                )
+
+            current_provider = self.providers.get(
+                spec.name
+            )
+
+            if (
+                provider is not None
+                and current_provider is provider
+            ):
+                self.providers.pop(
+                    spec.name,
+                    None,
+                )
+
+            logger.info(
+                "MCP worker '{}' stopped",
+                spec.name,
+            )
+
+    async def _stop_mcp_worker(
+        self,
+        worker: _MCPWorker,
+    ) -> None:
+        """
+        Ask one worker to shut itself down.
+
+        We do not directly close its stack from this task.
+        """
+        await worker.begin_stop()
+
+        task = worker.task
+
+        if task is None:
             return
 
         try:
-            proc = None
-            if hasattr(provider, 'session') and provider.session is not None:
-                if hasattr(provider.session, '_process'):
-                    proc = provider.session._process
-                elif hasattr(provider.session, 'process'):
-                    proc = provider.session.process
+            await task
 
-            if proc and hasattr(proc, 'poll') and proc.poll() is None:
-                proc.terminate()
-                await asyncio.sleep(0.2)
-                if proc.poll() is None:
-                    proc.kill()
+        except asyncio.CancelledError:
+            logger.warning(
+                "MCP worker '{}' was cancelled",
+                worker.spec.name,
+            )
+
         except Exception:
-            pass
+            # The worker already logged its own failure.
+            # Retrieving the exception here prevents "Task exception
+            # was never retrieved".
+            logger.debug(
+                "MCP worker '{}' finished with an exception",
+                worker.spec.name,
+            )
+
+    async def _stop_mcp_workers(
+        self,
+        workers: list[_MCPWorker],
+    ) -> None:
+        """
+        Stop multiple independent workers concurrently.
+
+        Every worker closes its own stack inside its own task, so
+        there is no global FILO relationship between MCP servers.
+        """
+        if not workers:
+            return
+
+        for worker in workers:
+            await worker.begin_stop()
+
+        await asyncio.gather(
+            *(
+                self._await_mcp_worker(
+                    worker
+                )
+                for worker in workers
+            ),
+            return_exceptions=True,
+        )
+
+    async def _await_mcp_worker(
+        self,
+        worker: _MCPWorker,
+    ) -> None:
+        task = worker.task
+
+        if task is None:
+            return
+
+        try:
+            await task
+
+        except asyncio.CancelledError:
+            logger.warning(
+                "MCP worker '{}' was cancelled",
+                worker.spec.name,
+            )
+
+        except Exception:
+            logger.exception(
+                "MCP worker '{}' failed during shutdown",
+                worker.spec.name,
+            )
+
+    async def _stop_all_mcp_workers(
+        self,
+    ) -> None:
+        workers = list(
+            self._mcp_workers.values()
+        )
+
+        if not workers:
+            return
+
+        # Mark all workers as stopping before waiting for any of them.
+        for worker in workers:
+            await worker.begin_stop()
+
+        await asyncio.gather(
+            *(
+                self._await_mcp_worker(
+                    worker
+                )
+                for worker in workers
+            ),
+            return_exceptions=True,
+        )
+
+        self._mcp_workers.clear()
+
+        # Local providers are in-process and don't have MCP workers.
+        for name, provider in list(
+            self.providers.items()
+        ):
+            if (
+                provider.spec.kind
+                == PROVIDER_KIND_LOCAL
+            ):
+                self.providers.pop(
+                    name,
+                    None,
+                )
+
+    async def _reap_dead_workers(self) -> None:
+        """
+        Detect unexpectedly terminated current MCP workers.
+
+        Workspace MCPs are marked for reload by removing their source
+        bookkeeping. The next workspace scan will reconnect them.
+
+        Builtin MCPs are simply removed; the existing policy of
+        "a broken builtin does not prevent boot" is preserved.
+        """
+        dead: list[tuple[str, _MCPWorker]] = []
+
+        for name, worker in list(
+            self._mcp_workers.items()
+        ):
+            task = worker.task
+
+            if task is None:
+                continue
+
+            if not task.done():
+                continue
+
+            if worker.stopping:
+                continue
+
+            dead.append(
+                (name, worker)
+            )
+
+        for name, worker in dead:
+            task = worker.task
+
+            if task is not None:
+                try:
+                    task.result()
+
+                except asyncio.CancelledError:
+                    pass
+
+                except Exception:
+                    logger.exception(
+                        "MCP worker '{}' crashed",
+                        name,
+                    )
+
+            current_worker = self._mcp_workers.get(
+                name
+            )
+
+            if current_worker is not worker:
+                continue
+
+            self._mcp_workers.pop(
+                name,
+                None,
+            )
+
+            provider = self.providers.get(
+                name
+            )
+
+            if (
+                provider is not None
+                and provider is worker.provider
+            ):
+                self.providers.pop(
+                    name,
+                    None,
+                )
+
+            if (
+                worker.spec.origin
+                == "workspace"
+            ):
+                source = Path(
+                    worker.spec.source
+                ).resolve()
+
+                # Force the next scan to reload this source.
+                self._mcp_sources.pop(
+                    source,
+                    None,
+                )
+
+                self._mcp_tracker.forget(
+                    source
+                )
+
+                logger.warning(
+                    "Workspace MCP worker '{}' died; "
+                    "source '{}' will be reloaded",
+                    name,
+                    source,
+                )
+
+            else:
+                logger.warning(
+                    "Builtin MCP worker '{}' died",
+                    name,
+                )
 
     # ==================================================================
     # Builtin sources
@@ -332,7 +938,7 @@ class ProviderRuntime:
                 )
 
             try:
-                provider = await self._connect_mcp(
+                await self._start_mcp_worker(
                     spec
                 )
 
@@ -344,10 +950,6 @@ class ProviderRuntime:
                     "provider '{}'; skipping",
                     spec.name,
                 )
-
-                continue
-
-            self.providers[spec.name] = provider
 
     def _load_builtin_tools(self) -> None:
         for cls in self.builtin_tools:
@@ -389,17 +991,25 @@ class ProviderRuntime:
             path.resolve()
             for path in self.workspace_mcp_dir.iterdir()
             if path.is_file()
-            and path.suffix.lower() in {".yaml", ".yml"}
+            and path.suffix.lower()
+            in {".yaml", ".yml"}
             and not path.name.startswith("_")
         }
 
-        for path in self._mcp_tracker.known_files() - current_files:
-            await self._remove_workspace_source(path)
+        for path in (
+            self._mcp_tracker.known_files()
+            - current_files
+        ):
+            await self._remove_workspace_source(
+                path
+            )
 
         for path in sorted(current_files):
             fingerprint = file_fingerprint(path)
 
-            loaded = path in self._mcp_sources
+            loaded = (
+                path in self._mcp_sources
+            )
 
             if not self._mcp_tracker.needs_load(
                 path,
@@ -408,7 +1018,10 @@ class ProviderRuntime:
             ):
                 continue
 
-            self._mcp_tracker.mark_seen(path, fingerprint)
+            self._mcp_tracker.mark_seen(
+                path,
+                fingerprint,
+            )
 
             try:
                 await self._reload_workspace_source(
@@ -417,7 +1030,10 @@ class ProviderRuntime:
                 )
 
             except Exception as exc:
-                self._mcp_tracker.mark_failed(path, exc)
+                self._mcp_tracker.mark_failed(
+                    path,
+                    exc,
+                )
 
                 logger.exception(
                     "Failed to load workspace MCP config: {}",
@@ -440,13 +1056,20 @@ class ProviderRuntime:
             and local_backend.has_tool_header(path)
         }
 
-        for path in self._local_tracker.known_files() - current_files:
-            await self._remove_local_source(path)
+        for path in (
+            self._local_tracker.known_files()
+            - current_files
+        ):
+            await self._remove_local_source(
+                path
+            )
 
         for path in sorted(current_files):
             fingerprint = file_fingerprint(path)
 
-            loaded = path in self._local_sources
+            loaded = (
+                path in self._local_sources
+            )
 
             if not self._local_tracker.needs_load(
                 path,
@@ -455,7 +1078,10 @@ class ProviderRuntime:
             ):
                 continue
 
-            self._local_tracker.mark_seen(path, fingerprint)
+            self._local_tracker.mark_seen(
+                path,
+                fingerprint,
+            )
 
             try:
                 await self._reload_local_source(
@@ -464,7 +1090,10 @@ class ProviderRuntime:
                 )
 
             except Exception as exc:
-                self._local_tracker.mark_failed(path, exc)
+                self._local_tracker.mark_failed(
+                    path,
+                    exc,
+                )
 
                 logger.exception(
                     "Failed to load workspace local tool: {}",
@@ -480,64 +1109,84 @@ class ProviderRuntime:
         path: Path,
         fingerprint: tuple[int, int],
     ) -> None:
-        config = mcp_backend.load_yaml(path)
+        path = path.resolve()
+
+        config = mcp_backend.load_yaml(
+            path
+        )
 
         specs = mcp_backend.parse_workspace_config(
             config,
             path,
         )
 
-        names = [spec.name for spec in specs]
+        names = [
+            spec.name
+            for spec in specs
+        ]
 
         if len(set(names)) != len(names):
             raise ValueError(
                 f"Duplicate MCP provider name in {path}"
             )
 
-        # Workspace providers may not shadow builtin providers,
-        # nor steal names owned by a different source file.
+        # --------------------------------------------------------------
+        # Validate name ownership before starting candidates.
+        # --------------------------------------------------------------
+
         for spec in specs:
-            existing = self.providers.get(spec.name)
+            existing = self.providers.get(
+                spec.name
+            )
 
-            if existing is not None:
-                if existing.spec.origin == "builtin":
-                    raise ValueError(
-                        f"Workspace MCP '{spec.name}' "
-                        f"cannot override builtin tool provider"
-                    )
+            if existing is None:
+                continue
 
-                source = Path(
-                    existing.spec.source
-                ).resolve()
+            if existing.spec.origin == "builtin":
+                raise ValueError(
+                    f"Workspace MCP '{spec.name}' "
+                    f"cannot override builtin tool provider"
+                )
 
-                if (
-                    existing.spec.origin == "workspace"
-                    and source != path.resolve()
-                ):
-                    raise ValueError(
-                        f"Workspace MCP '{spec.name}' "
-                        f"is already provided by {source}"
-                    )
+            source = Path(
+                existing.spec.source
+            ).resolve()
+
+            if (
+                existing.spec.origin == "workspace"
+                and source != path
+            ):
+                raise ValueError(
+                    f"Workspace MCP '{spec.name}' "
+                    f"is already provided by {source}"
+                )
 
         # --------------------------------------------------------------
-        # Connect every candidate first.
+        # Connect every candidate in its OWN worker task.
         #
-        # If any candidate fails, current source remains untouched.
+        # Existing providers stay alive while candidates are built.
+        # If a candidate fails, current source remains untouched.
         # --------------------------------------------------------------
 
-        candidates: dict[str, Provider] = {}
+        candidates: dict[
+            str,
+            _MCPWorker,
+        ] = {}
 
         try:
             for spec in specs:
-                candidate = await self._connect_mcp(
+                worker = await self._start_mcp_worker(
                     spec
                 )
 
-                candidates[spec.name] = candidate
+                candidates[spec.name] = worker
 
         except BaseException:
-            for provider in candidates.values():
-                await self._close_provider(provider)
+            # Candidates have independent workers. Stop only those
+            # created for this failed transaction.
+            await self._stop_mcp_workers(
+                list(candidates.values())
+            )
 
             raise
 
@@ -546,27 +1195,118 @@ class ProviderRuntime:
         # --------------------------------------------------------------
 
         old_names = self._mcp_sources.get(
-            path.resolve(),
+            path,
             set(),
         )
 
-        self._mcp_sources[path.resolve()] = set(
+        new_names = set(
             candidates
         )
 
-        for name in old_names - set(candidates):
-            provider = self.providers.pop(name, None)
+        old_workers_to_stop: list[
+            _MCPWorker
+        ] = []
 
-            if provider is not None:
-                await self._close_provider(provider)
+        # --------------------------------------------------------------
+        # Remove stale names from this source.
+        # --------------------------------------------------------------
+
+        for name in old_names - new_names:
+            old_worker = self._mcp_workers.get(
+                name
+            )
+
+            if (
+                old_worker is not None
+                and old_worker.spec.origin == "workspace"
+                and Path(
+                    old_worker.spec.source
+                ).resolve() == path
+            ):
+                self._mcp_workers.pop(
+                    name,
+                    None,
+                )
+
+                current_provider = (
+                    self.providers.get(name)
+                )
+
+                if (
+                    current_provider is not None
+                    and current_provider
+                    is old_worker.provider
+                ):
+                    self.providers.pop(
+                        name,
+                        None,
+                    )
+
+                old_workers_to_stop.append(
+                    old_worker
+                )
+
+        # --------------------------------------------------------------
+        # Install candidates first, then stop old workers.
+        #
+        # Each old/new worker owns a completely independent task.
+        # --------------------------------------------------------------
 
         for name, candidate in candidates.items():
-            old = self.providers.get(name)
+            old_worker = self._mcp_workers.get(
+                name
+            )
 
-            self.providers[name] = candidate
+            if (
+                old_worker is not None
+                and old_worker is not candidate
+            ):
+                self._mcp_workers.pop(
+                    name,
+                    None,
+                )
 
-            if old is not None:
-                await self._close_provider(old)
+                old_provider = self.providers.get(
+                    name
+                )
+
+                if (
+                    old_provider is not None
+                    and old_provider
+                    is old_worker.provider
+                ):
+                    self.providers.pop(
+                        name,
+                        None,
+                    )
+
+                old_workers_to_stop.append(
+                    old_worker
+                )
+
+            self._mcp_workers[name] = candidate
+
+            provider = candidate.provider
+
+            if provider is None:
+                raise RuntimeError(
+                    f"MCP worker '{name}' "
+                    f"became ready without a provider."
+                )
+
+            self.providers[name] = provider
+
+        self._mcp_sources[path] = new_names
+
+        # --------------------------------------------------------------
+        # Stop replaced/stale workers concurrently.
+        #
+        # The old worker closes the old stack itself.
+        # --------------------------------------------------------------
+
+        await self._stop_mcp_workers(
+            old_workers_to_stop
+        )
 
         logger.info(
             "Loaded workspace MCP source '{}': {}",
@@ -585,25 +1325,57 @@ class ProviderRuntime:
             set(),
         )
 
-        for name in names:
-            provider = self.providers.get(name)
+        workers: list[_MCPWorker] = []
 
-            if provider is None:
+        for name in names:
+            worker = self._mcp_workers.get(
+                name
+            )
+
+            if worker is None:
                 continue
 
-            if provider.spec.origin != "workspace":
+            if (
+                worker.spec.origin
+                != "workspace"
+            ):
                 continue
 
             if Path(
-                provider.spec.source
+                worker.spec.source
             ).resolve() != path:
                 continue
 
-            self.providers.pop(name, None)
+            self._mcp_workers.pop(
+                name,
+                None,
+            )
 
-            await self._close_provider(provider)
+            provider = self.providers.get(
+                name
+            )
 
-        self._mcp_tracker.forget(path)
+            if (
+                provider is not None
+                and provider
+                is worker.provider
+            ):
+                self.providers.pop(
+                    name,
+                    None,
+                )
+
+            workers.append(
+                worker
+            )
+
+        await self._stop_mcp_workers(
+            workers
+        )
+
+        self._mcp_tracker.forget(
+            path
+        )
 
         logger.info(
             "Removed workspace MCP source '{}'",
@@ -629,9 +1401,13 @@ class ProviderRuntime:
         (
             cls,
             imported_name,
-        ) = local_backend.load_class_from_file(path)
+        ) = local_backend.load_class_from_file(
+            path
+        )
 
-        local_backend.validate_class(cls)
+        local_backend.validate_class(
+            cls
+        )
 
         provider_name = cls.id
 
@@ -661,45 +1437,59 @@ class ProviderRuntime:
                     f"provided by {source}"
                 )
 
-        candidate_spec = local_backend.local_provider_spec(
-            name=provider_name,
-            file=path,
-            source=str(path),
-            origin="workspace",
+        candidate_spec = (
+            local_backend.local_provider_spec(
+                name=provider_name,
+                file=path,
+                source=str(path),
+                origin="workspace",
+            )
         )
 
-        # Build the candidate first; failure leaves the
-        # previously loaded source untouched.
+        # Build candidate first.
         candidate = local_backend.build_provider(
             candidate_spec,
             cls,
         )
 
         previous_imported = (
-            self._local_imported_names.get(path)
+            self._local_imported_names.get(
+                path
+            )
         )
 
         if (
             previous_imported is not None
-            and previous_imported != imported_name
+            and previous_imported
+            != imported_name
         ):
             sys.modules.pop(
                 previous_imported,
                 None,
             )
 
-        for name in old_names - {provider_name}:
-            stale = self.providers.pop(name, None)
+        for name in (
+            old_names - {provider_name}
+        ):
+            stale = self.providers.pop(
+                name,
+                None,
+            )
 
             if stale is not None:
-                await self._close_provider(stale)
+                # Local provider has no async lifecycle.
+                pass
 
-        old = self.providers.get(provider_name)
+        old = self.providers.get(
+            provider_name
+        )
 
-        self.providers[provider_name] = candidate
+        self.providers[
+            provider_name
+        ] = candidate
 
-        if old is not None:
-            await self._close_provider(old)
+        # Old local providers do not own async resources.
+        _ = old
 
         self._local_sources[path] = {
             provider_name,
@@ -727,7 +1517,9 @@ class ProviderRuntime:
         )
 
         for name in names:
-            provider = self.providers.get(name)
+            provider = self.providers.get(
+                name
+            )
 
             if provider is None:
                 continue
@@ -735,7 +1527,10 @@ class ProviderRuntime:
             if provider.spec.origin != "workspace":
                 continue
 
-            if provider.spec.kind != PROVIDER_KIND_LOCAL:
+            if (
+                provider.spec.kind
+                != PROVIDER_KIND_LOCAL
+            ):
                 continue
 
             if Path(
@@ -743,9 +1538,10 @@ class ProviderRuntime:
             ).resolve() != path:
                 continue
 
-            self.providers.pop(name, None)
-
-            await self._close_provider(provider)
+            self.providers.pop(
+                name,
+                None,
+            )
 
         imported_name = (
             self._local_imported_names.pop(
@@ -760,7 +1556,9 @@ class ProviderRuntime:
                 None,
             )
 
-        self._local_tracker.forget(path)
+        self._local_tracker.forget(
+            path
+        )
 
         logger.info(
             "Removed workspace local tool source '{}'",
@@ -772,23 +1570,98 @@ class ProviderRuntime:
     # ==================================================================
 
     async def _supervisor(self) -> None:
-        while not self._stopping:
-            try:
-                await self._scan_workspace()
-            except Exception:
-                logger.exception(
-                    "Provider workspace reconciliation failed"
+        """
+        Reconciliation loop.
+
+        The supervisor never directly closes an MCP AsyncExitStack.
+        It only tells worker tasks when they should stop.
+        """
+        startup_future = (
+            self._startup_future
+        )
+
+        try:
+            # ----------------------------------------------------------
+            # Initial load.
+            #
+            # All MCP connections are created by dedicated worker tasks.
+            # ----------------------------------------------------------
+
+            await self._load_builtin_config()
+
+            self._load_builtin_tools()
+
+            await self._scan_workspace()
+
+            if (
+                startup_future is not None
+                and not startup_future.done()
+            ):
+                startup_future.set_result(
+                    None
                 )
 
-            try:
-                await asyncio.wait_for(
-                    self._wake.wait(),
-                    timeout=self.scan_interval,
+            # ----------------------------------------------------------
+            # Hot-reload loop.
+            # ----------------------------------------------------------
+
+            while not self._stopping:
+                try:
+                    await self._reap_dead_workers()
+
+                    await self._scan_workspace()
+
+                except Exception:
+                    logger.exception(
+                        "Provider workspace reconciliation failed"
+                    )
+
+                try:
+                    await asyncio.wait_for(
+                        self._wake.wait(),
+                        timeout=self.scan_interval,
+                    )
+
+                except asyncio.TimeoutError:
+                    pass
+
+                finally:
+                    self._wake.clear()
+
+        except BaseException as exc:
+            if (
+                startup_future is not None
+                and not startup_future.done()
+            ):
+                startup_future.set_exception(
+                    exc
                 )
-            except asyncio.TimeoutError:
-                pass
-            finally:
-                self._wake.clear()
+
+            raise
+
+        finally:
+            # ----------------------------------------------------------
+            # IMPORTANT:
+            #
+            # The supervisor does not close stacks itself.
+            # It signals the workers, and each worker closes its
+            # own stack from its own asyncio task.
+            # ----------------------------------------------------------
+
+            await self._stop_all_mcp_workers()
+
+            # Local providers are in-process objects with no MCP
+            # AsyncExitStack to close.
+            self.providers.clear()
+
+            self._mcp_workers.clear()
+
+            self._mcp_sources.clear()
+            self._local_sources.clear()
+            self._local_imported_names.clear()
+
+            self._mcp_tracker = SourceTracker()
+            self._local_tracker = SourceTracker()
 
 
 __all__ = [
