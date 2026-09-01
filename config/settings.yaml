@@ -1,7 +1,7 @@
 llm:
   provider: openai
   api_key: xxx
-  model: qwen2.5:7b
+  model: qwen3.5:4b-mlx
   base_url: http://127.0.0.1:11434/v1
   timeout: 600
   max_retries: 2

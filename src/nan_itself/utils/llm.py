@@ -287,6 +287,16 @@ class LLMProvider:
             if mapped is not None
         ]
 
+        logger.warning(
+            "\n========== OPENAI REQUEST {} ==========\n{}",
+            len(messages),
+            json.dumps(
+                messages,
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
         tools = (
             [
                 {
