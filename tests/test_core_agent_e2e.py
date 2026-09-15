@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -49,6 +50,35 @@ def make_response(
 # ============================================================================
 
 
+def _load_inbox():
+    """
+    Load the real InboxModule from its hot-reload file.
+    """
+    import importlib.util
+
+    path = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        / "builtin"
+        / "modules"
+        / "inbox.py"
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "inbox_module_e2e",
+        path,
+    )
+
+    module = importlib.util.module_from_spec(
+        spec
+    )
+
+    spec.loader.exec_module(module)
+
+    return module.InboxModule()
+
+
 class FakeModules:
     def __init__(
         self,
@@ -64,6 +94,14 @@ class FakeModules:
         self.query_turns = []
 
         self.delivered_turns = []
+
+        self.inbox = None
+
+    def get(
+        self,
+        module_id: str,
+    ):
+        return self.inbox
 
     def snapshot(self):
         self.snapshot_calls += 1
@@ -96,7 +134,21 @@ class FakeModules:
             snapshot
         )
 
-        return []
+        ambient = []
+
+        # Real inbox module: the observation carries whatever
+        # is queued (user input, parked reports).
+        if self.inbox is not None:
+            body = await self.inbox.query(
+                turn
+            )
+
+            if body:
+                ambient.append(
+                    body
+                )
+
+        return ambient
 
     def deliver_turn(
         self,
@@ -125,14 +177,6 @@ class FakeSkills:
     def names(self):
         return ()
 
-    def activate(
-        self,
-        name,
-    ):
-        raise AssertionError(
-            f"Unexpected Skill activation: {name}"
-        )
-
 
 # ============================================================================
 # Fake Provider runtime
@@ -141,15 +185,16 @@ class FakeSkills:
 
 class FakeProviderRuntime:
     """
-    Deterministic AgentToolView-compatible ProviderRuntime.
-
-    This intentionally models the real public surface consumed by
-    AgentToolView rather than bypassing the view.
+    Deterministic ProviderRuntime exposing the surface consumed by
+    the tool verbs: resolve_tool() and call_tool().
     """
 
     def __init__(self):
         self.providers = {
             "calc": SimpleNamespace(
+                spec=SimpleNamespace(
+                    name="calc",
+                ),
                 tools={
                     "add": SimpleNamespace(
                         name="add",
@@ -181,6 +226,36 @@ class FakeProviderRuntime:
     def provider_names(self):
         return tuple(
             self.providers
+        )
+
+    async def resolve_tool(
+        self,
+        name,
+    ):
+        """
+        Resolve a 'provider/tool' composite name.
+        """
+        provider_name, _, tool_name = (
+            name.partition("/")
+        )
+
+        provider = self.providers.get(
+            provider_name
+        )
+
+        if provider is None or not tool_name:
+            return None
+
+        tool = provider.tools.get(
+            tool_name
+        )
+
+        if tool is None:
+            return None
+
+        return (
+            provider,
+            tool,
         )
 
     def get_provider(
@@ -289,7 +364,7 @@ def make_core(
     *,
     llm,
     modules,
-    providers,
+    tools,
     skills,
     persona,
 ):
@@ -300,7 +375,7 @@ def make_core(
     core = CoreAgent(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=tools,
         skills=skills,
         persona_source=lambda: persona[
             "value"
@@ -315,7 +390,7 @@ def make_core(
     core.engine = StepEngine(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=tools,
         skills=skills,
         agent_runtime=runtime,
     )
@@ -349,16 +424,20 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         [
             # ------------------------------------------------------
             # Step 1:
-            # route provider
+            # invoke the provider tool directly
             # ------------------------------------------------------
 
             make_response(
                 tool_calls=[
                     make_tool_call(
-                        "route-1",
-                        "route",
+                        "add-1",
+                        "invoke_tool",
                         {
-                            "provider_name": "calc",
+                            "name": "calc/add",
+                            "arguments": {
+                                "x": 20,
+                                "y": 22,
+                            },
                         },
                     )
                 ]
@@ -366,24 +445,6 @@ async def test_core_agent_runs_real_route_tool_final_chain():
 
             # ------------------------------------------------------
             # Step 2:
-            # use provider tool
-            # ------------------------------------------------------
-
-            make_response(
-                tool_calls=[
-                    make_tool_call(
-                        "add-1",
-                        "add",
-                        {
-                            "x": 20,
-                            "y": 22,
-                        },
-                    )
-                ]
-            ),
-
-            # ------------------------------------------------------
-            # Step 3:
             # final
             # ------------------------------------------------------
 
@@ -396,15 +457,20 @@ async def test_core_agent_runs_real_route_tool_final_chain():
     core, runtime = make_core(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=providers,
         skills=skills,
         persona=persona,
     )
 
     try:
-        result = await core.run(
-            "calculate 20 + 22"
-        )
+        # Single-step turn 1: it ends with the invoke_tool call.
+        first = await core.run()
+
+        assert first.content is None
+
+        # Turn 2: the observation is rebuilt and the model
+        # finalizes with the tool result in history.
+        result = await core.run()
 
         # ----------------------------------------------------------
         # Final Agent result.
@@ -421,12 +487,12 @@ async def test_core_agent_runs_real_route_tool_final_chain():
 
         assert (
             modules.snapshot_calls
-            == 1
+            == 2
         )
 
         assert (
             skills.refresh_calls
-            == 1
+            == 2
         )
 
         # ----------------------------------------------------------
@@ -439,7 +505,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
 
         assert (
             modules.query_snapshot_calls
-            == 1
+            == 2
         )
 
         assert (
@@ -470,8 +536,8 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
         # ----------------------------------------------------------
-        # Step 1 tool exposure.
-        # Only route should be available initially.
+        # Tool exposure: the 8 verbs are always visible; provider
+        # tools are never exposed directly (invoke_tool only).
         # ----------------------------------------------------------
 
         first_tools = {
@@ -480,7 +546,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         }
 
         assert (
-            "route"
+            "invoke_tool"
             in first_tools
         )
 
@@ -490,7 +556,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
         # ----------------------------------------------------------
-        # After route, the provider's whole tool block is visible.
+        # Every request sees the same full verb set.
         # ----------------------------------------------------------
 
         second_request = (
@@ -503,13 +569,13 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         }
 
         assert (
-            "route"
+            "invoke_tool"
             in second_tools
         )
 
         assert (
             "add"
-            in second_tools
+            not in second_tools
         )
 
         # ----------------------------------------------------------
@@ -570,7 +636,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
 
         assert (
             len(tool_messages)
-            == 2
+            == 1
         )
 
         assert any(
@@ -590,16 +656,14 @@ async def test_core_agent_runs_real_route_tool_final_chain():
             len(
                 modules.delivered_turns
             )
-            == 1
+            == 2
         )
 
+        # The second turn delivered the final reply.
         record = (
-            modules.delivered_turns[0]
-        )
-
-        assert (
-            record.user_input
-            == "calculate 20 + 22"
+            modules.delivered_turns[
+                -1
+            ]
         )
 
         assert (
@@ -649,15 +713,13 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
     core, runtime = make_core(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=providers,
         skills=skills,
         persona=persona,
     )
 
     try:
-        first = await core.run(
-            "first input"
-        )
+        first = await core.run()
 
         persona[
             "value"
@@ -665,9 +727,7 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
 
         modules.value = 2
 
-        second = await core.run(
-            "second input"
-        )
+        second = await core.run()
 
         assert (
             first.content
@@ -751,7 +811,9 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
         )
 
         # ----------------------------------------------------------
-        # No cross-turn history is carried into the next request.
+        # History accumulates across turns: the second request
+        # replays the first turn's messages (cleared only when
+        # the history character limit is exceeded).
         # ----------------------------------------------------------
 
         first_request_users = [
@@ -777,18 +839,32 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
         ]
 
         assert (
-            "first input"
-            in first_request_users
+            first_request_users
+            == [""]
         )
 
         assert (
-            "first input"
-            not in second_request_users
+            second_request_users
+            == ["", ""]
         )
 
-        assert (
-            "second input"
-            in second_request_users
+        # ----------------------------------------------------------
+        # The first turn's assistant reply is replayed in the
+        # second request.
+        # ----------------------------------------------------------
+
+        assert any(
+            getattr(
+                message,
+                "role",
+                None,
+            )
+            == "assistant"
+            and (message.content or "")
+            == "first"
+            for message in llm.requests[
+                1
+            ].messages
         )
 
     finally:
@@ -880,7 +956,7 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
             # Child execution.
             #
             # The first user message of a child turn is exactly the
-            # task supplied to dispatch_subagent().
+            # task supplied to spawn().
             # ------------------------------------------------------
 
             if (
@@ -950,8 +1026,8 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
                 return make_response(
                     tool_calls=[
                         make_tool_call(
-                            "dispatch-1",
-                            "dispatch_subagent",
+                            "spawn-1",
+                            "spawn",
                             {
                                 "task": "late child",
                             },
@@ -1017,15 +1093,23 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
                 )
 
             raise AssertionError(
-                "Unexpected parent state."
+                f"Unexpected parent state: "
+                f"steps={self.parent_steps} "
+                f"child={self.child_calls} "
+                f"has_report={has_report} "
+                f"inputs={user_inputs!r}"
             )
 
     llm = LateReportLLM()
 
+    # A real InboxModule is required: the engine parks late
+    # subagent reports into it and the next observation drains it.
+    modules.inbox = _load_inbox()
+
     core, runtime = make_core(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=providers,
         skills=skills,
         persona=persona,
     )
@@ -1037,29 +1121,35 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
         # Child must start but remain blocked.
         # ----------------------------------------------------------
 
-        first = await core.run(
-            "parent task"
-        )
+        first = await core.run()
 
-        assert (
-            first.content
-            == "parent finished early"
-        )
+        # Single-step turn: it ends with the spawn call.
+        assert first.content is None
 
         await asyncio.wait_for(
             child_started.wait(),
             timeout=1.0,
         )
 
-        # At this point the child is still running.
+        # At this point the child is still running and no
+        # report has been parked yet.
         assert (
             runtime.active_subagent_count
             == 1
         )
 
+        assert not modules.inbox._items
+
+        # ----------------------------------------------------------
+        # Second turn: the inbox is still empty, so the parent
+        # just wraps up.
+        # ----------------------------------------------------------
+
+        second = await core.run()
+
         assert (
-            core.has_pending_reports()
-            is False
+            second.content
+            == "parent finished early"
         )
 
         # ----------------------------------------------------------
@@ -1069,19 +1159,16 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
         release_child.set()
 
         # Wait until the background archival task has parked
-        # the formatted report.
+        # the formatted report into the inbox.
         for _ in range(100):
-            if core.has_pending_reports():
+            if modules.inbox._items:
                 break
 
             await asyncio.sleep(
                 0
             )
 
-        assert (
-            core.has_pending_reports()
-            is True
-        )
+        assert modules.inbox._items
 
         assert (
             runtime.active_subagent_count
@@ -1089,23 +1176,18 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
         )
 
         # ----------------------------------------------------------
-        # Next turn.
+        # Next turn: the observation now carries the report.
         # ----------------------------------------------------------
 
-        second = await core.run(
-            "next user input"
-        )
+        third = await core.run()
 
         assert (
-            second.content
+            third.content
             == "report received"
         )
 
-        # The report must have been consumed by this turn.
-        assert (
-            core.has_pending_reports()
-            is False
-        )
+        # The report was drained by this turn's observation.
+        assert not modules.inbox._items
 
         # ----------------------------------------------------------
         # Verify report reached the actual StepEngine request.

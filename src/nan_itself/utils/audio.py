@@ -1,5 +1,3 @@
-# @builtin
-
 """
 Audio DSP toolkit for the hearing module.
 

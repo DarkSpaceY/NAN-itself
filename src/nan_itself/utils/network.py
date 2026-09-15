@@ -1,5 +1,3 @@
-# @builtin
-
 """
 Network self-perception toolkit: deterministic facts only.
 

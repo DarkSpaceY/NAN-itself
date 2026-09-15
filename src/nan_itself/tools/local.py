@@ -557,12 +557,10 @@ def local_provider_spec(
     name: str,
     file: Path | None = None,
     source: str,
-    origin: str,
 ) -> ProviderSpec:
     return ProviderSpec(
         name=name,
         kind=PROVIDER_KIND_LOCAL,
         file=file,
         source=source,
-        origin=origin,  # type: ignore[arg-type]
     )

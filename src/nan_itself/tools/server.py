@@ -5,12 +5,14 @@ Wraps the whole provider runtime as a single stdio MCP server,
 so external MCP clients can consume every backend through one
 connection. The agent process itself does not use this file;
 it talks to ProviderRuntime directly.
+
+Tools are exposed under their 'provider/tool' composite names —
+the same addressing the agent verbs use.
 """
 
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import mcp.server.stdio
@@ -22,48 +24,35 @@ from mcp.server.lowlevel import (
 )
 from mcp.server.models import InitializationOptions
 
-from .builtin import (
-    BUILTIN_MCP_CONFIG,
-)
 from .results import (
     error_result,
 )
 from .runtime import (
     ProviderRuntime,
 )
-from .view import (
-    AgentToolView,
-)
 
 
 class MCPFacade:
     """
-    Compatibility wrapper around ProviderRuntime.
-
-    This preserves the existing MCP stdio-server use case while the
-    underlying runtime now supports MCP and local Python providers
-    through independent Agent views.
+    MCP stdio-server shell around ProviderRuntime.
     """
 
     def __init__(
         self,
-        config_path: Path,
-        workspace_mcp_dir: str | Path | None = None,
-        workspace_local_dir: str | Path | None = None,
         *,
-        builtin_tools: Any | None = None,
+        builtin_tools_dir=None,
+        workspace_mcp_dir=None,
+        workspace_local_dir=None,
         scan_interval: float = 1.0,
     ) -> None:
         self.runtime = ProviderRuntime(
-            builtin_config_path=config_path,
+            builtin_tools_dir=builtin_tools_dir,
             workspace_mcp_dir=workspace_mcp_dir,
             workspace_local_dir=workspace_local_dir,
-            builtin_tools=builtin_tools,
             scan_interval=scan_interval,
         )
 
         self.server = Server("mcp-facade")
-        self.view = None
 
         self._register_handlers()
 
@@ -97,8 +86,6 @@ class MCPFacade:
     async def start(self) -> None:
         await self.runtime.start()
 
-        self.view = AgentToolView(self.runtime)
-
         logger.info(
             "MCPFacade started: {}",
             list(self.runtime.provider_names()),
@@ -106,7 +93,6 @@ class MCPFacade:
 
     async def close(self) -> None:
         await self.runtime.stop()
-        self.view = None
 
         logger.info(
             "MCPFacade stopped"
@@ -115,23 +101,44 @@ class MCPFacade:
     def _register_handlers(self) -> None:
         @self.server.list_tools()
         async def list_tools() -> list[types.Tool]:
-            if self.view is None:
-                return []
-
-            return await self.view.list_tools()
+            return [
+                tool
+                for _, tool in (
+                    self.runtime.list_all_tools()
+                )
+            ]
 
         @self.server.call_tool()
         async def call_tool(
             name: str,
-            arguments: dict[str, Any],
+            arguments: dict[str, Any] | None = None,
         ) -> types.CallToolResult:
-            if self.view is None:
+            provider_name, _, tool_name = (
+                name.partition("/")
+            )
+
+            if not tool_name:
                 return error_result(
-                    "MCPFacade is not started."
+                    f"Tool name must be 'provider/tool': "
+                    f"{name}"
                 )
 
-            return await self.view.call_tool(
-                name,
+            resolved = (
+                await self.runtime.resolve_tool(
+                    name
+                )
+            )
+
+            if resolved is None:
+                return error_result(
+                    f"Unknown tool: {name}"
+                )
+
+            provider, tool = resolved
+
+            return await self.runtime.call_tool(
+                provider.spec.name,
+                tool.name,
                 arguments,
             )
 
@@ -162,9 +169,7 @@ class MCPFacade:
 
 
 async def main() -> None:
-    facade = MCPFacade(
-        config_path=BUILTIN_MCP_CONFIG,
-    )
+    facade = MCPFacade()
 
     await facade.run_stdio()
 

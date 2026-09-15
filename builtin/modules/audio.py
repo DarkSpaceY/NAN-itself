@@ -1,4 +1,4 @@
-# @builtin
+# @module
 
 """
 Audio: hearing as an autonomous builtin Module.
@@ -57,8 +57,8 @@ from ...utils.audio import (
 
 
 def _repo_root() -> Path:
-    # .../src/nan_itself/modules/builtin/audio.py -> repo root
-    return Path(__file__).resolve().parents[4]
+    # .../builtin/modules/audio.py -> repo root
+    return Path(__file__).resolve().parents[2]
 
 
 class AudioModule(Module):

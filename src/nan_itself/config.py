@@ -21,10 +21,12 @@ class GatewayConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     max_subagent_depth: int = 3
+    history_char_limit: int = 100_000
 
 
-class InboxConfig(BaseModel):
-    max_size: int = 256
+class SkillsConfig(BaseModel):
+    resource_char_limit: int = 100_000
+    script_timeout: float = 300.0
 
 
 class TurnConfig(BaseModel):
@@ -44,7 +46,6 @@ class RetryConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    inbox: InboxConfig = Field(default_factory=InboxConfig)
     turn: TurnConfig = Field(default_factory=TurnConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
@@ -69,6 +70,7 @@ class Settings(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     modules: ModulesConfig = Field(default_factory=ModulesConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)

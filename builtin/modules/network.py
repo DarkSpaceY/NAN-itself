@@ -1,4 +1,4 @@
-# @builtin
+# @module
 
 """
 Network: the agent feeling its long-range nerves.

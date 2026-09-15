@@ -16,9 +16,6 @@ from nan_itself.tools import local as local_backend
 from nan_itself.tools.runtime import (
     ProviderRuntime,
 )
-from nan_itself.tools.view import (
-    AgentToolView,
-)
 
 
 def run(coro):
@@ -54,7 +51,6 @@ def _install_module(
     record = facade._register_module_class(
         module_cls,
         source=str(source),
-        origin="workspace",
         source_fingerprint=(
             1,
             1,
@@ -559,7 +555,6 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
         workspace_local_dir=(
             tmp_path / "tools"
         ),
-        builtin_tools=(),
     )
 
     old_provider = (
@@ -567,7 +562,6 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
             local_backend.local_provider_spec(
                 name="example",
                 source="<old>",
-                origin="workspace",
             ),
             OldProvider,
         )
@@ -578,7 +572,6 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
             local_backend.local_provider_spec(
                 name="example",
                 source="<new>",
-                origin="workspace",
             ),
             NewProvider,
         )
@@ -588,14 +581,11 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
         "example"
     ] = old_provider
 
-    view = AgentToolView(
-        runtime,
-        active_provider="example",
-    )
 
     async def scenario():
         inflight = asyncio.create_task(
-            view.call_tool(
+            runtime.call_tool(
+                "example",
                 "echo",
                 {
                     "text": "hello",
@@ -624,7 +614,8 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
 
         # New call must use new provider.
         new_result = (
-            await view.call_tool(
+            await runtime.call_tool(
+                "example",
                 "echo",
                 {
                     "text": "hello",
@@ -695,7 +686,6 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
         workspace_local_dir=(
             tmp_path / "tools"
         ),
-        builtin_tools=(),
     )
 
     alpha_v1 = (
@@ -703,7 +693,6 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             local_backend.local_provider_spec(
                 name="alpha",
                 source="<alpha-v1>",
-                origin="workspace",
             ),
             AlphaV1,
         )
@@ -714,7 +703,6 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             local_backend.local_provider_spec(
                 name="alpha",
                 source="<alpha-v2>",
-                origin="workspace",
             ),
             AlphaV2,
         )
@@ -725,7 +713,6 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             local_backend.local_provider_spec(
                 name="beta",
                 source="<beta>",
-                origin="workspace",
             ),
             Beta,
         )

@@ -39,50 +39,8 @@ class SkillMetadata:
     description: str
 
     source: Path
-    origin: str  # "builtin" | "workspace"
 
     frontmatter: Mapping[str, Any]
-
-
-@dataclass(frozen=True)
-class Skill:
-    """
-    Fully loaded Skill.
-
-    The instructions are the Markdown body of SKILL.md.
-
-    Bundled resources are intentionally represented as paths rather than
-    eagerly loaded bytes/text. This preserves progressive disclosure.
-    """
-
-    metadata: SkillMetadata
-    instructions: str
-
-    scripts: tuple[Path, ...]
-    references: tuple[Path, ...]
-    assets: tuple[Path, ...]
-
-    generation: int = 0
-
-    @property
-    def name(self) -> str:
-        return self.metadata.name
-
-    @property
-    def description(self) -> str:
-        return self.metadata.description
-
-    @property
-    def source(self) -> Path:
-        return self.metadata.source
-
-    @property
-    def origin(self) -> str:
-        return self.metadata.origin
-
-    @property
-    def frontmatter(self) -> Mapping[str, Any]:
-        return self.metadata.frontmatter
 
 
 class SkillValidationError(ValueError):

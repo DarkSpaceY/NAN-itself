@@ -295,7 +295,6 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         fromlist=["Facade"],
     ).Facade(
         workspace_modules=workspace,
-        builtin_modules=(),
         data_dir=tmp_path / "data",
         scan_interval=60.0,
         retry_interval=60.0,
@@ -323,7 +322,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
     core = CoreAgent(
         llm=llm,
         modules=modules,
-        providers=providers,
+        tools=providers,
         skills=skills,
         persona_source=lambda: persona[
             "value"
@@ -409,9 +408,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # --------------------------------------------------------------
 
         first_task = asyncio.create_task(
-            core.run(
-                "first turn"
-            ),
+            core.run(),
             name="test-core-turn-1",
         )
 
@@ -473,7 +470,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         )
 
         await asyncio.wait_for(
-            modules._load_or_reload_workspace_file(
+            modules._load_or_reload_file(
                 source,
                 new_fingerprint,
             ),
@@ -573,9 +570,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
         second_result = (
             await asyncio.wait_for(
-                core.run(
-                    "second turn"
-                ),
+                core.run(),
                 timeout=1.0,
             )
         )
@@ -653,297 +648,6 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
 
 # ============================================================================
-# Skill refresh during an active Subagent execution
-# ============================================================================
-
-
-SKILL_V1 = """---
-name: demo
-description: Demo Skill
----
-
-instructions-v1
-"""
-
-
-SKILL_V2 = """---
-name: demo
-description: Demo Skill
----
-
-instructions-v2
-"""
-
-
-@pytest.mark.asyncio
-async def test_skill_refresh_during_active_subagent_keeps_current_generation_immutable(
-    tmp_path,
-):
-    """
-    A loaded Skill is an immutable execution value.
-
-    During an active Subagent:
-
-        current execution Skill == v1
-
-    The workspace Skill is refreshed:
-
-        registry generation == v2
-
-    The running execution must continue holding the original Skill object.
-
-    A newly activated Skill must contain v2.
-    """
-
-    skills_root = (
-        tmp_path / "skills"
-    )
-
-    skill_dir = (
-        skills_root / "demo"
-    )
-
-    skill_dir.mkdir(
-        parents=True
-    )
-
-    skill_file = (
-        skill_dir / "SKILL.md"
-    )
-
-    skill_file.write_text(
-        SKILL_V1,
-        encoding="utf-8",
-    )
-
-    from nan_itself.skills import (
-        SkillRuntime,
-    )
-
-    skills = SkillRuntime(
-        workspace_skills=skills_root,
-        builtin_skills=(),
-    )
-
-    skills.discover()
-
-    skill_v1 = skills.activate(
-        "demo"
-    )
-
-    assert (
-        skill_v1.instructions
-        == "instructions-v1"
-    )
-
-    runtime = AgentRuntime(
-        max_subagent_depth=3
-    )
-
-    providers = EmptyProviders()
-
-    class EmptyModules:
-        async def query_snapshot(
-            self,
-            turn,
-            snapshot,
-            **kwargs,
-        ):
-            return []
-
-        def deliver_turn(
-            self,
-            record,
-        ):
-            pass
-
-    llm = QueueLLM(
-        [
-            make_response(
-                content="first skill turn"
-            ),
-            make_response(
-                content="second skill turn"
-            ),
-        ],
-        block_first=True,
-    )
-
-    engine = StepEngine(
-        llm=llm,
-        modules=EmptyModules(),
-        providers=providers,
-        skills=skills,
-        agent_runtime=runtime,
-    )
-
-    root = runtime.create_root(
-        world={},
-        task="root",
-    )
-
-    async def run_child(
-        skill,
-        *,
-        user_input,
-    ):
-        async def worker(
-            context,
-        ):
-            return await engine.execute(
-                context=context,
-                user_input=user_input,
-                persona="test",
-            )
-
-        handle = runtime.dispatch(
-            root,
-            task=user_input,
-            worker=worker,
-            skill=skill,
-        )
-
-        return await handle.wait()
-
-    try:
-        # ----------------------------------------------------------
-        # First execution uses v1.
-        # ----------------------------------------------------------
-
-        first_task = asyncio.create_task(
-            run_child(
-                skill_v1,
-                user_input="first skill turn",
-            )
-        )
-
-        await asyncio.wait_for(
-            llm.first_request_started.wait(),
-            timeout=1.0,
-        )
-
-        first_request = (
-            llm.requests[0]
-        )
-
-        first_text = request_text(
-            first_request
-        )
-
-        assert (
-            "instructions-v1"
-            in first_text
-        )
-
-        # Keep a direct reference to the active execution Skill.
-        active_skill = skill_v1
-
-        # ----------------------------------------------------------
-        # Refresh workspace Skill while the execution is active.
-        # ----------------------------------------------------------
-
-        await asyncio.sleep(
-            0.01
-        )
-
-        skill_file.write_text(
-            SKILL_V2,
-            encoding="utf-8",
-        )
-
-        skills.refresh()
-
-        skill_v2 = skills.activate(
-            "demo"
-        )
-
-        assert (
-            skill_v2.generation
-            > skill_v1.generation
-        )
-
-        assert (
-            skill_v2.instructions
-            == "instructions-v2"
-        )
-
-        # The old immutable execution value did not mutate.
-        assert (
-            active_skill.instructions
-            == "instructions-v1"
-        )
-
-        assert (
-            active_skill.generation
-            == skill_v1.generation
-        )
-
-        # ----------------------------------------------------------
-        # Finish the original Subagent execution.
-        # ----------------------------------------------------------
-
-        llm.release_first.set()
-
-        first_result = (
-            await asyncio.wait_for(
-                first_task,
-                timeout=2.0,
-            )
-        )
-
-        assert (
-            first_result.content
-            == "first skill turn"
-        )
-
-        # Its already-built prompt still contains v1.
-        assert (
-            "instructions-v1"
-            in request_text(
-                llm.requests[0]
-            )
-        )
-
-        # ----------------------------------------------------------
-        # New Subagent execution receives refreshed Skill v2.
-        # ----------------------------------------------------------
-
-        second_result = await run_child(
-            skill_v2,
-            user_input="second skill turn",
-        )
-
-        assert (
-            second_result.content
-            == "second skill turn"
-        )
-
-        assert (
-            len(llm.requests)
-            == 2
-        )
-
-        second_text = request_text(
-            llm.requests[1]
-        )
-
-        assert (
-            "instructions-v2"
-            in second_text
-        )
-
-        assert (
-            "instructions-v1"
-            not in second_text
-        )
-
-    finally:
-        llm.release_first.set()
-
-        await runtime.shutdown()
-
-
-# ============================================================================
 # Local Tool reload during an in-flight call
 # ============================================================================
 
@@ -1017,14 +721,13 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     )
 
     runtime = ProviderRuntime(
-        builtin_config_path=(
-            tmp_path / "missing.yaml"
-        ),
         workspace_mcp_dir=(
             tmp_path / "mcps"
         ),
         workspace_local_dir=tmp_path,
-        builtin_tools=(),
+        builtin_tools_dir=(
+            tmp_path / "no-builtin"
+        ),
         scan_interval=60.0,
         tool_timeout=2.0,
     )
@@ -1341,14 +1044,13 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
     )
 
     runtime = ProviderRuntime(
-        builtin_config_path=(
-            tmp_path / "missing.yaml"
-        ),
         workspace_mcp_dir=workspace,
         workspace_local_dir=(
             tmp_path / "local"
         ),
-        builtin_tools=(),
+        builtin_tools_dir=(
+            tmp_path / "no-builtin"
+        ),
         scan_interval=60.0,
         tool_timeout=2.0,
     )
@@ -1401,7 +1103,7 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
         # ----------------------------------------------------------
 
         reload_task = asyncio.create_task(
-            runtime._reload_workspace_source(
+            runtime._reload_mcp_source(
                 source,
                 runtime._mcp_tracker.fingerprints.get(
                     source.resolve(),

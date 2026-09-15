@@ -102,7 +102,6 @@ def test_module_long_running_candidate_can_commit_without_returning(
     old = facade._register_module_class(
         OldModule,
         source=str(source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -193,7 +192,6 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
     old = facade._register_module_class(
         OldModule,
         source=str(source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -267,7 +265,6 @@ def test_module_candidate_start_failure_keeps_old_generation(
     old = facade._register_module_class(
         OldModule,
         source=str(source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -349,7 +346,6 @@ def test_module_reload_restore_failure_keeps_old_generation(
     old = facade._register_module_class(
         OldModule,
         source=str(source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -438,7 +434,6 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
     old_a = facade._register_module_class(
         AOld,
         source=str(a_source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-a",
     )
@@ -446,7 +441,6 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
     b_record = facade._register_module_class(
         B,
         source=str(b_source),
-        origin="workspace",
         source_fingerprint=(1, 1),
         imported_module_name="old-b",
     )
@@ -532,11 +526,10 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     old_provider = runtime.get_provider(
@@ -557,7 +550,7 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     new_provider = runtime.get_provider(
@@ -615,11 +608,10 @@ def test_local_tool_id_collision_keeps_old_provider(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     alpha_before = (
@@ -649,7 +641,7 @@ def test_local_tool_id_collision_keeps_old_provider(
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     # Failed reload must preserve both existing providers.
@@ -707,11 +699,10 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     beta_before = (
@@ -725,7 +716,7 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
     alpha.unlink()
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     assert (
@@ -773,8 +764,6 @@ def test_skill_invalid_candidate_keeps_old_record(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         value = (
             skill_root / "SKILL.md"
@@ -793,7 +782,6 @@ def test_skill_invalid_candidate_keeps_old_record(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -886,8 +874,6 @@ def test_skill_name_collision_keeps_old_record(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         value = (
             skill_root / "SKILL.md"
@@ -901,7 +887,6 @@ def test_skill_name_collision_keeps_old_record(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -1003,8 +988,6 @@ def test_skill_removed_file_does_not_touch_other_skill(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         value = (
             skill_root / "SKILL.md"
@@ -1018,7 +1001,6 @@ def test_skill_removed_file_does_not_touch_other_skill(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 

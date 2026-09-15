@@ -117,14 +117,13 @@ def test_workspace_mcp_is_strictly_one_file_one_provider():
         "command": "fake-mcp",
     }
 
-    specs = mcp_backend.parse_workspace_config(
+    specs = mcp_backend.parse_config(
         config,
         Path("/tmp/github.yaml"),
     )
 
     assert len(specs) == 1
     assert specs[0].name == "github"
-    assert specs[0].origin == "workspace"
 
 
 def test_workspace_mcp_rejects_multi_provider_mapping():
@@ -140,7 +139,7 @@ def test_workspace_mcp_rejects_multi_provider_mapping():
     }
 
     try:
-        mcp_backend.parse_workspace_config(
+        mcp_backend.parse_config(
             config,
             Path("/tmp/multi.yaml"),
         )
@@ -150,39 +149,8 @@ def test_workspace_mcp_rejects_multi_provider_mapping():
         assert "mcp_servers" in message
     else:
         raise AssertionError(
-            "Workspace MCP accepted a multi-provider file"
+            "MCP accepted a multi-provider file"
         )
-
-
-def test_builtin_mcp_may_still_define_multiple_providers():
-    config = {
-        "mcp_servers": {
-            "github": {
-                "command": "fake-github",
-            },
-            "playwright": {
-                "command": "fake-playwright",
-            },
-        }
-    }
-
-    specs = mcp_backend.parse_builtin_config(
-        config,
-        Path("/tmp/builtin.yaml"),
-    )
-
-    assert {
-        spec.name
-        for spec in specs
-    } == {
-        "github",
-        "playwright",
-    }
-
-    assert all(
-        spec.origin == "builtin"
-        for spec in specs
-    )
 
 
 # ============================================================================
@@ -244,7 +212,6 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
             workspace_local_dir=(
                 tmp_path / "local"
             ),
-            builtin_tools=(),
         )
 
         try:
@@ -252,7 +219,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
             # v1
             # ------------------------------------------------------
 
-            await runtime._scan_workspace_mcps()
+            await runtime._scan_mcps()
 
             old_provider = (
                 runtime.get_provider(
@@ -275,7 +242,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
                 encoding="utf-8",
             )
 
-            await runtime._scan_workspace_mcps()
+            await runtime._scan_mcps()
 
             # v1 must survive.
             current = (
@@ -305,7 +272,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
                 encoding="utf-8",
             )
 
-            await runtime._scan_workspace_mcps()
+            await runtime._scan_mcps()
 
             new_provider = (
                 runtime.get_provider(
@@ -370,11 +337,10 @@ class Provider(LocalToolProvider):
             workspace_mcp_dir=(
                 tmp_path / "mcps"
             ),
-            builtin_tools=(),
         )
 
         try:
-            await runtime._scan_workspace_locals()
+            await runtime._scan_locals()
 
             old_provider = (
                 runtime.get_provider(
@@ -396,7 +362,7 @@ class Provider(LocalToolProvider):
                 encoding="utf-8",
             )
 
-            await runtime._scan_workspace_locals()
+            await runtime._scan_locals()
 
             assert (
                 runtime.get_provider(
@@ -418,7 +384,7 @@ class Provider(LocalToolProvider):
                 encoding="utf-8",
             )
 
-            await runtime._scan_workspace_locals()
+            await runtime._scan_locals()
 
             new_provider = (
                 runtime.get_provider(
@@ -479,8 +445,6 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         value = (
             skill_root / "SKILL.md"
@@ -499,7 +463,6 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -623,7 +586,9 @@ class Example(Module):
         )
 
         # Initial scan/register.
-        await facade._scan_workspace_modules()
+        await facade._scan_module_root(
+            facade.workspace_modules
+        )
 
         old = (
             facade._find_record_by_source(
@@ -646,7 +611,9 @@ class Example(Module):
             encoding="utf-8",
         )
 
-        await facade._scan_workspace_modules()
+        await facade._scan_module_root(
+            facade.workspace_modules
+        )
 
         current = (
             facade._find_record_by_source(
@@ -688,7 +655,9 @@ class Example(Module):
             fake_run_module
         )
 
-        await facade._scan_workspace_modules()
+        await facade._scan_module_root(
+            facade.workspace_modules
+        )
 
         new = (
             facade._find_record_by_source(

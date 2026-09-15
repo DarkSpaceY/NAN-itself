@@ -1,0 +1,6 @@
+name: files
+command: npx
+args:
+  - "--yes"
+  - "@modelcontextprotocol/server-filesystem@2026.7.10"
+  - "./workspace"

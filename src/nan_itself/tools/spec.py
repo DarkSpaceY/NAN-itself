@@ -21,11 +21,6 @@ ProviderKind = Literal[
     "local",
 ]
 
-ProviderOrigin = Literal[
-    "builtin",
-    "workspace",
-]
-
 LOCAL_TOOL_HEADER = "# @tool"
 
 LOCAL_TOOL_HEADER_SCAN_LINES = 20
@@ -45,8 +40,8 @@ class ProviderSpec:
 
     kind="local":
         An in-process Python class tool provider. `file` points at
-        the workspace source it was loaded from, or stays None for
-        builtin classes registered directly.
+        the source file it was loaded from, or stays None when the
+        class was registered directly.
     """
 
     name: str
@@ -61,4 +56,3 @@ class ProviderSpec:
     file: Path | None = None
 
     source: str = "<unknown>"
-    origin: ProviderOrigin = "builtin"

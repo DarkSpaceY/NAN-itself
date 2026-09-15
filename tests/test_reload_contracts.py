@@ -24,9 +24,6 @@ from nan_itself.skills.runtime import (
 from nan_itself.tools.runtime import (
     ProviderRuntime,
 )
-from nan_itself.tools.view import (
-    AgentToolView,
-)
 
 
 def run(coro):
@@ -98,16 +95,10 @@ def test_local_tool_reload_replaces_only_one_provider(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
-    )
-
-    alpha_view = AgentToolView(
-        runtime,
-        active_provider="alpha",
+        runtime._scan_locals()
     )
 
     beta_before = (
@@ -115,7 +106,8 @@ def test_local_tool_reload_replaces_only_one_provider(
     )
 
     first = run(
-        alpha_view.call_tool(
+        runtime.call_tool(
+            "alpha",
             "echo",
             {
                 "text": "hello"
@@ -135,7 +127,7 @@ def test_local_tool_reload_replaces_only_one_provider(
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     beta_after = (
@@ -149,7 +141,8 @@ def test_local_tool_reload_replaces_only_one_provider(
     )
 
     second = run(
-        alpha_view.call_tool(
+        runtime.call_tool(
+            "alpha",
             "echo",
             {
                 "text": "hello"
@@ -184,11 +177,10 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     assert (
@@ -208,7 +200,7 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     # One file owns one provider only.
@@ -249,11 +241,10 @@ def test_removed_local_tool_disappears_completely(
 
     runtime = ProviderRuntime(
         workspace_local_dir=tool_dir,
-        builtin_tools=(),
     )
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     assert (
@@ -264,7 +255,7 @@ def test_removed_local_tool_disappears_completely(
     source.unlink()
 
     run(
-        runtime._scan_workspace_locals()
+        runtime._scan_locals()
     )
 
     assert (
@@ -316,8 +307,6 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         name = (
             skill_root / "SKILL.md"
@@ -331,7 +320,6 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -423,8 +411,6 @@ def test_skill_reload_preserves_generation(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         return SkillMetadata(
             name="alpha",
@@ -432,7 +418,6 @@ def test_skill_reload_preserves_generation(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -475,111 +460,6 @@ def test_skill_reload_preserves_generation(
     assert second is not first
 
 
-def test_skill_reload_does_not_mutate_old_activated_object(
-    tmp_path,
-    monkeypatch,
-):
-    import nan_itself.skills.registry as registry_module
-    import nan_itself.skills.runtime as runtime_module
-
-    root = (
-        tmp_path / "skills"
-    )
-
-    alpha = (
-        root / "alpha"
-    )
-
-    alpha.mkdir(
-        parents=True
-    )
-
-    (alpha / "SKILL.md").write_text(
-        "alpha-v1",
-        encoding="utf-8",
-    )
-
-    def fake_read_metadata(
-        skill_root,
-        *,
-        origin,
-    ):
-        return SkillMetadata(
-            name="alpha",
-            description="alpha",
-            source=(
-                skill_root / "SKILL.md"
-            ),
-            origin=origin,
-            frontmatter={},
-        )
-
-    monkeypatch.setattr(
-        registry_module,
-        "read_metadata",
-        fake_read_metadata,
-    )
-
-    monkeypatch.setattr(
-        runtime_module,
-        "read_instructions",
-        lambda path: path.read_text(
-            encoding="utf-8"
-        ),
-    )
-
-    monkeypatch.setattr(
-        runtime_module,
-        "resource_files",
-        lambda path: (),
-    )
-
-    runtime = SkillRuntime(
-        workspace_skills=root,
-    )
-
-    runtime.refresh()
-
-    old_skill = (
-        runtime.activate("alpha")
-    )
-
-    assert (
-        old_skill.instructions
-        == "alpha-v1"
-    )
-
-    old_generation = (
-        old_skill.generation
-    )
-
-    (alpha / "SKILL.md").write_text(
-        "alpha-v2",
-        encoding="utf-8",
-    )
-
-    runtime.refresh()
-
-    new_skill = (
-        runtime.activate("alpha")
-    )
-
-    assert (
-        old_skill.instructions
-        == "alpha-v1"
-    )
-
-    assert (
-        new_skill.instructions
-        == "alpha-v2"
-    )
-
-    assert (
-        new_skill.generation
-        == old_generation + 1
-    )
-
-
 def test_removed_skill_disappears_completely(
     tmp_path,
     monkeypatch,
@@ -605,8 +485,6 @@ def test_removed_skill_disappears_completely(
 
     def fake_read_metadata(
         skill_root,
-        *,
-        origin,
     ):
         return SkillMetadata(
             name="alpha",
@@ -614,7 +492,6 @@ def test_removed_skill_disappears_completely(
             source=(
                 skill_root / "SKILL.md"
             ),
-            origin=origin,
             frontmatter={},
         )
 
@@ -704,7 +581,7 @@ class Example(Module):
     )
 
     run(
-        facade._load_or_reload_workspace_file(
+        facade._load_or_reload_file(
             source,
             first_fp,
         )
@@ -738,7 +615,7 @@ class Example(Module):
 
     # This must enter hot_reload() successfully.
     run(
-        facade._load_or_reload_workspace_file(
+        facade._load_or_reload_file(
             source,
             second_fp,
         )
@@ -828,7 +705,6 @@ def test_module_reload_does_not_rebind_unrelated_module(
         facade._register_module_class(
             AOld,
             source=str(a_source),
-            origin="workspace",
             source_fingerprint=(
                 1,
                 1,
@@ -841,7 +717,6 @@ def test_module_reload_does_not_rebind_unrelated_module(
         facade._register_module_class(
             B,
             source=str(b_source),
-            origin="workspace",
             source_fingerprint=(
                 1,
                 1,

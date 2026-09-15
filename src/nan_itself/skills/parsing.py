@@ -79,8 +79,6 @@ def split_skill_file(
 
 def read_metadata(
     root: Path,
-    *,
-    origin: str,
 ) -> SkillMetadata:
     skill_file = root / SKILL_FILENAME
 
@@ -106,7 +104,6 @@ def read_metadata(
         name=name,
         description=description,
         source=skill_file,
-        origin=origin,
         frontmatter=MappingProxyType(
             dict(frontmatter)
         ),

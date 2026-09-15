@@ -1,4 +1,4 @@
-# @builtin
+# @module
 
 """
 System: the agent feeling its own body.

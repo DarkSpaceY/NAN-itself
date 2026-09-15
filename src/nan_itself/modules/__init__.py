@@ -5,8 +5,6 @@ Layering (dependencies point downward only):
 
     runtime ──> { deps, loading, persistence, reload } ──> model
 
-        builtin: built-in registration consumed by runtime
-
 Import from this package, never from sibling modules.
 """
 
@@ -23,7 +21,6 @@ from .model import (
 )
 
 from .runtime import (
-    BUILTIN_MODULES,
     Facade,
 )
 
@@ -37,6 +34,5 @@ __all__ = [
     "ModuleTurn",
     "TurnRecord",
     "DuplicateModuleError",
-    "BUILTIN_MODULES",
     "Facade",
 ]

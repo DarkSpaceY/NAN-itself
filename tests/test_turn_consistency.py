@@ -119,7 +119,6 @@ class FakeLLM:
 @dataclass
 class CapturedExecution:
     context: object | None = None
-    user_input: str | None = None
     persona: str | None = None
 
 
@@ -140,16 +139,14 @@ class CapturingEngine:
         self,
         *,
         context,
-        user_input,
         persona,
-        seed_reports=None,
+        history,
         report_sink=None,
         sink=None,
     ):
         self.executions.append(
             CapturedExecution(
                 context=context,
-                user_input=user_input,
                 persona=persona,
             )
         )
@@ -160,7 +157,8 @@ class CapturingEngine:
             )
 
         return SimpleNamespace(
-            content="done"
+            content="done",
+            messages=[],
         )
 
 
@@ -176,7 +174,7 @@ def make_core(
     core = CoreAgent(
         llm=FakeLLM(),
         modules=modules,
-        providers=providers,
+        tools=providers,
         skills=skills,
         persona_source=lambda: persona,
     )
@@ -271,9 +269,7 @@ def test_core_captures_exactly_one_world_snapshot_per_turn():
             modules
         )
 
-        await core.run(
-            "hello"
-        )
+        await core.run()
 
         assert (
             modules.snapshot_calls
@@ -308,9 +304,7 @@ def test_each_main_turn_gets_a_new_world_snapshot():
             modules
         )
 
-        await core.run(
-            "turn-1"
-        )
+        await core.run()
 
         first_context = (
             engine.executions[0].context
@@ -329,9 +323,7 @@ def test_each_main_turn_gets_a_new_world_snapshot():
             }
         )
 
-        await core.run(
-            "turn-2"
-        )
+        await core.run()
 
         second_context = (
             engine.executions[1].context
@@ -419,9 +411,7 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
             on_execute
         )
 
-        await core.run(
-            "mid-turn"
-        )
+        await core.run()
 
         assert (
             observed["before"]
@@ -678,9 +668,7 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
             modules
         )
 
-        await core.run(
-            "first"
-        )
+        await core.run()
 
         first = (
             engine.executions[0].context
@@ -692,9 +680,7 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
             }
         )
 
-        await core.run(
-            "second"
-        )
+        await core.run()
 
         second = (
             engine.executions[1].context
@@ -932,7 +918,7 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
         core = CoreAgent(
             llm=FakeLLM(),
             modules=modules,
-            providers=FakeProviders(),
+            tools=FakeProviders(),
             skills=skills,
             persona_source=lambda: persona[
                 "value"
@@ -942,9 +928,7 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
         engine = CapturingEngine()
         core.engine = engine
 
-        await core.run(
-            "first"
-        )
+        await core.run()
 
         first = (
             engine.executions[0]
@@ -972,9 +956,7 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
             }
         )
 
-        await core.run(
-            "second"
-        )
+        await core.run()
 
         second = (
             engine.executions[1]

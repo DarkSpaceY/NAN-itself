@@ -1,0 +1,5 @@
+name: calculation
+command: npx
+args:
+  - "--yes"
+  - "@cyanheads/calculator-mcp-server@0.4.0"

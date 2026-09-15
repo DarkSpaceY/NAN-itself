@@ -1,4 +1,4 @@
-# @builtin
+# @module
 
 """
 Memory: semantic memory as an autonomous builtin Module.
@@ -269,7 +269,6 @@ class MemoryModule(Module):
                 "agent_hash": record.agent_hash,
                 "depth": record.depth,
                 "task": record.task,
-                "user_input": record.user_input,
                 "reply": record.reply,
                 "error": record.error,
             },

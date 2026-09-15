@@ -28,8 +28,6 @@ class AgentTurn:
     agent_hash: str
     depth: int
 
-    user_input: str
-
     data: Any
 
     task: str | None = None
@@ -39,9 +37,12 @@ class AgentTurn:
 class AgentResult:
     """
     Result of one completed Agent execution.
+
+    `content` is the model's plain-text reply; None when the turn
+    ended with tool calls (the next turn continues from them).
     """
 
-    content: str
+    content: str | None
 
     messages: tuple[Any, ...]
 

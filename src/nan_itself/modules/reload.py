@@ -291,7 +291,6 @@ async def _hot_reload_locked(
         instance=candidate_instance,
         data=old.data,
         source=old.source,
-        origin=old.origin,
         generation=(
             old.generation + 1
         ),

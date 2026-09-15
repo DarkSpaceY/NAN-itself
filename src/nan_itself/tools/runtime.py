@@ -2,14 +2,12 @@
 Shared tool provider runtime.
 
 Responsibilities:
-    - load builtin MCP configuration and builtin local classes
-    - discover workspace MCP configs and local Python tools
+    - discover builtin and workspace MCP configs and local
+      Python tools (both are hot-reloadable; deleting a source
+      file disables its provider)
     - maintain provider sessions/instances (hot reload included)
-    - cache tool definitions
+    - resolve tools by 'provider/tool' composite name
     - bound every tool call with a timeout
-
-This object does NOT know about Agent exposure: per-Agent tool
-visibility lives in AgentToolView, which composes this runtime.
 
 MCP lifecycle model:
 
@@ -71,10 +69,6 @@ from loguru import logger
 
 from . import local as local_backend
 from . import mcp as mcp_backend
-from .builtin import (
-    BUILTIN_MCP_CONFIG,
-    BUILTIN_TOOLS,
-)
 from .provider import Provider
 from .results import error_result
 from .spec import (
@@ -192,19 +186,10 @@ class _MCPWorker:
 class ProviderRuntime:
     def __init__(
         self,
-        builtin_config_path: str | Path | None = None,
+        builtin_tools_dir: str | Path | None = None,
         workspace_mcp_dir: str | Path | None = None,
         workspace_local_dir: str | Path | None = None,
         *,
-        builtin_tools: (
-            tuple[
-                type[
-                    local_backend.LocalToolProvider
-                ],
-                ...,
-            ]
-            | None
-        ) = None,
         scan_interval: float = 1.0,
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
         mcp_start_timeout: float = 30.0,
@@ -218,12 +203,27 @@ class ProviderRuntime:
             mcp_start_timeout
         )
 
-        self.builtin_config_path = (
+        builtin_root = (
             Path(
-                builtin_config_path
+                builtin_tools_dir
             ).resolve()
-            if builtin_config_path is not None
-            else BUILTIN_MCP_CONFIG
+            if builtin_tools_dir is not None
+            else (
+                project_root
+                / "builtin"
+                / "tools"
+            ).resolve()
+        )
+
+        # Builtin and workspace sources live in parallel directory
+        # layouts and are scanned with exactly the same hot-reload
+        # logic. Deleting a source file disables its provider.
+        self.builtin_mcps_dir = (
+            builtin_root / "mcps"
+        )
+
+        self.builtin_locals_dir = (
+            builtin_root / "local"
         )
 
         self.workspace_mcp_dir = (
@@ -256,12 +256,6 @@ class ProviderRuntime:
             scan_interval
         )
 
-        self.builtin_tools = (
-            BUILTIN_TOOLS
-            if builtin_tools is None
-            else tuple(builtin_tools)
-        )
-
         # ----------------------------------------------------------
         # Live providers.
         # ----------------------------------------------------------
@@ -287,12 +281,12 @@ class ProviderRuntime:
         ] = {}
 
         # ----------------------------------------------------------
-        # Workspace bookkeeping.
+        # Source bookkeeping (builtin + workspace).
         # ----------------------------------------------------------
 
         self._mcp_tracker = SourceTracker()
 
-        # Workspace MCP source file -> provider names from it.
+        # MCP source file -> provider names from it.
         self._mcp_sources: dict[
             Path,
             set[str],
@@ -300,7 +294,7 @@ class ProviderRuntime:
 
         self._local_tracker = SourceTracker()
 
-        # Workspace local source file -> provider name from it.
+        # Local source file -> provider name from it.
         self._local_sources: dict[
             Path,
             set[str],
@@ -458,6 +452,105 @@ class ProviderRuntime:
     ) -> Provider | None:
         return self.providers.get(
             name
+        )
+
+    def list_all_tools(
+        self,
+    ) -> list[
+        tuple[
+            str,
+            types.Tool,
+        ]
+    ]:
+        """
+        Every tool of every provider as
+        (provider_name, tool) pairs, in stable order.
+        """
+        pairs: list[
+            tuple[
+                str,
+                types.Tool,
+            ]
+        ] = []
+
+        for provider_name in sorted(
+            self.providers
+        ):
+            provider = self.providers[
+                provider_name
+            ]
+
+            for tool_name in sorted(
+                provider.tools
+            ):
+                pairs.append(
+                    (
+                        provider_name,
+                        provider.tools[
+                            tool_name
+                        ],
+                    )
+                )
+
+        return pairs
+
+    async def resolve_tool(
+        self,
+        name: str,
+    ) -> tuple[
+        Provider,
+        types.Tool,
+    ] | None:
+        """
+        Resolve a 'provider/tool' composite name.
+
+        MCP tool tables are refreshed once on a miss, so a tool
+        added to a live server becomes visible without restart.
+        """
+        provider_name, _, tool_name = (
+            name.partition("/")
+        )
+
+        if not tool_name:
+            return None
+
+        provider = self.providers.get(
+            provider_name
+        )
+
+        if provider is None:
+            return None
+
+        tool = provider.tools.get(
+            tool_name
+        )
+
+        if (
+            tool is None
+            and provider.spec.kind
+            != PROVIDER_KIND_LOCAL
+        ):
+            await self.refresh_provider_tools(
+                provider_name
+            )
+
+            provider = self.providers.get(
+                provider_name
+            )
+
+            if provider is None:
+                return None
+
+            tool = provider.tools.get(
+                tool_name
+            )
+
+        if tool is None:
+            return None
+
+        return (
+            provider,
+            tool,
         )
 
     async def refresh_provider_tools(
@@ -942,11 +1035,10 @@ class ProviderRuntime:
         """
         Detect unexpectedly terminated current MCP workers.
 
-        Workspace MCPs are marked for reload by removing their source
-        bookkeeping. The next workspace scan will reconnect them.
-
-        Builtin MCPs are simply removed; the existing policy of
-        "a broken builtin does not prevent boot" is preserved.
+        The worker's source file is marked for reload by removing
+        its source bookkeeping, so the next scan reconnects it —
+        or removes it cleanly when the file is gone. This policy
+        is the same for builtin and workspace sources.
         """
         dead: list[
             tuple[str, _MCPWorker]
@@ -1018,130 +1110,59 @@ class ProviderRuntime:
                     None,
                 )
 
-            if (
-                worker.spec.origin
-                == "workspace"
-            ):
-                source = Path(
-                    worker.spec.source
-                ).resolve()
+            source = Path(
+                worker.spec.source
+            ).resolve()
 
-                self._mcp_sources.pop(
-                    source,
-                    None,
-                )
+            self._mcp_sources.pop(
+                source,
+                None,
+            )
 
-                self._mcp_tracker.forget(
-                    source
-                )
+            self._mcp_tracker.forget(
+                source
+            )
 
-                logger.warning(
-                    "Workspace MCP worker '{}' died; "
-                    "source '{}' will be reloaded",
-                    name,
-                    source,
-                )
-
-            else:
-                logger.warning(
-                    "Builtin MCP worker '{}' died",
-                    name,
-                )
-
-    # ==================================================================
-    # Builtin sources
-    # ==================================================================
-
-    async def _load_builtin_config(
-        self,
-    ) -> None:
-        if not self.builtin_config_path.exists():
             logger.warning(
-                "Builtin MCP config not found: {}",
-                self.builtin_config_path,
-            )
-            return
-
-        config = mcp_backend.load_yaml(
-            self.builtin_config_path
-        )
-
-        specs = (
-            mcp_backend.parse_builtin_config(
-                config,
-                self.builtin_config_path,
-            )
-        )
-
-        for spec in specs:
-            if spec.name in self.providers:
-                raise ValueError(
-                    f"Duplicate builtin tool provider: "
-                    f"{spec.name}"
-                )
-
-            try:
-                await self._start_mcp_worker(
-                    spec
-                )
-
-            except Exception:
-                logger.exception(
-                    "Failed to start builtin MCP "
-                    "provider '{}'; skipping",
-                    spec.name,
-                )
-
-    def _load_builtin_tools(
-        self,
-    ) -> None:
-        for cls in self.builtin_tools:
-            local_backend.validate_class(
-                cls
-            )
-
-            if cls.id in self.providers:
-                raise ValueError(
-                    f"Duplicate builtin tool provider: "
-                    f"{cls.id}"
-                )
-
-            spec = (
-                local_backend.local_provider_spec(
-                    name=cls.id,
-                    source="<builtin>",
-                    origin="builtin",
-                )
-            )
-
-            self.providers[
-                spec.name
-            ] = local_backend.build_provider(
-                spec,
-                cls,
+                "MCP worker '{}' died; source '{}' "
+                "will be reloaded",
+                name,
+                source,
             )
 
     # ==================================================================
-    # Workspace scanning
+    # Source scanning (builtin + workspace, identical logic)
     # ==================================================================
 
-    async def _scan_workspace(
+    async def _scan_sources(
         self,
     ) -> None:
-        await self._scan_workspace_mcps()
-        await self._scan_workspace_locals()
+        await self._scan_mcps()
+        await self._scan_locals()
 
-    async def _scan_workspace_mcps(
+    async def _scan_mcps(
         self,
     ) -> None:
-        self.workspace_mcp_dir.mkdir(
+        await self._scan_mcp_root(
+            self.builtin_mcps_dir
+        )
+
+        await self._scan_mcp_root(
+            self.workspace_mcp_dir
+        )
+
+    async def _scan_mcp_root(
+        self,
+        root: Path,
+    ) -> None:
+        root.mkdir(
             parents=True,
             exist_ok=True,
         )
 
         current_files = {
             path.resolve()
-            for path in self.workspace_mcp_dir.iterdir()
+            for path in root.iterdir()
             if (
                 path.is_file()
                 and path.suffix.lower()
@@ -1150,11 +1171,16 @@ class ProviderRuntime:
             )
         }
 
-        for path in (
-            self._mcp_tracker.known_files()
-            - current_files
-        ):
-            await self._remove_workspace_source(
+        removed = {
+            path
+            for path in self._mcp_tracker.known_files()
+            if path.is_relative_to(
+                root
+            )
+        } - current_files
+
+        for path in removed:
+            await self._remove_mcp_source(
                 path
             )
 
@@ -1182,7 +1208,7 @@ class ProviderRuntime:
             )
 
             try:
-                await self._reload_workspace_source(
+                await self._reload_mcp_source(
                     path,
                     fingerprint,
                 )
@@ -1194,21 +1220,33 @@ class ProviderRuntime:
                 )
 
                 logger.exception(
-                    "Failed to load workspace MCP config: {}",
+                    "Failed to load MCP config: {}",
                     path,
                 )
 
-    async def _scan_workspace_locals(
+    async def _scan_locals(
         self,
     ) -> None:
-        self.workspace_local_dir.mkdir(
+        await self._scan_local_root(
+            self.builtin_locals_dir
+        )
+
+        await self._scan_local_root(
+            self.workspace_local_dir
+        )
+
+    async def _scan_local_root(
+        self,
+        root: Path,
+    ) -> None:
+        root.mkdir(
             parents=True,
             exist_ok=True,
         )
 
         current_files = {
             path.resolve()
-            for path in self.workspace_local_dir.rglob(
+            for path in root.rglob(
                 "*.py"
             )
             if (
@@ -1220,10 +1258,15 @@ class ProviderRuntime:
             )
         }
 
-        for path in (
-            self._local_tracker.known_files()
-            - current_files
-        ):
+        removed = {
+            path
+            for path in self._local_tracker.known_files()
+            if path.is_relative_to(
+                root
+            )
+        } - current_files
+
+        for path in removed:
             await self._remove_local_source(
                 path
             )
@@ -1264,15 +1307,15 @@ class ProviderRuntime:
                 )
 
                 logger.exception(
-                    "Failed to load workspace local tool: {}",
+                    "Failed to load local tool: {}",
                     path,
                 )
 
     # ------------------------------------------------------------------
-    # Workspace MCP reload
+    # MCP source reload
     # ------------------------------------------------------------------
 
-    async def _reload_workspace_source(
+    async def _reload_mcp_source(
         self,
         path: Path,
         fingerprint: tuple[int, int],
@@ -1284,7 +1327,7 @@ class ProviderRuntime:
         )
 
         specs = (
-            mcp_backend.parse_workspace_config(
+            mcp_backend.parse_config(
                 config,
                 path,
             )
@@ -1301,7 +1344,8 @@ class ProviderRuntime:
             )
 
         # --------------------------------------------------------------
-        # Validate ownership before starting candidates.
+        # Validate ownership before starting candidates:
+        # one provider name belongs to exactly one source file.
         # --------------------------------------------------------------
 
         for spec in specs:
@@ -1314,22 +1358,13 @@ class ProviderRuntime:
             if existing is None:
                 continue
 
-            if existing.spec.origin == "builtin":
-                raise ValueError(
-                    f"Workspace MCP '{spec.name}' "
-                    f"cannot override builtin tool provider"
-                )
-
             source = Path(
                 existing.spec.source
             ).resolve()
 
-            if (
-                existing.spec.origin == "workspace"
-                and source != path
-            ):
+            if source != path:
                 raise ValueError(
-                    f"Workspace MCP '{spec.name}' "
+                    f"MCP provider '{spec.name}' "
                     f"is already provided by {source}"
                 )
 
@@ -1408,8 +1443,6 @@ class ProviderRuntime:
 
             if (
                 old_worker is not None
-                and old_worker.spec.origin
-                == "workspace"
                 and Path(
                     old_worker.spec.source
                 ).resolve()
@@ -1524,12 +1557,12 @@ class ProviderRuntime:
         )
 
         logger.info(
-            "Loaded workspace MCP source '{}': {}",
+            "Loaded MCP source '{}': {}",
             path,
             sorted(candidates),
         )
 
-    async def _remove_workspace_source(
+    async def _remove_mcp_source(
         self,
         path: Path,
     ) -> None:
@@ -1552,12 +1585,6 @@ class ProviderRuntime:
             )
 
             if worker is None:
-                continue
-
-            if (
-                worker.spec.origin
-                != "workspace"
-            ):
                 continue
 
             if Path(
@@ -1599,12 +1626,12 @@ class ProviderRuntime:
         )
 
         logger.info(
-            "Removed workspace MCP source '{}'",
+            "Removed MCP source '{}'",
             path,
         )
 
     # ------------------------------------------------------------------
-    # Workspace local reload
+    # Local source reload
     # ------------------------------------------------------------------
 
     async def _reload_local_source(
@@ -1641,27 +1668,13 @@ class ProviderRuntime:
         )
 
         if existing is not None:
-            if (
-                existing.spec.origin
-                == "builtin"
-            ):
-                raise ValueError(
-                    f"Workspace local tool "
-                    f"'{provider_name}' cannot "
-                    f"override builtin tool provider"
-                )
-
             source = Path(
                 existing.spec.source
             ).resolve()
 
-            if (
-                existing.spec.origin
-                == "workspace"
-                and source != path
-            ):
+            if source != path:
                 raise ValueError(
-                    f"Workspace local tool "
+                    f"Local tool "
                     f"'{provider_name}' is already "
                     f"provided by {source}"
                 )
@@ -1671,7 +1684,6 @@ class ProviderRuntime:
                 name=provider_name,
                 file=path,
                 source=str(path),
-                origin="workspace",
             )
         )
 
@@ -1733,7 +1745,7 @@ class ProviderRuntime:
         ] = imported_name
 
         logger.info(
-            "Loaded workspace local tool source '{}': {}",
+            "Loaded local tool source '{}': {}",
             path,
             provider_name,
         )
@@ -1759,18 +1771,6 @@ class ProviderRuntime:
             )
 
             if provider is None:
-                continue
-
-            if (
-                provider.spec.origin
-                != "workspace"
-            ):
-                continue
-
-            if (
-                provider.spec.kind
-                != PROVIDER_KIND_LOCAL
-            ):
                 continue
 
             if Path(
@@ -1801,7 +1801,7 @@ class ProviderRuntime:
         )
 
         logger.info(
-            "Removed workspace local tool source '{}'",
+            "Removed local tool source '{}'",
             path,
         )
 
@@ -1819,11 +1819,7 @@ class ProviderRuntime:
         It only tells worker tasks when they should stop.
         """
         try:
-            await self._load_builtin_config()
-
-            self._load_builtin_tools()
-
-            await self._scan_workspace()
+            await self._scan_sources()
 
             if (
                 self._startup_future is not None
@@ -1837,11 +1833,11 @@ class ProviderRuntime:
                 try:
                     await self._reap_dead_workers()
 
-                    await self._scan_workspace()
+                    await self._scan_sources()
 
                 except Exception:
                     logger.exception(
-                        "Provider workspace reconciliation failed"
+                        "Provider source reconciliation failed"
                     )
 
                 try:
@@ -1887,7 +1883,6 @@ class ProviderRuntime:
 
 
 __all__ = [
-    "BUILTIN_TOOLS",
     "Provider",
     "ProviderRuntime",
     "ProviderSpec",

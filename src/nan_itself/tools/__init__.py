@@ -3,13 +3,11 @@ Tools package public surface.
 
 Layering (dependencies point downward only):
 
-    view ─┐
-    server ├─ runtime ──> provider <── { mcp, local }
-          │                   │             │
-          └────────────────> results <── spec
+    server ──> runtime ──> provider <── { mcp, local }
+                  │             │
+                  └──> results <── spec
 
         watcher: hot-reload bookkeeping used by runtime
-        builtin: built-in registration consumed by runtime
 
 Import from this package, never from sibling modules.
 """
@@ -23,7 +21,6 @@ from .provider import (
     Provider,
 )
 from .runtime import (
-    BUILTIN_TOOLS,
     ProviderRuntime,
 )
 from .server import (
@@ -36,13 +33,7 @@ from .spec import (
     PROVIDER_KIND_LOCAL,
     PROVIDER_KIND_MCP,
     ProviderKind,
-    ProviderOrigin,
     ProviderSpec,
-)
-from .view import (
-    ROUTE_TOOL_ARGUMENT,
-    ROUTE_TOOL_NAME,
-    AgentToolView,
 )
 
 __all__ = [
@@ -54,7 +45,6 @@ __all__ = [
     "Provider",
     "ProviderSpec",
     "ProviderKind",
-    "ProviderOrigin",
     "PROVIDER_KIND_MCP",
     "PROVIDER_KIND_LOCAL",
     "LOCAL_TOOL_HEADER",
@@ -62,11 +52,6 @@ __all__ = [
     "DEFAULT_TOOL_TIMEOUT",
     # runtime
     "ProviderRuntime",
-    "BUILTIN_TOOLS",
-    # exposure
-    "AgentToolView",
-    "ROUTE_TOOL_NAME",
-    "ROUTE_TOOL_ARGUMENT",
     # standalone server shell
     "MCPFacade",
 ]

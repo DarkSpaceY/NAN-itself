@@ -1,0 +1,5 @@
+name: prolog
+command: npx
+args:
+  - "--yes"
+  - "@vpursuit/swipl-mcp-server@2.0.6"

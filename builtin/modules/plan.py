@@ -1,4 +1,4 @@
-# @builtin
+# @module
 
 """
 Plan: the goal-nesting stack as an autonomous builtin Module.
@@ -1002,10 +1002,8 @@ class PlanModule(Module):
         if record.depth > 0:
             lines.append(f"(子代理 depth={record.depth})")
 
-        if record.task and record.task != record.user_input:
+        if record.task and record.depth > 0:
             lines.append(f"任务: {record.task[:200]}")
-
-        lines.append(f"用户: {record.user_input[:300]}")
 
         if record.reply:
             lines.append(

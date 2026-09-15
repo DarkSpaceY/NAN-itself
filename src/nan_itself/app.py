@@ -12,11 +12,6 @@ from typing import Any
 from loguru import logger
 
 from .agent.core import CoreAgent
-from .agent.loop import (
-    AgentLoop,
-    DEFAULT_TURN_GRACE,
-    Inbox,
-)
 from .config import get_settings
 from .events import EventBus
 from .gateway import Gateway
@@ -174,44 +169,6 @@ async def run_agent_process() -> None:
         tool_timeout=settings.providers.tool_timeout,
     )
 
-    from .modules.builtin import (
-        MemoryModule,
-        PlanModule,
-    )
-
-    builtin_modules: tuple[type, ...] = (
-        MemoryModule,
-        PlanModule,
-    )
-
-    # Hearing is hardware-dependent; the composition root decides
-    # whether it mounts at all.
-    if os.getenv(
-        "NAN_AUDIO_ENABLED",
-        "1",
-    ) != "0":
-        from .modules.builtin.audio import (
-            AudioModule,
-        )
-        from .modules.builtin.network import (
-            NetworkModule,
-        )
-        from .modules.builtin.system import (
-            SystemModule,
-        )
-
-        builtin_modules = (
-            MemoryModule,
-            PlanModule,
-            AudioModule,
-            SystemModule,
-            NetworkModule,
-        )
-
-        logger.info(
-            "audio module enabled"
-        )
-
     bus = EventBus(
         history_limit=settings.events.history_limit,
         subscriber_queue_size=(
@@ -221,12 +178,16 @@ async def run_agent_process() -> None:
 
     modules = ModuleFacade(
         llm=llm,
-        builtin_modules=builtin_modules,
         retry_interval=settings.modules.retry_interval,
         scan_interval=settings.modules.scan_interval,
     )
 
-    skills = SkillRuntime()
+    skills = SkillRuntime(
+        resource_char_limit=(
+            settings.skills.resource_char_limit
+        ),
+        script_timeout=settings.skills.script_timeout,
+    )
 
     persona_path = (
         Path(__file__).resolve().parents[2]
@@ -300,34 +261,26 @@ async def run_agent_process() -> None:
         agent = CoreAgent(
             llm=llm,
             modules=modules,
-            providers=providers,
+            tools=providers,
             skills=skills,
             persona_source=read_persona,
             bus=bus,
             max_subagent_depth=(
                 settings.agent.max_subagent_depth
             ),
+            history_char_limit=(
+                settings.agent.history_char_limit
+            ),
+            turn_grace=(
+                settings.runtime.turn.grace
+            ),
+            backoff=(
+                settings.runtime.retry.backoff
+            ),
         )
 
-        inbox = Inbox(
-            maxsize=settings.runtime.inbox.max_size,
-        )
-
-        agent.agent_runtime.set_interrupt_event(
-            inbox.wake_event(),
-        )
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            turn_grace=settings.runtime.turn.grace,
-            backoff=settings.runtime.retry.backoff,
-        )
-
-        stop_received = asyncio.Event()
-
-        loop_task = asyncio.create_task(
-            loop.run_forever(),
+        agent_task = asyncio.create_task(
+            agent.run_forever(),
             name="agent-loop",
         )
 
@@ -341,7 +294,7 @@ async def run_agent_process() -> None:
             text: str,
             mid: str | None = None,
         ) -> None:
-            # 唯一的接收点：进入 Inbox 的同时立刻回显，
+            # 唯一的接收点：进入 Inbox 模块的同时立刻回显，
             # 用户消息不因 sleep/长回合而“消失”。
             if mid:
                 if mid in seen_mids:
@@ -362,7 +315,15 @@ async def run_agent_process() -> None:
                             None,
                         )
 
-            inbox.put(text)
+            inbox = modules.get("inbox")
+
+            if inbox is None:
+                logger.warning(
+                    "Inbox module not running; input dropped"
+                )
+
+            else:
+                inbox.put(text)
 
             if text.strip():
                 echo: dict[str, Any] = {
@@ -413,14 +374,16 @@ async def run_agent_process() -> None:
             name="stdin-reader",
         )
 
+        stop_received = asyncio.Event()
+
         def _request_stop() -> None:
             logger.info(
                 "Stop signal received; grace {}s "
                 "for the current turn",
-                DEFAULT_TURN_GRACE,
+                agent.turn_grace,
             )
 
-            loop.request_stop()
+            agent.request_stop()
             stop_received.set()
 
         for sig in (
@@ -473,10 +436,10 @@ async def run_agent_process() -> None:
         # Stop accepting / processing agent work.
         # ----------------------------------------------------------
 
-        if loop_task is not None:
-            if not loop_task.done():
+        if agent_task is not None:
+            if not agent_task.done():
                 try:
-                    await loop_task
+                    await agent_task
 
                 except asyncio.CancelledError:
                     logger.debug(

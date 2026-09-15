@@ -1,12 +1,24 @@
 """
 Step engine: how ANY agent (main or sub) thinks for one turn.
 
-Depth-aware behaviour comes exclusively from RolePolicy; actions
-come exclusively from the verb registry. This module has no
-concept of a "main agent".
+A turn is exactly ONE cycle of three phases:
 
-A turn ends when the model produces plain text, raises, or the
-process is stopping — there is no step cap.
+    observation   one user message carrying ambient Module
+                  context (the inbox included); a subagent's
+                  task is appended the same way
+    model call    the model sees [system, *history, *turn]
+    result        plain text ends the turn; tool calls are run,
+                  their results appended, and the turn ends --
+                  the caller starts the next turn
+
+Every agent is identical; actions come exclusively from the verb
+registry. There is no in-engine loop: after tool calls the next
+observation is rebuilt (fresh modules, fresh inbox), which is
+what keeps the message prefix cacheable.
+
+`history` is owned by the caller (the main agent keeps it across
+turns; spawned agents pass an empty list). The engine never
+mutates it; this turn's messages are returned in AgentResult.
 """
 
 from __future__ import annotations
@@ -16,9 +28,8 @@ import json
 import os
 import time
 import uuid
-from typing import Any, Callable
+from typing import Callable
 
-import mcp.types as mcp_types
 from loguru import logger
 
 from .model import (
@@ -26,31 +37,21 @@ from .model import (
     AgentTurn,
 )
 from .prompts import (
-    build_messages,
-    format_skill_section,
-    render_running_subagents,
+    build_observation,
+    build_system,
 )
 from .reports import (
-    collect_finished_children,
     format_child_report,
 )
-from .role import (
-    RolePolicy,
-)
 from .verbs import (
-    ACTIVATE_SKILL_TOOL_NAME,
-    DISPATCH_SUBAGENT_TOOL_NAME,
+    INVOKE_SKILL_TOOL_NAME,
+    INVOKE_TOOL_TOOL_NAME,
+    SPAWN_TOOL_NAME,
     VERBS,
     ExecutionState,
 )
 from ..modules import (
     TurnRecord,
-)
-from ..skills import (
-    Skill,
-)
-from ..tools import (
-    AgentToolView,
 )
 from ..events import (
     StreamSink,
@@ -73,13 +74,13 @@ class StepEngine:
         *,
         llm,
         modules,
-        providers,
+        tools,
         skills,
         agent_runtime,
     ) -> None:
         self.llm = llm
         self.modules = modules
-        self.providers = providers
+        self.tools = tools
         self.skills = skills
         self.agent_runtime = agent_runtime
 
@@ -87,9 +88,8 @@ class StepEngine:
         self,
         *,
         context,
-        user_input: str,
         persona: str,
-        seed_reports: list[str] | None = None,
+        history: list[Message],
         report_sink: Callable[
             [list[str]], None
         ]
@@ -99,11 +99,6 @@ class StepEngine:
         started_wall = time.time()
 
         state = ExecutionState(
-            active_skill=(
-                context.skill
-                if isinstance(context.skill, Skill)
-                else None
-            ),
             persona=persona,
         )
 
@@ -111,7 +106,6 @@ class StepEngine:
             turn_id=uuid.uuid4().hex,
             agent_hash=context.agent_hash,
             depth=context.depth,
-            user_input=user_input,
             data=context.world,
             task=context.task,
         )
@@ -174,6 +168,11 @@ class StepEngine:
                 note=f"{duration:.1f}s",
             )
 
+        # ----------------------------------------------------------
+        # Observation: the whole world as ONE user message.
+        # A subagent's task rides along as its own part.
+        # ----------------------------------------------------------
+
         ambient_context = (
             await self.modules.query_snapshot(
                 turn,
@@ -189,152 +188,115 @@ class StepEngine:
             )
         )
 
-        provider_view = AgentToolView(
-            self.providers
+        system_message = build_system(
+            persona
         )
 
-        current_messages: list[Message] = [
-            _user_message(report)
-            for report in (
-                seed_reports or []
+        turn_messages: list[Message] = [
+            build_observation(
+                ambient_context=ambient_context,
+                task=(
+                    context.task
+                    if context.depth > 0
+                    else None
+                ),
             )
         ]
-
-        current_messages.append(
-            _user_message(user_input)
-        )
 
         reply_text: str | None = None
         error_text: str | None = None
 
         try:
-            while True:
-                reports = (
-                    await collect_finished_children(
-                        state.children
+            response = await self._generate(
+                LLMRequest(
+                    messages=[
+                        system_message,
+                        *history,
+                        *turn_messages,
+                    ],
+                    tools=self._tool_definitions(),
+                ),
+                sink=sink,
+            )
+
+            # --------------------------------------------------
+            # Plain text: the turn is over.
+            # --------------------------------------------------
+
+            if not response.tool_calls:
+                if not (
+                    response.content or ""
+                ).strip():
+                    logger.warning(
+                        "[turn:{}] empty reply "
+                        "(finish={})",
+                        context.agent_hash[:8],
+                        response.finish_reason,
+                    )
+
+                turn_messages.append(
+                    _assistant_message(
+                        response.content or ""
                     )
                 )
 
-                for report in reports:
-                    current_messages.append(
-                        _user_message(report)
-                    )
-
-                skill_section = (
-                    format_skill_section(
-                        state.active_skill,
-                        self.skills.catalog(),
-                    )
-                    if RolePolicy.injects_skills_section(
-                        context.depth
-                    )
-                    else None
+                reply_text = (
+                    response.content or ""
                 )
 
-                request_messages = build_messages(
-                    persona=persona,
-                    skill_section=skill_section,
-                    ambient_context=ambient_context,
-                    current=current_messages,
-                    running_subagents=(
-                        render_running_subagents(
-                            [
-                                child
-                                for child in state.children
-                                if not child.reported
-                            ]
-                        )
+                return AgentResult(
+                    content=reply_text,
+                    messages=tuple(
+                        turn_messages
+                    ),
+                    response=response,
+                )
+
+            # --------------------------------------------------
+            # Results: run every call, append them.
+            # The next turn (new observation) is the
+            # caller's business.
+            # --------------------------------------------------
+
+            turn_messages.append(
+                _assistant_message_with_calls(
+                    response
+                )
+            )
+
+            for call in response.tool_calls:
+                logger.info(
+                    "[turn:{}] tool {} {}",
+                    context.agent_hash[:8],
+                    call.name,
+                    json.dumps(
+                        call.arguments
                     ),
                 )
 
-                tool_definitions = (
-                    await self._tool_definitions(
-                        provider_view=provider_view,
-                        depth=context.depth,
+                result_text = (
+                    await self._run_call(
+                        context=context,
+                        state=state,
+                        call=call,
+                        sink=sink,
                     )
                 )
 
-                if (
-                    os.getenv(
-                        "NAN_TRACE_MESSAGES"
-                    )
-                    == "1"
-                ):
-                    logger.debug(
-                        "[turn:{}] system:\n{}",
-                        context.agent_hash[:8],
-                        request_messages[0].content,
-                    )
-
-                response = await self._generate(
-                    LLMRequest(
-                        messages=request_messages,
-                        tools=tool_definitions,
-                    ),
-                    sink=sink,
-                )
-
-                if not response.tool_calls:
-                    if not (
-                        response.content or ""
-                    ).strip():
-                        logger.warning(
-                            "[turn:{}] empty reply "
-                            "(finish={})",
-                            context.agent_hash[:8],
-                            response.finish_reason,
-                        )
-
-                    current_messages.append(
-                        _assistant_message(
-                            response.content or ""
-                        )
-                    )
-
-                    reply_text = (
-                        response.content or ""
-                    )
-
-                    return AgentResult(
-                        content=reply_text,
-                        messages=tuple(
-                            current_messages
-                        ),
-                        response=response,
-                    )
-
-                current_messages.append(
-                    _assistant_message_with_calls(
-                        response
+                turn_messages.append(
+                    _tool_message(
+                        call.id,
+                        result_text,
                     )
                 )
 
-                for call in response.tool_calls:
-                    logger.info(
-                        "[turn:{}] tool {} {}",
-                        context.agent_hash[:8],
-                        call.name,
-                        json.dumps(
-                            call.arguments
-                        ),
-                    )
-
-                    result_text = (
-                        await self._run_call(
-                            context=context,
-                            state=state,
-                            provider_view=provider_view,
-                            call=call,
-                            sink=sink,
-                        )
-                    )
-
-                    current_messages.append(
-                        _tool_message(
-                            call.id,
-                            result_text,
-                        )
-                    )
+            return AgentResult(
+                content=None,
+                messages=tuple(
+                    turn_messages
+                ),
+                response=response,
+            )
 
         except asyncio.CancelledError:
             error_text = "cancelled"
@@ -353,7 +315,6 @@ class StepEngine:
                     parent_hash=context.parent_hash,
                     depth=context.depth,
                     task=context.task,
-                    user_input=user_input,
                     world=context.world,
                     reply=reply_text,
                     error=error_text,
@@ -370,9 +331,6 @@ class StepEngine:
 
             if (
                 pending
-                and RolePolicy.archives_orphan_reports(
-                    context.depth
-                )
                 and report_sink is not None
             ):
                 task = asyncio.create_task(
@@ -398,7 +356,6 @@ class StepEngine:
         *,
         context,
         state: ExecutionState,
-        provider_view: AgentToolView,
         call,
         sink: StreamSink | None = None,
     ) -> str:
@@ -408,18 +365,21 @@ class StepEngine:
         if sink is not None:
             if (
                 call.name
-                == DISPATCH_SUBAGENT_TOOL_NAME
+                == SPAWN_TOOL_NAME
             ):
                 kind = "agent"
             elif (
                 call.name
-                == ACTIVATE_SKILL_TOOL_NAME
+                == INVOKE_SKILL_TOOL_NAME
             ):
                 kind = "skill"
-            elif call.name in VERBS:
-                kind = "verb"
-            else:
+            elif (
+                call.name
+                == INVOKE_TOOL_TOOL_NAME
+            ):
                 kind = "tool"
+            else:
+                kind = "verb"
 
             record_id = sink.record_started(
                 kind=kind,
@@ -439,54 +399,20 @@ class StepEngine:
                 call.name
             )
 
-            if verb is not None:
-                if not verb.visible(
-                    context.depth,
-                    RolePolicy,
-                ):
-                    result_text = (
-                        RolePolicy.hidden_verb_reply(
-                            call.name,
-                        )
-                    )
-                else:
-                    result_text = (
-                        await verb.execute(
-                            call=call,
-                            context=context,
-                            state=state,
-                            engine=self,
-                        )
-                    )
-
-                if (
-                    call.name
-                    == ACTIVATE_SKILL_TOOL_NAME
-                    and sink is not None
-                    and isinstance(
-                        state.active_skill,
-                        Skill,
-                    )
-                ):
-                    for line in _skill_structure(
-                        state.active_skill,
-                    ):
-                        sink.record_detail(
-                            record_id,
-                            line,
-                        )
-
-            else:
-                result = (
-                    await provider_view.call_tool(
-                        call.name,
-                        call.arguments,
-                    )
+            if verb is None:
+                result_text = (
+                    f"Unknown action '{call.name}'. "
+                    f"Available actions: "
+                    f"{', '.join(VERBS)}."
                 )
 
+            else:
                 result_text = (
-                    _serialize_tool_result(
-                        result
+                    await verb.execute(
+                        call=call,
+                        context=context,
+                        state=state,
+                        engine=self,
                     )
                 )
 
@@ -614,35 +540,13 @@ class StepEngine:
             finish_reason=finish_reason,
         )
 
-    async def _tool_definitions(
+    def _tool_definitions(
         self,
-        *,
-        provider_view: AgentToolView,
-        depth: int = 0,
-    ) -> list:
-        definitions = [
-            ToolDefinition(
-                name=tool.name,
-                description=(
-                    tool.description or ""
-                ),
-                input_schema=tool.inputSchema,
-            )
-            for tool in (
-                await provider_view.list_tools()
-            )
+    ) -> list[ToolDefinition]:
+        return [
+            verb.definition()
+            for verb in VERBS.values()
         ]
-
-        for verb in VERBS.values():
-            if verb.visible(
-                depth,
-                RolePolicy,
-            ):
-                definitions.append(
-                    verb.definition()
-                )
-
-        return definitions
 
     async def _archive_children(
         self,
@@ -665,15 +569,6 @@ class StepEngine:
 # ----------------------------------------------------------------------
 # Small helpers
 # ----------------------------------------------------------------------
-
-
-def _user_message(
-    content: str,
-) -> Message:
-    return Message(
-        role="user",
-        content=content,
-    )
 
 
 def _assistant_message(
@@ -711,22 +606,6 @@ def _tool_message(
     )
 
 
-def _compact_args(
-    arguments: Any,
-) -> str:
-    if not arguments:
-        return ""
-
-    try:
-        return json.dumps(
-            arguments,
-            ensure_ascii=False,
-        )
-
-    except Exception:
-        return str(arguments)[:96]
-
-
 def _pretty_args(
     arguments: Any,
 ) -> list[str]:
@@ -752,52 +631,6 @@ def _result_lines(
     return (
         (text or "").splitlines()
     )
-
-
-def _skill_structure(
-    skill: Any,
-) -> list[str]:
-    meta = skill.metadata
-
-    lines = [
-        f"name: {meta.name}",
-        f"description: {meta.description}",
-        f"origin: {meta.origin}",
-    ]
-
-    resources = (
-        getattr(
-            skill,
-            "resources",
-            None,
-        )
-        or []
-    )
-
-    if resources:
-        lines.append(
-            f"resources: {len(resources)}"
-        )
-
-        for path in resources:
-            lines.append(
-                f"  · {path}"
-            )
-
-    body = (
-        skill.instructions or ""
-    ).strip()
-
-    if body:
-        lines.append(
-            "── body ──"
-        )
-
-        lines.extend(
-            body.splitlines()
-        )
-
-    return lines
 
 
 def _compact_result(
@@ -855,40 +688,3 @@ def _compact_result(
             pass
 
     return flat
-
-
-def _serialize_tool_result(
-    result: Any,
-) -> str:
-    if isinstance(
-        result,
-        mcp_types.CallToolResult,
-    ):
-        try:
-            dumped = result.model_dump(
-                mode="json"
-            )
-
-            return json.dumps(
-                dumped,
-                ensure_ascii=False,
-            )
-
-        except Exception:
-            return str(result)
-
-    if isinstance(
-        result,
-        str,
-    ):
-        return result
-
-    try:
-        return json.dumps(
-            result,
-            ensure_ascii=False,
-            default=str,
-        )
-
-    except Exception:
-        return str(result)

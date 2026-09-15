@@ -14,9 +14,6 @@ from ..modules import (
     loading as _loading,
     persistence as _persistence,
 )
-from .builtin import (
-    BUILTIN_MODULES,
-)
 from .model import (
     DataSpace,
     DuplicateModuleError,
@@ -40,8 +37,8 @@ class Facade:
     Runtime supervisor for Modules.
 
     Responsibilities:
-        - builtin Module registration
-        - workspace Module discovery
+        - builtin and workspace Module discovery (same
+          hot-reload logic per root)
         - Python Module loading
         - dependency graph
         - lifecycle supervision
@@ -124,9 +121,7 @@ class Facade:
         self,
         workspace_modules: str | Path | None = None,
         *,
-        builtin_modules: (
-            tuple[type[Module], ...] | None
-        ) = None,
+        builtin_modules_dir: str | Path | None = None,
         data_dir: str | Path = "./data/modules",
         retry_interval: float = 1.0,
         scan_interval: float = 1.0,
@@ -138,6 +133,22 @@ class Facade:
             Path(__file__)
             .resolve()
             .parents[3]
+        )
+
+        # Builtin and workspace module files live in parallel
+        # directory layouts and are scanned with exactly the same
+        # hot-reload logic. Deleting a source file removes its
+        # Module.
+        self.builtin_modules_dir = (
+            Path(
+                builtin_modules_dir
+            ).resolve()
+            if builtin_modules_dir is not None
+            else (
+                project_root
+                / "builtin"
+                / "modules"
+            ).resolve()
         )
 
         self.workspace_modules = (
@@ -162,12 +173,6 @@ class Facade:
 
         self.dataspace_dir = (
             self.data_dir / "dataspace"
-        )
-
-        self.builtin_modules = (
-            BUILTIN_MODULES
-            if builtin_modules is None
-            else tuple(builtin_modules)
         )
 
         self.retry_interval = (
@@ -232,11 +237,9 @@ class Facade:
 
         self._ensure_data_dirs()
 
-        # Builtins are concrete classes and are loaded once.
-        self._load_builtins()
-
-        # Workspace classes are discovered by Facade itself.
-        await self._scan_workspace_modules()
+        # Builtin and workspace module files share one identical
+        # hot-reload discovery path.
+        await self._scan_modules()
 
         # Graph construction is pure bookkeeping.
         # It must not re-bind already existing instances.
@@ -295,6 +298,31 @@ class Facade:
     # ==================================================================
     # Agent / turn snapshots
     # ==================================================================
+
+    def get(
+        self,
+        module_id: str,
+    ):
+        """
+        Return the RUNNING instance of a Module, or None.
+
+        This is how the composition root reaches special Modules
+        (e.g. the inbox) without importing them.
+        """
+        record = self.modules.get(
+            module_id
+        )
+
+        if record is None:
+            return None
+
+        if (
+            record.state
+            is not ModuleState.RUNNING
+        ):
+            return None
+
+        return record.instance
 
     def snapshot(
         self,
@@ -550,23 +578,22 @@ class Facade:
     # Discovery / loading
     # ==================================================================
 
-    def _load_builtins(
+    async def _scan_modules(
         self,
     ) -> None:
-        for cls in self.builtin_modules:
-            if cls.id in self.modules:
-                continue
+        await self._scan_module_root(
+            self.builtin_modules_dir
+        )
 
-            self._register_module_class(
-                cls,
-                source="<builtin>",
-                origin="builtin",
-            )
+        await self._scan_module_root(
+            self.workspace_modules
+        )
 
-    async def _scan_workspace_modules(
+    async def _scan_module_root(
         self,
+        root: Path,
     ) -> None:
-        self.workspace_modules.mkdir(
+        root.mkdir(
             parents=True,
             exist_ok=True,
         )
@@ -574,7 +601,7 @@ class Facade:
         current_files = {
             path.resolve()
             for path in (
-                self.workspace_modules.rglob(
+                root.rglob(
                     "*.py"
                 )
             )
@@ -587,7 +614,11 @@ class Facade:
         known_files = {
             Path(record.source).resolve()
             for record in self.modules.values()
-            if record.origin == "workspace"
+            if Path(
+                record.source
+            ).resolve().is_relative_to(
+                root
+            )
         }
 
         # --------------------------------------------------------------
@@ -602,9 +633,7 @@ class Facade:
                     item
                     for item in self.modules.values()
                     if (
-                        item.origin
-                        == "workspace"
-                        and Path(
+                        Path(
                             item.source
                         ).resolve()
                         == removed
@@ -614,7 +643,7 @@ class Facade:
             )
 
             if record is not None:
-                await self._remove_workspace_record(
+                await self._remove_record(
                     record
                 )
 
@@ -675,7 +704,7 @@ class Facade:
             )
 
             try:
-                await self._load_or_reload_workspace_file(
+                await self._load_or_reload_file(
                     path,
                     fingerprint,
                 )
@@ -686,7 +715,7 @@ class Facade:
                 ] = exc
 
                 logger.exception(
-                    f"Failed to load workspace Module: "
+                    f"Failed to load Module file: "
                     f"{path}"
                 )
 
@@ -708,7 +737,7 @@ class Facade:
             path
         )
 
-    async def _load_or_reload_workspace_file(
+    async def _load_or_reload_file(
         self,
         path: Path,
         fingerprint: tuple[int, int],
@@ -721,7 +750,7 @@ class Facade:
             cls,
             imported_name,
             _,
-        ) = self._import_workspace_class(
+        ) = self._import_module_file(
             path
         )
 
@@ -733,7 +762,6 @@ class Facade:
             self._register_module_class(
                 cls,
                 source=str(path),
-                origin="workspace",
                 source_fingerprint=(
                     fingerprint
                 ),
@@ -771,7 +799,7 @@ class Facade:
             fingerprint=fingerprint,
         )
 
-    def _import_workspace_class(
+    def _import_module_file(
         self,
         path: Path,
     ) -> tuple[
@@ -806,7 +834,6 @@ class Facade:
         cls: type[Module],
         *,
         source: str,
-        origin: str,
         source_fingerprint: (
             tuple[int, int]
             | None
@@ -857,7 +884,6 @@ class Facade:
             instance=instance,
             data=data,
             source=source,
-            origin=origin,
             generation=0,
             source_fingerprint=(
                 source_fingerprint
@@ -880,10 +906,7 @@ class Facade:
             record
         )
 
-        if (
-            origin == "workspace"
-            and source_fingerprint is not None
-        ):
+        if source_fingerprint is not None:
             self._workspace_fingerprints[
                 Path(
                     source
@@ -909,9 +932,7 @@ class Facade:
 
         for record in self.modules.values():
             if (
-                record.origin
-                == "workspace"
-                and Path(
+                Path(
                     record.source
                 ).resolve()
                 == path
@@ -988,7 +1009,7 @@ class Facade:
 
             if now >= next_scan:
                 try:
-                    await self._scan_workspace_modules()
+                    await self._scan_modules()
 
                     # Pure graph reconstruction.
                     self._rebuild_dependency_graph(
@@ -1251,12 +1272,12 @@ class Facade:
     # Hot Reload
     # ==================================================================
 
-    async def _remove_workspace_record(
+    async def _remove_record(
         self,
         record: ModuleRecord,
     ) -> None:
         logger.info(
-            f"Removing workspace Module: "
+            f"Removing Module: "
             f"{record.id}"
         )
 

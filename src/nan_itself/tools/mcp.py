@@ -6,18 +6,9 @@ Owns everything specific to stdio MCP servers:
     - establishing connections (stdio client + session)
     - parsing MCP provider configuration from YAML
 
-Builtin MCP:
-    One builtin config file may contain multiple providers.
-
-Workspace MCP:
-    Exactly one workspace file maps to exactly one provider.
-
-This distinction is intentional:
-
-    builtin configuration is static composition metadata
-
-    workspace configuration is a hot-reloadable entity and therefore
-    follows the strict file <-> provider 1:1 rule.
+One YAML file maps to exactly one provider (name defaults to the
+file stem). This keeps every configuration file a hot-reloadable
+entity: builtin and workspace configs follow the same rule.
 """
 
 from __future__ import annotations
@@ -40,7 +31,6 @@ from mcp.client.stdio import stdio_client
 from .provider import Provider
 from .spec import (
     PROVIDER_KIND_MCP,
-    ProviderOrigin,
     ProviderSpec,
 )
 
@@ -178,74 +168,16 @@ def load_yaml(
 
 
 # ============================================================================
-# Builtin MCP configuration
+# Provider configuration
 # ============================================================================
 
 
-def parse_builtin_config(
+def parse_config(
     config: dict[str, Any],
     source: Path,
 ) -> list[ProviderSpec]:
     """
-    Builtin configuration intentionally supports multiple MCP
-    providers in one static config file:
-
-        mcp_servers:
-          github:
-            command: npx
-          playwright:
-            command: npx
-
-    Builtins are never hot-reloaded, so the workspace 1:1 entity
-    rule does not apply here.
-    """
-    servers = config.get(
-        "mcp_servers",
-        {},
-    )
-
-    if not isinstance(
-        servers,
-        dict,
-    ):
-        raise ValueError(
-            f"'mcp_servers' must be a mapping: {source}"
-        )
-
-    specs: list[ProviderSpec] = []
-
-    for name, raw in servers.items():
-        if not isinstance(
-            raw,
-            dict,
-        ):
-            raise ValueError(
-                f"Invalid MCP config for '{name}'"
-            )
-
-        specs.append(
-            spec_from_mapping(
-                name=str(name),
-                raw=raw,
-                source=str(source),
-                origin="builtin",
-            )
-        )
-
-    return specs
-
-
-# ============================================================================
-# Workspace MCP configuration
-# ============================================================================
-
-
-def parse_workspace_config(
-    config: dict[str, Any],
-    source: Path,
-) -> list[ProviderSpec]:
-    """
-    Parse exactly ONE workspace MCP provider.
+    Parse exactly ONE MCP provider.
 
     Supported form:
 
@@ -256,14 +188,13 @@ def parse_workspace_config(
 
     `name` is optional. When omitted, source.stem is used.
 
-    Workspace files are hot-reloadable entities and therefore obey
-    the strict:
+    Every configuration file obeys the strict:
 
         one file <-> one provider
 
-    rule.
+    rule so it can be hot-reloaded as a single entity.
 
-    The old multi-provider form:
+    The multi-provider form:
 
         mcp_servers:
           github:
@@ -271,13 +202,14 @@ def parse_workspace_config(
           playwright:
             ...
 
-    is intentionally rejected for workspace configuration.
+    is rejected: split it into one file per provider.
     """
     if "mcp_servers" in config:
         raise ValueError(
-            f"Workspace MCP source '{source}' must define "
-            "exactly one provider; the 'mcp_servers' mapping "
-            "is only supported by builtin MCP configuration."
+            f"MCP source '{source}' must define "
+            "exactly one provider; the 'mcp_servers' "
+            "mapping is not supported. Split it into "
+            "one file per provider."
         )
 
     name = config.get(
@@ -290,7 +222,7 @@ def parse_workspace_config(
         or not name
     ):
         raise ValueError(
-            f"Invalid workspace MCP name: {source}"
+            f"Invalid MCP name: {source}"
         )
 
     return [
@@ -298,7 +230,6 @@ def parse_workspace_config(
             name=name,
             raw=config,
             source=str(source),
-            origin="workspace",
         )
     ]
 
@@ -313,7 +244,6 @@ def spec_from_mapping(
     name: str,
     raw: dict[str, Any],
     source: str,
-    origin: ProviderOrigin,
 ) -> ProviderSpec:
     command = raw.get(
         "command"
@@ -383,5 +313,4 @@ def spec_from_mapping(
         env=env,
         cwd=cwd,
         source=source,
-        origin=origin,
     )

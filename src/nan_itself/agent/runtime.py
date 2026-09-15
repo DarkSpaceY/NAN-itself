@@ -24,10 +24,6 @@ class AgentContext:
     Runtime context owned by one Agent execution.
 
     `world` is shared by all Agents within the same dispatch tree.
-
-    `skill` is the Skill inherited by this execution when the context
-    is created. The context itself is immutable; current execution
-    Skill changes are represented by StepEngine's ExecutionState.
     """
 
     agent_hash: str
@@ -36,8 +32,6 @@ class AgentContext:
     depth: int
 
     task: str | None
-
-    skill: Any | None
 
     world: Mapping[str, Any]
 
@@ -178,12 +172,6 @@ class AgentRuntime:
         # Once shutdown starts, no new Subagent may be dispatched.
         self._stopping = False
 
-        # Set by the composition root: new-input wake signal used
-        # by sleep() so idle naps yield to pending messages.
-        self.interrupt_event: (
-            asyncio.Event | None
-        ) = None
-
     # ------------------------------------------------------------------
     # Root Agent
     # ------------------------------------------------------------------
@@ -192,7 +180,6 @@ class AgentRuntime:
         self,
         *,
         world: Mapping[str, Any] | None = None,
-        skill: Any | None = None,
         task: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> AgentContext:
@@ -215,7 +202,6 @@ class AgentRuntime:
             parent_hash=None,
             depth=0,
             task=task,
-            skill=skill,
             world=self._freeze_world(
                 world or {}
             ),
@@ -240,7 +226,6 @@ class AgentRuntime:
         *,
         task: str,
         worker: SubagentWorker,
-        skill: Any | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> SubagentHandle:
         """
@@ -249,15 +234,9 @@ class AgentRuntime:
         The new Subagent:
             - gets a new identity
             - inherits the parent's world snapshot
-            - inherits the explicitly supplied Skill when given
-            - otherwise inherits parent.skill
             - increments depth
 
         The resulting asyncio Task is owned by this AgentRuntime.
-
-        `skill=None` intentionally means "inherit parent Skill", so
-        callers that represent mutable current execution state should
-        pass the current Skill explicitly.
         """
         if self._stopping:
             raise RuntimeError(
@@ -287,11 +266,6 @@ class AgentRuntime:
             parent_hash=parent.agent_hash,
             depth=child_depth,
             task=task,
-            skill=(
-                skill
-                if skill is not None
-                else parent.skill
-            ),
             world=parent.world,
             metadata=MappingProxyType(
                 dict(metadata or {})
@@ -466,97 +440,21 @@ class AgentRuntime:
     # Waiting
     # ------------------------------------------------------------------
 
-    def set_interrupt_event(
-        self,
-        event: asyncio.Event | None,
-    ) -> None:
-        self.interrupt_event = event
-
     async def sleep(
         self,
         seconds: float,
-    ) -> tuple[float, bool]:
+    ) -> None:
         """
-        Sleep for `seconds`, OR until the interrupt event fires
-        (new input arrived).
-
-        Returns:
-
-            (waited_seconds, interrupted)
+        Sleep for `seconds`.
         """
         if seconds < 0:
             raise ValueError(
                 "seconds must be >= 0"
             )
 
-        event = self.interrupt_event
-
-        if event is None:
-            await asyncio.sleep(
-                seconds
-            )
-
-            return (
-                seconds,
-                False,
-            )
-
-        started = time.time()
-
-        sleeper = asyncio.create_task(
-            asyncio.sleep(
-                seconds
-            ),
-            name="agent-sleep",
+        await asyncio.sleep(
+            seconds
         )
-
-        waiter = asyncio.create_task(
-            event.wait(),
-            name="agent-sleep-interrupt",
-        )
-
-        try:
-            done, pending = await asyncio.wait(
-                {
-                    sleeper,
-                    waiter,
-                },
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            for task in pending:
-                task.cancel()
-
-            for task in pending:
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
-
-            return (
-                time.time() - started,
-                waiter in done,
-            )
-
-        except asyncio.CancelledError:
-            # If the parent Subagent itself is being cancelled,
-            # never leave helper sleep tasks behind.
-            for task in (
-                sleeper,
-                waiter,
-            ):
-                if not task.done():
-                    task.cancel()
-
-            await asyncio.gather(
-                sleeper,
-                waiter,
-                return_exceptions=True,
-            )
-
-            raise
 
     @staticmethod
     async def wait(

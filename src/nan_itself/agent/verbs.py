@@ -3,19 +3,22 @@ Agent verbs: the cognitive actions an agent can take.
 
 One registry, one protocol:
 
-    name                      literal tool name
-    definition()              JSON schema handed to the model
-    visible(context, policy)  role gate (RolePolicy decides)
-    execute(...)              performs the action, may mutate
-                              the execution state
+    name            literal tool name
+    definition()    JSON schema handed to the model
+    execute(...)    performs the action, may mutate
+                    the execution state
 
-The Main Agent simply never sees verbs whose visibility fails —
-Skills do not exist in its world.
+Every agent sees every verb. Tools and skills are NOT exposed to
+the model directly: they are reached only through these verbs,
+and their content therefore arrives as tool results.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+import json
+from typing import Any, ClassVar
+
+import mcp.types as mcp_types
 
 from .model import (
     ChildSubagent,
@@ -30,17 +33,22 @@ from ..utils.llm import (
     ToolDefinition,
 )
 
-if TYPE_CHECKING:
-    from .role import (
-        RolePolicy,
-    )
-
 
 SLEEP_TOOL_NAME = "sleep"
 
-DISPATCH_SUBAGENT_TOOL_NAME = "dispatch_subagent"
+SPAWN_TOOL_NAME = "spawn"
 
-ACTIVATE_SKILL_TOOL_NAME = "activate_skill"
+LIST_TOOLS_TOOL_NAME = "list_tools"
+
+SHOW_TOOL_TOOL_NAME = "show_tool"
+
+INVOKE_TOOL_TOOL_NAME = "invoke_tool"
+
+LIST_SKILLS_TOOL_NAME = "list_skills"
+
+SHOW_SKILL_TOOL_NAME = "show_skill"
+
+INVOKE_SKILL_TOOL_NAME = "invoke_skill"
 
 
 class ExecutionState:
@@ -54,13 +62,48 @@ class ExecutionState:
     def __init__(
         self,
         *,
-        active_skill: Any | None,
         persona: str,
     ) -> None:
-        self.active_skill = active_skill
         self.persona = persona
 
         self.children: list[ChildSubagent] = []
+
+
+def serialize_tool_result(
+    result: Any,
+) -> str:
+    if isinstance(
+        result,
+        mcp_types.CallToolResult,
+    ):
+        try:
+            dumped = result.model_dump(
+                mode="json"
+            )
+
+            return json.dumps(
+                dumped,
+                ensure_ascii=False,
+            )
+
+        except Exception:
+            return str(result)
+
+    if isinstance(
+        result,
+        str,
+    ):
+        return result
+
+    try:
+        return json.dumps(
+            result,
+            ensure_ascii=False,
+            default=str,
+        )
+
+    except Exception:
+        return str(result)
 
 
 class SleepVerb:
@@ -87,13 +130,6 @@ class SleepVerb:
             },
         )
 
-    def visible(
-        self,
-        depth: int,
-        policy: "RolePolicy",
-    ) -> bool:
-        return True
-
     async def execute(
         self,
         *,
@@ -118,35 +154,26 @@ class SleepVerb:
         if seconds < 0:
             return "'seconds' must be >= 0."
 
-        waited, interrupted = (
-            await engine.agent_runtime.sleep(
-                float(seconds)
-            )
-        )
+        waited = float(seconds)
 
-        if interrupted:
-            return (
-                f"Sleep interrupted after {waited:.1f}s: "
-                "new input arrived. End your turn now so it "
-                "can be processed."
-            )
+        await engine.agent_runtime.sleep(
+            waited
+        )
 
         return (
-            f"Waited {float(seconds):g} seconds."
+            f"Waited {waited:g} seconds."
         )
 
 
-class DispatchVerb:
-    name: ClassVar[str] = (
-        DISPATCH_SUBAGENT_TOOL_NAME
-    )
+class SpawnVerb:
+    name: ClassVar[str] = SPAWN_TOOL_NAME
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Dispatch a parallel Subagent to work "
-                "on a task. Dispatch several in the same "
+                "Spawn a parallel Subagent to work "
+                "on a task. Spawn several in the same "
                 "response when tasks are independent. "
                 "Each Subagent starts immediately and its "
                 "final report is delivered to this agent's "
@@ -167,13 +194,6 @@ class DispatchVerb:
             },
         )
 
-    def visible(
-        self,
-        depth: int,
-        policy: "RolePolicy",
-    ) -> bool:
-        return True
-
     async def execute(
         self,
         *,
@@ -186,22 +206,17 @@ class DispatchVerb:
 
         if not isinstance(task, str) or not task.strip():
             return (
-                "dispatch_subagent requires "
+                "spawn requires "
                 "a non-empty 'task'."
             )
 
         async def worker(
             child_context,
         ):
-            # The child inherits the CURRENT execution Skill.
-            #
-            # AgentContext itself is immutable, while the active
-            # Skill is mutable execution state. Therefore the current
-            # state.active_skill must be passed explicitly.
             return await engine.execute(
                 context=child_context,
-                user_input=task,
                 persona=state.persona,
+                history=[],
             )
 
         try:
@@ -209,7 +224,6 @@ class DispatchVerb:
                 context,
                 task=task,
                 worker=worker,
-                skill=state.active_skill,
             )
 
         except SubagentLimitError as exc:
@@ -226,7 +240,7 @@ class DispatchVerb:
         )
 
         return (
-            "Subagent dispatched.\n"
+            "Subagent spawned.\n"
             f"id: {child.id}\n"
             f"depth: {handle.depth}\n"
             "It runs in parallel; its report will be "
@@ -234,17 +248,58 @@ class DispatchVerb:
         )
 
 
-class ActivateSkillVerb:
-    name: ClassVar[str] = (
-        ACTIVATE_SKILL_TOOL_NAME
-    )
+class ListToolsVerb:
+    name: ClassVar[str] = LIST_TOOLS_TOOL_NAME
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Switch this Subagent's own Skill. The new "
-                "Skill takes effect from the next step."
+                "List the names of every available tool. "
+                "Tools are addressed as 'provider/tool'. "
+                "Use show_tool to inspect one and "
+                "invoke_tool to call one."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        try:
+            pairs = engine.tools.list_all_tools()
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+        if not pairs:
+            return "No tools are available."
+
+        return "\n".join(
+            f"{provider_name}/{tool.name}"
+            for provider_name, tool in pairs
+        )
+
+
+class ShowToolVerb:
+    name: ClassVar[str] = SHOW_TOOL_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Show the JSON definition of one tool "
+                "('provider/tool'): its description and "
+                "input schema."
             ),
             input_schema={
                 "type": "object",
@@ -252,23 +307,13 @@ class ActivateSkillVerb:
                     "name": {
                         "type": "string",
                         "description": (
-                            "The name of the Skill to "
-                            "activate."
+                            "Tool name as 'provider/tool'."
                         ),
                     },
                 },
                 "required": ["name"],
                 "additionalProperties": False,
             },
-        )
-
-    def visible(
-        self,
-        depth: int,
-        policy: "RolePolicy",
-    ) -> bool:
-        return policy.may_switch_skill(
-            depth
         )
 
     async def execute(
@@ -283,33 +328,372 @@ class ActivateSkillVerb:
 
         if not isinstance(name, str) or not name.strip():
             return (
-                "activate_skill requires 'name'. "
-                f"Available Skills: "
-                f"{', '.join(engine.skills.names())}"
+                "show_tool requires 'name' "
+                "(format 'provider/tool')."
             )
 
         try:
-            skill = engine.skills.activate(
-                name
+            resolved = (
+                await engine.tools.resolve_tool(
+                    name
+                )
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+        if resolved is None:
+            return (
+                f"Unknown tool '{name}'. "
+                "Use list_tools to see available tools."
+            )
+
+        provider, tool = resolved
+
+        definition = {
+            "name": (
+                f"{provider.spec.name}/{tool.name}"
+            ),
+            "description": (
+                tool.description or ""
+            ),
+            "inputSchema": tool.inputSchema,
+        }
+
+        return json.dumps(
+            definition,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+class InvokeToolVerb:
+    name: ClassVar[str] = INVOKE_TOOL_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Invoke one tool ('provider/tool') with "
+                "arguments matching its input schema. "
+                "Use show_tool first when the schema is "
+                "unknown."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Tool name as 'provider/tool'."
+                        ),
+                    },
+                    "arguments": {
+                        "type": "object",
+                        "description": (
+                            "Arguments for the tool."
+                        ),
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        name = call.arguments.get("name")
+
+        if not isinstance(name, str) or not name.strip():
+            return (
+                "invoke_tool requires 'name' "
+                "(format 'provider/tool')."
+            )
+
+        arguments = (
+            call.arguments.get("arguments")
+            or {}
+        )
+
+        if not isinstance(
+            arguments,
+            dict,
+        ):
+            return "'arguments' must be an object."
+
+        try:
+            resolved = (
+                await engine.tools.resolve_tool(
+                    name
+                )
+            )
+
+            if resolved is None:
+                return (
+                    f"Unknown tool '{name}'. "
+                    "Use list_tools to see available tools."
+                )
+
+            provider, tool = resolved
+
+            result = (
+                await engine.tools.call_tool(
+                    provider.spec.name,
+                    tool.name,
+                    arguments,
+                )
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+        return serialize_tool_result(
+            result
+        )
+
+
+class ListSkillsVerb:
+    name: ClassVar[str] = LIST_SKILLS_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "List every available Skill with its "
+                "description. Use show_skill to inspect "
+                "one and invoke_skill to read its "
+                "resources or run its scripts."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        catalog = engine.skills.catalog()
+
+        if not catalog:
+            return "No skills are available."
+
+        return "\n".join(
+            f"{metadata.name}: {metadata.description}"
+            for metadata in catalog
+        )
+
+
+class ShowSkillVerb:
+    name: ClassVar[str] = SHOW_SKILL_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Show one Skill's metadata, description "
+                "and the directory of resources it ships "
+                "(scripts / references / assets)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "The Skill name."
+                        ),
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        name = call.arguments.get("name")
+
+        if not isinstance(name, str) or not name.strip():
+            return "show_skill requires 'name'."
+
+        metadata = engine.skills.get_metadata(
+            name
+        )
+
+        if metadata is None:
+            return (
+                f"Unknown Skill '{name}'. "
+                "Use list_skills to see available skills."
+            )
+
+        lines = [
+            f"name: {metadata.name}",
+            f"description: {metadata.description}",
+            f"source: {metadata.source}",
+        ]
+
+        try:
+            resources = (
+                engine.skills.resource_paths(
+                    name
+                )
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+        for group in (
+            "scripts",
+            "references",
+            "assets",
+        ):
+            paths = resources.get(
+                group,
+                (),
+            )
+
+            if paths:
+                lines.append(
+                    f"{group}:"
+                )
+
+                lines.extend(
+                    f"  - {path}"
+                    for path in paths
+                )
+
+        return "\n".join(
+            lines
+        )
+
+
+class InvokeSkillVerb:
+    name: ClassVar[str] = INVOKE_SKILL_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Invoke one Skill resource. Paths under "
+                "scripts/ are executed with the given "
+                "arguments; any other resource is "
+                "returned as text."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "The Skill name."
+                        ),
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Resource path relative to "
+                            "the Skill root, e.g. "
+                            "'scripts/run.py' or "
+                            "'references/guide.md'."
+                        ),
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": (
+                            "Arguments for a script."
+                        ),
+                    },
+                },
+                "required": ["name", "path"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        name = call.arguments.get("name")
+
+        path = call.arguments.get("path")
+
+        args = (
+            call.arguments.get("args")
+            or []
+        )
+
+        if not isinstance(name, str) or not name.strip():
+            return "invoke_skill requires 'name'."
+
+        if not isinstance(path, str) or not path.strip():
+            return "invoke_skill requires 'path'."
+
+        if not isinstance(
+            args,
+            list,
+        ) or any(
+            not isinstance(
+                item,
+                str,
+            )
+            for item in args
+        ):
+            return "'args' must be a list of strings."
+
+        try:
+            result = (
+                await engine.skills.invoke(
+                    name,
+                    path,
+                    args,
+                )
             )
 
         except UnknownSkillError:
             return (
                 f"Unknown Skill '{name}'. "
-                f"Available Skills: "
-                f"{', '.join(engine.skills.names())}"
+                "Use list_skills to see available skills."
             )
 
-        state.active_skill = skill
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
 
-        return (
-            f"Skill '{skill.name}' activated. It takes "
-            "effect from your next step."
-        )
+        return result
 
 
 VERBS: dict[str, Any] = {
     SleepVerb.name: SleepVerb(),
-    DispatchVerb.name: DispatchVerb(),
-    ActivateSkillVerb.name: ActivateSkillVerb(),
+    SpawnVerb.name: SpawnVerb(),
+    ListToolsVerb.name: ListToolsVerb(),
+    ShowToolVerb.name: ShowToolVerb(),
+    InvokeToolVerb.name: InvokeToolVerb(),
+    ListSkillsVerb.name: ListSkillsVerb(),
+    ShowSkillVerb.name: ShowSkillVerb(),
+    InvokeSkillVerb.name: InvokeSkillVerb(),
 }

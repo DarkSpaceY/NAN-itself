@@ -143,7 +143,7 @@ class TurnRecord:
     """
     One completed agent execution: the full closed unit of a turn.
 
-    Seen side     -> user_input, world, depth / task / identity
+    Seen side     -> task, world, depth / identity
     Returned side -> reply on success, error otherwise
 
     Facade delivers one record per finished execution to every
@@ -155,8 +155,6 @@ class TurnRecord:
     depth: int
 
     task: str | None
-
-    user_input: str
 
     world: Mapping[str, Mapping[str, Any]]
 
@@ -284,7 +282,6 @@ class ModuleRecord:
     data: DataSpace
 
     source: str
-    origin: str  # "builtin" | "workspace"
 
     generation: int = 0
 
@@ -305,6 +302,5 @@ class DuplicateModuleError(RuntimeError):
     """
     Raised when two sources claim the same module id.
 
-    Distinguishes "workspace file collides with builtin" from
-    other failures; the message always lists both sources.
+    The message always lists both sources.
     """

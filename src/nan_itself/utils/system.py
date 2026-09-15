@@ -1,5 +1,3 @@
-# @builtin
-
 """
 System self-perception toolkit: deterministic facts only.
 

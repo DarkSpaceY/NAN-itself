@@ -1,16 +1,13 @@
-
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 from nan_itself.agent.core import CoreAgent
-from nan_itself.agent.loop import (
-    AgentLoop,
-    Inbox,
-)
 from nan_itself.modules.model import DataSpace
+from nan_itself.modules.model import ModuleTurn
 
 
 # ============================================================================
@@ -45,6 +42,8 @@ class FakeModules:
 
         self.snapshot_calls = 0
 
+        self.inbox = None
+
     def snapshot(self):
         self.snapshot_calls += 1
 
@@ -65,6 +64,12 @@ class FakeModules:
         record,
     ):
         pass
+
+    def get(
+        self,
+        module_id: str,
+    ):
+        return self.inbox
 
 
 class FakeSkills:
@@ -105,8 +110,8 @@ class FakeLLM:
 @dataclass
 class CapturedExecution:
     context: object
-    user_input: str
     persona: str
+    history: tuple
 
 
 class CapturingEngine:
@@ -125,964 +130,373 @@ class CapturingEngine:
 
         self.on_execute = None
 
+        self.reply = "done"
+
     async def execute(
         self,
         *,
         context,
-        user_input,
         persona,
-        seed_reports=None,
+        history,
         report_sink=None,
         sink=None,
     ):
         self.executions.append(
             CapturedExecution(
                 context=context,
-                user_input=user_input,
                 persona=persona,
+                history=tuple(history),
             )
         )
 
         callback = self.on_execute
 
         if callback is not None:
-            await callback(
-                context
+            outcome = callback(
+                self,
+                context,
             )
 
-        return SimpleNamespace(
-            content="done"
-        )
-
-
-# ============================================================================
-# AgentLoop doubles
-# ============================================================================
-
-
-class RecordingAgent:
-    """
-    Agent used to inspect AgentLoop's input lifecycle.
-
-    The first turn blocks while the test injects an Inbox message.
-    The second turn sees the message and requests shutdown.
-    """
-
-    def __init__(self):
-        self.calls: list[str] = []
-
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
-
-        self.loop: AgentLoop | None = None
-
-    async def run(
-        self,
-        user_input: str,
-    ):
-        self.calls.append(
-            user_input
-        )
-
-        if len(self.calls) == 1:
-            self.started.set()
-
-            await self.release.wait()
-
-        elif len(self.calls) == 2:
-            assert self.loop is not None
-
-            self.loop.request_stop()
+            if asyncio.iscoroutine(
+                outcome
+            ):
+                await outcome
 
         return SimpleNamespace(
-            content="done"
+            content=self.reply,
+            messages=(
+                SimpleNamespace(
+                    content="assistant-done",
+                ),
+            ),
         )
 
-    def has_pending_reports(self):
-        return False
 
-
-class RetryAgent:
-    """
-    First execution fails.
-
-    The second execution succeeds and requests shutdown.
-
-    The test verifies that the exact input from the failed turn
-    survives the retry boundary.
-    """
-
-    def __init__(self):
-        self.calls: list[str] = []
-
-        self.loop: AgentLoop | None = None
-
-    async def run(
-        self,
-        user_input: str,
-    ):
-        self.calls.append(
-            user_input
-        )
-
-        if len(self.calls) == 1:
-            raise RuntimeError(
-                "intentional test failure"
-            )
-
-        assert self.loop is not None
-
-        self.loop.request_stop()
-
-        return SimpleNamespace(
-            content="recovered"
-        )
-
-    def has_pending_reports(self):
-        return False
-
-
-# ============================================================================
-# CoreAgent construction
-# ============================================================================
-
-
-def make_core(
-    modules: FakeModules,
-    skills: FakeSkills,
+def make_agent(
     *,
-    persona_source,
+    engine=None,
+    history_char_limit=100_000,
+    autonomous_interval=0.0,
 ):
     core = CoreAgent(
         llm=FakeLLM(),
-        modules=modules,
-        providers=FakeProviders(),
-        skills=skills,
-        persona_source=persona_source,
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        persona_source=lambda: "You are NAN.",
+        history_char_limit=history_char_limit,
+        autonomous_interval=autonomous_interval,
     )
 
+    if engine is not None:
+        core.engine = engine
+
+    return core
+
+
+# ============================================================================
+# Turn boundaries (CoreAgent.run)
+# ============================================================================
+
+
+def test_run_assembles_turn_boundaries():
+    engine = CapturingEngine()
+    core = make_agent(engine=engine)
+
+    result = run(core.run())
+
+    assert result.content == "done"
+
+    # One execution captured, one turn's messages retained.
+    assert len(engine.executions) == 1
+
+    captured = engine.executions[0]
+
+    assert captured.persona == "You are NAN."
+    assert captured.history == ()
+
+    assert [
+        m.content for m in core.history
+    ] == ["assistant-done"]
+
+    # Per-turn boundaries: refresh + snapshot exactly once.
+    assert core.skills.refresh_calls == 1
+    assert core.modules.snapshot_calls == 1
+
+    # Root context: depth 0, no task (input rides in the inbox).
+    assert captured.context.depth == 0
+    assert captured.context.task is None
+
+
+def test_run_extends_history_across_turns():
+    engine = CapturingEngine()
+    core = make_agent(engine=engine)
+
+    run(core.run())
+    run(core.run())
+
+    first, second = engine.executions
+
+    assert first.history == ()
+    assert [
+        m.content for m in second.history
+    ] == ["assistant-done"]
+
+
+def test_run_clears_history_over_char_limit():
+    engine = CapturingEngine()
+    core = make_agent(engine=engine)
+
+    core.history_char_limit = 5
+
+    core.history.append(
+        SimpleNamespace(
+            content="x" * 100,
+        )
+    )
+
+    run(core.run())
+
+    # History was cleared before the turn; the new turn's
+    # messages are then appended.
+    assert engine.executions[0].history == ()
+    assert [
+        m.content for m in core.history
+    ] == ["assistant-done"]
+
+
+# ============================================================================
+# Subagent report parking
+# ============================================================================
+
+
+def test_park_reports_routes_to_inbox_module():
+    core = make_agent()
+
+    class FakeInbox:
+        def __init__(self):
+            self.items = []
+
+        def put(
+            self,
+            item,
+        ):
+            self.items.append(item)
+
+    fake = FakeInbox()
+    core.modules.inbox = fake
+
+    core._park_reports(
+        [
+            "[Subagent Report]\nstatus: completed",
+            "[Subagent Report]\nstatus: failed",
+        ]
+    )
+
+    assert len(fake.items) == 2
+
+
+def test_park_reports_drops_without_inbox():
+    core = make_agent()
+
+    # No inbox module running: must not raise.
+    core._park_reports(
+        [
+            "[Subagent Report]\nstatus: completed",
+        ]
+    )
+
+
+# ============================================================================
+# Autonomous loop (CoreAgent.run_forever)
+# ============================================================================
+
+
+def test_run_forever_runs_turns_until_stop():
     engine = CapturingEngine()
 
-    core.engine = engine
+    core = make_agent(engine=engine)
 
-    return core, engine
+    def stop_after_second(
+        engine_self,
+        context,
+    ):
+        if len(engine_self.executions) >= 2:
+            core.request_stop()
+
+    engine.on_execute = stop_after_second
+
+    run(core.run_forever())
+
+    assert len(engine.executions) == 2
+    assert core.cycles == 2
+    assert core.stopping
+
+
+def test_run_forever_backoff_retries_failed_turn():
+    engine = CapturingEngine()
+
+    core = make_agent(engine=engine)
+    core.backoff = (0.0,)
+
+    calls = 0
+
+    def fail_once(
+        engine_self,
+        context,
+    ):
+        nonlocal calls
+
+        calls += 1
+
+        if calls == 1:
+            raise RuntimeError("boom")
+
+        core.request_stop()
+
+    engine.on_execute = fail_once
+
+    run(core.run_forever())
+
+    # The failed turn retried immediately (zero backoff) and the
+    # retry succeeded.
+    assert calls == 2
+    assert core.cycles == 1
+
+
+def test_run_forever_grace_completes_turn_on_stop():
+    engine = CapturingEngine()
+
+    core = make_agent(engine=engine)
+    core.turn_grace = 2.0
+
+    async def stop_and_finish(
+        engine_self,
+        context,
+    ):
+        core.request_stop()
+
+    engine.on_execute = stop_and_finish
+
+    run(core.run_forever())
+
+    # The in-flight turn was allowed to finish inside the grace
+    # window and its result counted as a completed cycle.
+    assert len(engine.executions) == 1
+    assert core.cycles == 1
+
+
+def test_run_forever_cancels_turn_after_grace():
+    engine = CapturingEngine()
+
+    core = make_agent(engine=engine)
+    core.turn_grace = 0.05
+
+    async def stop_and_hang(
+        engine_self,
+        context,
+    ):
+        core.request_stop()
+
+        await asyncio.sleep(
+            1.0,
+        )
+
+    engine.on_execute = stop_and_hang
+
+    run(core.run_forever())
+
+    # Grace expired: the turn was cancelled mid-flight.
+    assert core.stopping
+    assert core.cycles == 0
 
 
 # ============================================================================
-# AgentLoop / Inbox semantics
+# InboxModule semantics (loaded straight from its hot-reload file)
 # ============================================================================
 
 
-def test_agent_loop_does_not_consume_inbox_during_active_turn():
-    """
-    An Inbox message arriving while a turn is executing belongs to
-    the next turn.
-
-    Timeline:
-
-        turn 1 starts with ""
-             |
-             +---- inbox receives "hello"
-             |
-        turn 1 continues
-             |
-        turn 1 finishes
-             |
-        turn 2 receives "hello"
-    """
-
-    async def scenario():
-        agent = RecordingAgent()
-
-        inbox = Inbox(
-            maxsize=8
-        )
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            backoff=(0.0,),
-        )
-
-        agent.loop = loop
-
-        loop_task = asyncio.create_task(
-            loop.run_forever()
-        )
-
-        try:
-            await asyncio.wait_for(
-                agent.started.wait(),
-                timeout=1,
-            )
-
-            # The first turn is already executing.
-            assert agent.calls == [
-                ""
-            ]
-
-            inbox.put(
-                "hello"
-            )
-
-            # Input exists, but the current turn is not cancelled.
-            assert not loop.stopping
-
-            agent.release.set()
-
-            await asyncio.wait_for(
-                loop_task,
-                timeout=1,
-            )
-
-            assert agent.calls == [
-                "",
-                "hello",
-            ]
-
-        finally:
-            if not loop_task.done():
-                loop.request_stop()
-
-                await loop_task
-
-    run(
-        scenario()
+def _turn(depth=0):
+    return ModuleTurn(
+        turn=SimpleNamespace(
+            depth=depth,
+        ),
+        data={},
     )
 
 
-def test_agent_loop_retry_preserves_failed_turn_input():
-    """
-    Input belonging to a failed turn must survive and be retried.
-    """
+def _load_inbox(max_size=256):
+    import importlib.util
 
-    async def scenario():
-        agent = RetryAgent()
-
-        inbox = Inbox(
-            maxsize=8
-        )
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            backoff=(0.0,),
-        )
-
-        agent.loop = loop
-
-        inbox.put(
-            "important task"
-        )
-
-        await loop.run_forever()
-
-        assert agent.calls == [
-            "important task",
-            "important task",
-        ]
-
-        assert loop.cycles == 1
-        assert loop.stopping
-
-    run(
-        scenario()
+    path = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        / "builtin"
+        / "modules"
+        / "inbox.py"
     )
 
-
-def test_agent_loop_empty_inbox_is_valid_autonomous_turn():
-    """
-    Empty Inbox must not prevent an autonomous turn.
-
-    The first input is therefore the empty string.
-    """
-
-    async def scenario():
-        agent = RecordingAgent()
-
-        inbox = Inbox()
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            backoff=(0.0,),
-        )
-
-        agent.loop = loop
-
-        loop_task = asyncio.create_task(
-            loop.run_forever()
-        )
-
-        try:
-            await asyncio.wait_for(
-                agent.started.wait(),
-                timeout=1,
-            )
-
-            assert agent.calls == [
-                ""
-            ]
-
-            agent.release.set()
-
-            await asyncio.wait_for(
-                loop_task,
-                timeout=1,
-            )
-
-        finally:
-            if not loop_task.done():
-                loop.request_stop()
-
-                await loop_task
-
-    run(
-        scenario()
+    spec = importlib.util.spec_from_file_location(
+        f"inbox_under_test_{max_size}",
+        path,
     )
 
-
-def test_agent_loop_stop_request_allows_current_turn_gracefully():
-    """
-    request_stop() does not immediately cancel the current turn.
-
-    A turn that finishes inside the shutdown grace window is counted
-    as completed.
-    """
-
-    class SlowAgent:
-        def __init__(self):
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-
-            self.loop: AgentLoop | None = None
-
-        async def run(
-            self,
-            user_input,
-        ):
-            self.started.set()
-
-            await self.release.wait()
-
-            return SimpleNamespace(
-                content="completed"
-            )
-
-        def has_pending_reports(self):
-            return False
-
-    async def scenario():
-        agent = SlowAgent()
-
-        inbox = Inbox()
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            turn_grace=1.0,
-        )
-
-        agent.loop = loop
-
-        task = asyncio.create_task(
-            loop.run_forever()
-        )
-
-        try:
-            await asyncio.wait_for(
-                agent.started.wait(),
-                timeout=1,
-            )
-
-            loop.request_stop()
-
-            # Current turn is still allowed to finish.
-            assert not task.done()
-
-            agent.release.set()
-
-            await asyncio.wait_for(
-                task,
-                timeout=1,
-            )
-
-            assert loop.cycles == 1
-
-        finally:
-            if not task.done():
-                loop.request_stop()
-
-                await task
-
-    run(
-        scenario()
+    module = importlib.util.module_from_spec(
+        spec
     )
 
+    spec.loader.exec_module(module)
 
-# ============================================================================
-# CoreAgent turn boundary
-# ============================================================================
+    inbox = module.InboxModule()
 
+    inbox.max_size = max_size
 
-def test_core_agent_captures_one_world_snapshot_per_turn():
-    async def scenario():
-        modules = FakeModules()
-        skills = FakeSkills()
+    return inbox
 
-        core, engine = make_core(
-            modules,
-            skills,
-            persona_source=lambda: "persona",
-        )
 
-        await core.run(
-            "first"
-        )
+def test_inbox_query_drains_messages():
+    inbox = _load_inbox()
 
-        assert (
-            modules.snapshot_calls
-            == 1
-        )
+    inbox.put("hello")
+    inbox.put("second")
 
-        assert (
-            len(engine.executions)
-            == 1
-        )
+    body = run(inbox.query(_turn()))
 
-        assert (
-            engine.executions[0]
-            .context.world["state"]["value"]
-            == 1
-        )
+    assert body == "[Inbox]\nhello\n\nsecond"
 
-        assert (
-            skills.refresh_calls
-            == 1
-        )
+    # Drained: the next query sees nothing.
+    assert run(inbox.query(_turn())) is None
 
-    run(
-        scenario()
-    )
 
+def test_inbox_hidden_for_subagents():
+    inbox = _load_inbox()
 
-def test_core_agent_new_turn_observes_new_module_state():
-    """
-    Live DataSpace may change between turns.
+    inbox.put("secret")
 
-    Previous turn keeps the old world.
-    Next turn receives a new detached snapshot.
-    """
+    assert run(inbox.query(_turn(depth=2))) is None
 
-    async def scenario():
-        modules = FakeModules()
-        skills = FakeSkills()
+    # Still queued for the main agent.
+    assert "secret" in run(inbox.query(_turn()))
 
-        core, engine = make_core(
-            modules,
-            skills,
-            persona_source=lambda: "persona",
-        )
 
-        await core.run(
-            "first"
-        )
+def test_inbox_overflow_drops_oldest():
+    inbox = _load_inbox(max_size=2)
 
-        first_world = (
-            engine.executions[0]
-            .context.world
-        )
+    inbox.put("one")
+    inbox.put("two")
+    inbox.put("three")
 
-        assert (
-            first_world["state"]["value"]
-            == 1
-        )
+    body = run(inbox.query(_turn()))
 
-        modules.space.publish(
-            {
-                "value": 2,
-            }
-        )
+    assert "one" not in body
+    assert "two" in body
+    assert "three" in body
 
-        await core.run(
-            "second"
-        )
 
-        second_world = (
-            engine.executions[1]
-            .context.world
-        )
+def test_inbox_ignores_empty_put():
+    inbox = _load_inbox()
 
-        assert (
-            first_world["state"]["value"]
-            == 1
-        )
+    inbox.put("")
 
-        assert (
-            second_world["state"]["value"]
-            == 2
-        )
-
-        assert (
-            first_world
-            is not second_world
-        )
-
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
-
-    run(
-        scenario()
-    )
-
-
-def test_core_agent_world_remains_stable_during_live_dataspace_update():
-    """
-    A live Module update during an Agent turn must not rewrite that
-    turn's world.
-    """
-
-    async def scenario():
-        modules = FakeModules()
-        skills = FakeSkills()
-
-        core, engine = make_core(
-            modules,
-            skills,
-            persona_source=lambda: "persona",
-        )
-
-        observed = {}
-
-        async def on_execute(
-            context,
-        ):
-            observed["before"] = (
-                context.world[
-                    "state"
-                ]["value"]
-            )
-
-            modules.space.publish(
-                {
-                    "value": 99,
-                }
-            )
-
-            observed["during"] = (
-                context.world[
-                    "state"
-                ]["value"]
-            )
-
-            observed["live"] = (
-                modules.space.snapshot()[
-                    "value"
-                ]
-            )
-
-        engine.on_execute = (
-            on_execute
-        )
-
-        await core.run(
-            "turn"
-        )
-
-        assert (
-            observed["before"]
-            == 1
-        )
-
-        assert (
-            observed["during"]
-            == 1
-        )
-
-        assert (
-            observed["live"]
-            == 99
-        )
-
-        assert (
-            engine.executions[0]
-            .context.world[
-                "state"
-            ]["value"]
-            == 1
-        )
-
-    run(
-        scenario()
-    )
-
-
-# ============================================================================
-# CoreAgent turn refresh semantics
-# ============================================================================
-
-
-def test_core_agent_refreshes_skills_at_every_turn_boundary():
-    async def scenario():
-        modules = FakeModules()
-        skills = FakeSkills()
-
-        core, engine = make_core(
-            modules,
-            skills,
-            persona_source=lambda: "persona",
-        )
-
-        await core.run(
-            "first"
-        )
-
-        await core.run(
-            "second"
-        )
-
-        await core.run(
-            "third"
-        )
-
-        assert (
-            skills.refresh_calls
-            == 3
-        )
-
-        assert (
-            modules.snapshot_calls
-            == 3
-        )
-
-    run(
-        scenario()
-    )
-
-
-def test_core_agent_reloads_persona_at_every_turn_boundary():
-    persona = {
-        "value": "persona-v1"
-    }
-
-    modules = FakeModules()
-    skills = FakeSkills()
-
-    core, engine = make_core(
-        modules,
-        skills,
-        persona_source=lambda: persona[
-            "value"
-        ],
-    )
-
-    async def scenario():
-        await core.run(
-            "first"
-        )
-
-        persona[
-            "value"
-        ] = "persona-v2"
-
-        await core.run(
-            "second"
-        )
-
-        persona[
-            "value"
-        ] = "persona-v3"
-
-        await core.run(
-            "third"
-        )
-
-        assert [
-            execution.persona
-            for execution
-            in engine.executions
-        ] == [
-            "persona-v1",
-            "persona-v2",
-            "persona-v3",
-        ]
-
-    run(
-        scenario()
-    )
-
-
-# ============================================================================
-# CoreAgent + AgentLoop integration
-# ============================================================================
-
-
-def test_agent_loop_and_core_agent_share_turn_boundaries():
-    """
-    Integration-level check:
-
-        AgentLoop
-            ->
-        CoreAgent.run()
-            ->
-        exactly one snapshot
-
-    Two AgentLoop turns therefore produce two DataSpace snapshots.
-    """
-
-    class LoopAgent:
-        def __init__(
-            self,
-            core,
-        ):
-            self.core = core
-            self.calls = []
-
-            self.loop: AgentLoop | None = None
-
-        async def run(
-            self,
-            user_input,
-        ):
-            self.calls.append(
-                user_input
-            )
-
-            await self.core.run(
-                user_input
-            )
-
-            if len(self.calls) >= 2:
-                assert self.loop is not None
-                self.loop.request_stop()
-
-            return SimpleNamespace(
-                content="done"
-            )
-
-        def has_pending_reports(self):
-            return self.core.has_pending_reports()
-
-    async def scenario():
-        modules = FakeModules()
-        skills = FakeSkills()
-
-        core, engine = make_core(
-            modules,
-            skills,
-            persona_source=lambda: "persona",
-        )
-
-        agent = LoopAgent(
-            core
-        )
-
-        inbox = Inbox(
-            maxsize=8
-        )
-
-        loop = AgentLoop(
-            agent,
-            inbox,
-            backoff=(0.0,),
-        )
-
-        agent.loop = loop
-
-        # First autonomous turn.
-        loop_task = asyncio.create_task(
-            loop.run_forever()
-        )
-
-        try:
-            await asyncio.wait_for(
-                loop_task,
-                timeout=1,
-            )
-
-        finally:
-            if not loop_task.done():
-                loop.request_stop()
-
-                await loop_task
-
-        assert agent.calls == [
-            "",
-            "",
-        ]
-
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
-
-        assert (
-            len(engine.executions)
-            == 2
-        )
-
-        assert (
-            engine.executions[0]
-            .context.world["state"]["value"]
-            == 1
-        )
-
-        assert (
-            engine.executions[1]
-            .context.world["state"]["value"]
-            == 1
-        )
-
-        assert (
-            skills.refresh_calls
-            == 2
-        )
-
-    run(
-        scenario()
-    )
-
-
-def test_agent_loop_delivers_new_input_on_next_turn_after_live_update():
-    """
-    A message arriving during an active turn becomes input for the
-    following turn, where CoreAgent captures the then-current world.
-    """
-
-    class BlockingCore:
-        def __init__(
-            self,
-            modules,
-        ):
-            self.modules = modules
-            self.loop: AgentLoop | None = None
-
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-
-            self.turns = []
-
-        async def run(
-            self,
-            user_input,
-        ):
-            world = (
-                self.modules.snapshot()
-            )
-
-            self.turns.append(
-                (
-                    user_input,
-                    world,
-                )
-            )
-
-            if len(self.turns) == 1:
-                self.started.set()
-
-                await self.release.wait()
-
-            else:
-                assert self.loop is not None
-                self.loop.request_stop()
-
-            return SimpleNamespace(
-                content="done"
-            )
-
-        def has_pending_reports(self):
-            return False
-
-    async def scenario():
-        modules = FakeModules()
-
-        core = BlockingCore(
-            modules
-        )
-
-        inbox = Inbox(
-            maxsize=8
-        )
-
-        loop = AgentLoop(
-            core,
-            inbox,
-            backoff=(0.0,),
-        )
-
-        core.loop = loop
-
-        task = asyncio.create_task(
-            loop.run_forever()
-        )
-
-        try:
-            await asyncio.wait_for(
-                core.started.wait(),
-                timeout=1,
-            )
-
-            # Turn 1 has already captured world v1.
-            assert (
-                core.turns[0][1][
-                    "state"
-                ]["value"]
-                == 1
-            )
-
-            # Live state changes during turn 1.
-            modules.space.publish(
-                {
-                    "value": 2,
-                }
-            )
-
-            # New input also arrives during turn 1.
-            inbox.put(
-                "new input"
-            )
-
-            core.release.set()
-
-            await asyncio.wait_for(
-                task,
-                timeout=1,
-            )
-
-        finally:
-            if not task.done():
-                loop.request_stop()
-
-                await task
-
-        assert (
-            core.turns[0][0]
-            == ""
-        )
-
-        assert (
-            core.turns[1][0]
-            == "new input"
-        )
-
-        # Turn 1 observed v1.
-        assert (
-            core.turns[0][1][
-                "state"
-            ]["value"]
-            == 1
-        )
-
-        # Turn 2 observed the newer live state.
-        assert (
-            core.turns[1][1][
-                "state"
-            ]["value"]
-            == 2
-        )
-
-    run(
-        scenario()
-    )
+    assert run(inbox.query(_turn())) is None

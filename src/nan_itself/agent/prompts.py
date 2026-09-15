@@ -1,45 +1,27 @@
 """
-System prompt assembly.
+Message assembly.
 
-Structural sections are XML-tagged containers; a section whose
-body is empty is omitted entirely. Message-stream labels (like
-[Subagent Report]) are NOT owned here — they live beside the code
-that emits those messages.
+The system message is the persona alone: it stays stable for the
+whole turn (and across turns until the persona file changes), so
+the provider can cache the prefix.
 
-Tags:
-    <skills>             active protocol + switchable catalog
-                         (subagents only)
-    <running_subagents>  this execution's still-running children,
-                         rebuilt every step
-    <module>             background Module observations (ambient
-                         context; the future memory module will
-                         surface here exactly the same way)
+Everything per-turn and dynamic — Module ambient context (which
+includes the inbox, i.e. user messages) — is assembled into ONE
+user message, the observation. A subagent's task is appended the
+same way. Nothing dynamic ever enters the system message.
+
+Message-stream labels (like [Subagent Report]) are NOT owned
+here — they live beside the code that emits those messages.
 """
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING
 
 from ..utils.llm import (
     Message,
 )
 
-if TYPE_CHECKING:
-    from .model import (
-        ChildSubagent,
-    )
-    from ..skills import (
-        Skill,
-    )
-
-
-SKILLS_TAG = "skills"
 
 MODULE_TAG = "module"
-
-RUNNING_SUBAGENTS_TAG = "running_subagents"
-
-# RUNNING_TASK_PREVIEW_LIMIT = 80
 
 _AMBIENT_PREAMBLE = (
     "The following information is supplied by background "
@@ -64,109 +46,48 @@ def render_section(
     return f"<{tag}>\n{body}\n</{tag}>"
 
 
-def build_messages(
-    *,
+def build_system(
     persona: str,
-    skill_section: str | None,
-    ambient_context: list[str],
-    current: list[Message],
-    running_subagents: str | None = None,
-) -> list[Message]:
-    system_parts: list[str] = []
-
-    # L1 persona: who the agent is. Always present.
-    system_parts.append(
-        persona
+) -> Message:
+    return Message(
+        role="system",
+        content=persona,
     )
 
-    # L2 skills (subagents only), then this execution's running
-    # children, then ambient Module observations.
-    for section in (
-        render_section(SKILLS_TAG, skill_section),
-        render_section(RUNNING_SUBAGENTS_TAG, running_subagents),
-        render_section(
-            MODULE_TAG,
-            "\n\n".join(
-                [_AMBIENT_PREAMBLE, *ambient_context]
-            )
-            if ambient_context
-            else "",
-        ),
-    ):
-        if section:
-            system_parts.append(
-                "\n\n" + section
-            )
 
-    return [
-        Message(
-            role="system",
-            content="\n".join(system_parts),
-        ),
-        *current,
-    ]
-
-
-def format_skill_section(
-    active_skill: "Skill | None",
-    catalog_metadatas,
-) -> str:
+def build_observation(
+    *,
+    ambient_context: list[str],
+    task: str | None = None,
+) -> Message:
     """
-    The <skills> body: what is currently active plus what can be
-    switched to.
-
-    The Main Agent never receives this section: Skills do not
-    exist in its world.
+    One user message per turn: ambient Module observations
+    (including the inbox) first, then a subagent's task.
     """
-    catalog = [
-        f"- {metadata.name}: {metadata.description}"
-        for metadata in catalog_metadatas
-    ]
-
     parts: list[str] = []
 
-    if active_skill is not None:
+    section = render_section(
+        MODULE_TAG,
+        "\n\n".join(
+            [_AMBIENT_PREAMBLE, *ambient_context]
+        )
+        if ambient_context
+        else "",
+    )
+
+    if section:
         parts.append(
-            f"Active skill: {active_skill.name}"
+            section
         )
 
-        parts.append(active_skill.instructions)
-
-    else:
+    if task:
         parts.append(
-            "No skill is currently active."
+            task
         )
 
-    if catalog:
-        parts.append(
-            "Switch at any step by calling "
-            "activate_skill with one of these names:"
-        )
-
-        parts.extend(catalog)
-
-    return "\n".join(parts)
-
-
-def render_running_subagents(
-    children: list["ChildSubagent"],
-) -> str:
-    """
-    One line per child that has not delivered its report yet.
-
-    Callers pass the post-collection remainder: everything here
-    is genuinely still in flight.
-    """
-    lines: list[str] = []
-
-    for child in children:
-        task = child.task
-
-        # if len(task) > RUNNING_TASK_PREVIEW_LIMIT:
-        #     task = task[:RUNNING_TASK_PREVIEW_LIMIT] + "..."
-
-        lines.append(
-            f"- id: {child.id} | task: {task}"
-        )
-
-    return "\n".join(lines)
+    return Message(
+        role="user",
+        content="\n\n".join(
+            parts
+        ),
+    )
