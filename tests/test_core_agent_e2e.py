@@ -649,16 +649,25 @@ async def test_core_agent_runs_real_route_tool_final_chain():
             == 2
         )
 
-        # The second turn delivered the final reply.
+        # The second turn delivered the final reply. Turn has
+        # no reply field: the reply is the last assistant
+        # message in the message flow.
         record = (
             modules.delivered_turns[
                 -1
             ]
         )
 
-        assert (
-            record.reply
+        assert any(
+            getattr(
+                message,
+                "role",
+                None,
+            )
+            == "assistant"
+            and (message.content or "")
             == "42"
+            for message in record.messages
         )
 
         assert (

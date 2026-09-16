@@ -111,16 +111,35 @@ class DataSpaceReader:
 @dataclass(frozen=True)
 class Turn:
     """
-    One agent turn as seen by Modules.
+    One agent turn as seen by Modules, and the ONLY record of it.
+
+    A turn is self-contained: everything needed to reconstruct
+    what the agent saw and did lives on the Turn itself.
+
+        identity   agent_hash / parent_hash / depth
+        inputs     task / world (structured sources; the
+                   observation message is their rendering)
+        snapshots  persona / history (as of this turn's start)
+                   -- there is no persistent history anywhere:
+                   the next turn's history snapshot is derived
+                   from the last turn's history + messages
+        messages   this turn's message flow (observation +
+                   assistant + tool results), i.e. what the
+                   model produced; full model input for the
+                   turn is history + the first message
+        response   usage / finish_reason / model (duck-typed;
+                   tool calls live on the assistant message)
+        outcome    error / started_at / ended_at
 
     query() receives the in-flight turn: identity and world are
-    already fixed, the result fields are still None.
+    already fixed, the snapshot and result fields are still None.
 
-    on_turn() receives the same turn completed: reply / error /
-    started_at / ended_at are filled via dataclasses.replace().
+    on_turn() receives the same turn completed, filled via
+    dataclasses.replace().
 
-    `world` is one consistent detached DataSpace snapshot shared
-    by the entire dispatch tree.
+    The history snapshot is cleared (empty tuple) whenever the
+    running character count exceeded the engine's limit: earlier
+    turns stay on record, but the broken chain starts fresh.
     """
 
     agent_hash: str
@@ -131,7 +150,18 @@ class Turn:
 
     world: Mapping[str, Mapping[str, Any]]
 
-    reply: str | None = None
+    persona: str | None = None
+
+    history: tuple[Any, ...] = ()
+
+    messages: tuple[Any, ...] = ()
+
+    usage: Any | None = None
+
+    finish_reason: str | None = None
+
+    model: str | None = None
+
     error: str | None = None
 
     started_at: float | None = None

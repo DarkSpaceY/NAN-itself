@@ -226,17 +226,21 @@ class SpawnVerb:
         ):
             # Subagent loop: identical to the main agent cycle
             # (obs -> model call -> result), but only the finish
-            # tool ends it. History follows the same retention
-            # policy as the main agent -- the engine maintains
-            # it in place, clearing over the char limit.
-            history: list = []
+            # tool ends it. There is no persistent history: each
+            # turn rides out as its own Turn record, and the next
+            # turn derives its history snapshot from the last one
+            # (same retention policy as the main agent). The
+            # child's turn chain dies with the worker.
+            last_turn = None
 
             while True:
                 result = await engine.execute(
                     context=child_context,
                     persona=state.persona,
-                    history=history,
+                    last_turn=last_turn,
                 )
+
+                last_turn = result.turn
 
                 if result.finished:
                     return result

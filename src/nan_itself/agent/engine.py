@@ -16,11 +16,12 @@ registry. There is no in-engine loop: after tool calls the next
 observation is rebuilt (fresh modules, fresh inbox), which is
 what keeps the message prefix cacheable.
 
-`history` is maintained in place by the engine: the main agent
-and subagents alike pass their list here; the shared retention
-policy (clear-all over history_char_limit) is applied at entry,
-and this turn's messages are appended before returning. The
-caller never touches history itself.
+There is no persistent history anywhere. Each Turn carries the
+history snapshot as of its start (`turn.history`); the next turn
+derives its snapshot as `last_turn.history + last_turn.messages`,
+cleared to empty over history_char_limit. A turn's full model
+input is exactly `turn.history + turn.messages` -- reconstruction
+needs nothing else.
 """
 
 from __future__ import annotations
@@ -105,7 +106,7 @@ class StepEngine:
         *,
         context,
         persona: str,
-        history: list[Message],
+        last_turn: Turn | None = None,
         report_sink: Callable[
             [list[str]], None
         ]
@@ -115,30 +116,38 @@ class StepEngine:
         """
         Run one turn: observe once, call the model once.
 
-        `history` is maintained in place: this turn's messages
-        are appended before returning, and the shared retention
-        policy (clear-all over history_char_limit) is applied at
-        entry. Both the main agent and subagents pass their
-        history list here, so the policy lives in exactly one
-        place.
+        `last_turn` is the previous Turn of the same agent (None
+        on its first turn). Its history + messages derive this
+        turn's history snapshot; the clear-all policy applies at
+        derivation time. The completed Turn rides out on
+        AgentResult.turn -- callers keep no history themselves.
         """
         started_wall = time.time()
 
         # ----------------------------------------------------------
-        # History: full retention, clear-all over the limit.
+        # History snapshot: derived from the last turn; clear-all
+        # over the limit. No persistent history exists anywhere.
         # ----------------------------------------------------------
 
-        if (
-            self._history_chars(history)
-            > self.history_char_limit
-        ):
-            logger.info(
-                "History exceeded {} characters; "
-                "clearing conversation history",
-                self.history_char_limit,
+        prior: tuple = ()
+
+        if last_turn is not None:
+            prior = (
+                last_turn.history
+                + last_turn.messages
             )
 
-            history.clear()
+            if (
+                self._history_chars(prior)
+                > self.history_char_limit
+            ):
+                logger.info(
+                    "History exceeded {} characters; "
+                    "clearing conversation history",
+                    self.history_char_limit,
+                )
+
+                prior = ()
 
         state = ExecutionState(
             persona=persona,
@@ -151,6 +160,8 @@ class StepEngine:
             depth=context.depth,
             task=context.task,
             world=context.world,
+            persona=persona,
+            history=prior,
             started_at=started_wall,
         )
 
@@ -246,15 +257,42 @@ class StepEngine:
             )
         ]
 
-        reply_text: str | None = None
+        response = None
         error_text: str | None = None
+
+        def _completed() -> Turn:
+            """
+            The finished Turn, filled in one place. A successful
+            return builds it for AgentResult.turn and delivery
+            builds it again in finally -- only ever on success,
+            where both are equal.
+            """
+            return replace(
+                turn,
+                messages=tuple(
+                    turn_messages
+                ),
+                usage=(
+                    response.usage
+                    if response is not None
+                    else None
+                ),
+                finish_reason=(
+                    response.finish_reason
+                    if response is not None
+                    else None
+                ),
+                model=self.llm.model,
+                error=error_text,
+                ended_at=time.time(),
+            )
 
         try:
             response = await self._generate(
                 LLMRequest(
                     messages=[
                         system_message,
-                        *history,
+                        *prior,
                         *turn_messages,
                     ],
                     tools=self._tool_definitions(
@@ -279,22 +317,19 @@ class StepEngine:
                         response.finish_reason,
                     )
 
-                turn_messages.append(
-                    _assistant_message(
-                        response.content or ""
-                    )
-                )
-
                 reply_text = (
                     response.content or ""
                 )
 
+                turn_messages.append(
+                    _assistant_message(
+                        reply_text
+                    )
+                )
+
                 return AgentResult(
                     content=reply_text,
-                    messages=tuple(
-                        turn_messages
-                    ),
-                    response=response,
+                    turn=_completed(),
                 )
 
             # --------------------------------------------------
@@ -343,19 +378,13 @@ class StepEngine:
             if state.finished:
                 return AgentResult(
                     content=state.report,
-                    messages=tuple(
-                        turn_messages
-                    ),
-                    response=response,
+                    turn=_completed(),
                     finished=True,
                 )
 
             return AgentResult(
                 content=None,
-                messages=tuple(
-                    turn_messages
-                ),
-                response=response,
+                turn=_completed(),
             )
 
         except asyncio.CancelledError:
@@ -369,17 +398,8 @@ class StepEngine:
             raise
 
         finally:
-            history.extend(
-                turn_messages
-            )
-
             self.modules.deliver_turn(
-                replace(
-                    turn,
-                    reply=reply_text,
-                    error=error_text,
-                    ended_at=time.time(),
-                )
+                _completed()
             )
 
             pending = [
@@ -606,11 +626,11 @@ class StepEngine:
 
     @staticmethod
     def _history_chars(
-        history: list[Message],
+        messages,
     ) -> int:
         return sum(
             len(message.content or "")
-            for message in history
+            for message in messages
         )
 
     async def _archive_children(

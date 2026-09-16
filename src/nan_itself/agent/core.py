@@ -10,8 +10,8 @@ from .model import AgentResult
 from .reports import report_record_name
 from .runtime import AgentRuntime
 from ..events import EventBus, StreamSink
+from ..modules import Turn
 from ..utils.backoff import next_backoff
-from ..utils.llm import Message
 
 
 DEFAULT_TURN_GRACE = 5.0
@@ -41,9 +41,11 @@ class CoreAgent:
         - a turn that ends with tool calls returns content=None;
           run_forever() immediately starts the next turn, whose
           observation is rebuilt fresh (modules, inbox included)
-        - conversation history is maintained in place by the
-          step engine, which applies the shared retention policy
-          (clear-all over history_char_limit) for subagents too
+        - there is no persistent history: each Turn carries the
+          history snapshot as of its start, the next turn derives
+          its snapshot from the last Turn (clear-all over
+          history_char_limit applies at derivation), and turns
+          accumulate on self.turns as the full turn record
 
     run_forever() owns the autonomous loop: failed turns retry
     with escalating backoff, stop requests get a grace window,
@@ -85,9 +87,12 @@ class CoreAgent:
             autonomous_interval,
         )
 
-        # Cross-turn conversation history (excludes the system
-        # message, which is rebuilt from the persona every turn).
-        self.history: list[Message] = []
+        # Full turn record of the main agent (excludes the
+        # system message, which is rebuilt from the persona
+        # every turn). The next turn's history snapshot is
+        # derived from the last Turn; no persistent history
+        # list exists anywhere.
+        self.turns: list[Turn] = []
 
         self.bus = bus
 
@@ -187,7 +192,11 @@ class CoreAgent:
             result = await self.engine.execute(
                 context=root,
                 persona=persona,
-                history=self.history,
+                last_turn=(
+                    self.turns[-1]
+                    if self.turns
+                    else None
+                ),
                 report_sink=report_sink,
                 sink=sink,
             )
@@ -195,6 +204,8 @@ class CoreAgent:
         finally:
             if sink is not None:
                 sink.status_idle()
+
+        self.turns.append(result.turn)
 
         return result
 

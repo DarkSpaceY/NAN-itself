@@ -119,6 +119,7 @@ class FakeLLM:
 class CapturedExecution:
     context: object | None = None
     persona: str | None = None
+    last_turn: object | None = None
 
 
 class CapturingEngine:
@@ -139,7 +140,7 @@ class CapturingEngine:
         *,
         context,
         persona,
-        history,
+        last_turn=None,
         report_sink=None,
         sink=None,
     ):
@@ -147,6 +148,7 @@ class CapturingEngine:
             CapturedExecution(
                 context=context,
                 persona=persona,
+                last_turn=last_turn,
             )
         )
 
@@ -157,7 +159,7 @@ class CapturingEngine:
 
         return SimpleNamespace(
             content="done",
-            messages=[],
+            turn=SimpleNamespace(),
         )
 
 

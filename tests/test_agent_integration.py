@@ -9,6 +9,7 @@ from nan_itself.agent.core import CoreAgent
 from nan_itself.agent.engine import StepEngine
 from nan_itself.modules.loading import import_module_class
 from nan_itself.modules.model import DataSpace, Turn
+from nan_itself.utils.llm import Message
 
 
 # ============================================================================
@@ -139,7 +140,8 @@ class EchoLLM:
 class CapturedExecution:
     context: object
     persona: str
-    history: tuple
+    last_turn: object | None
+    turn: object
 
 
 class CapturingEngine:
@@ -148,7 +150,10 @@ class CapturingEngine:
     behavior.
 
     This allows us to verify exactly what CoreAgent constructs and
-    passes into the execution engine.
+    passes into the execution engine. The fake mirrors the engine's
+    snapshot-derivation contract: each turn's Turn record carries
+    the history snapshot as of its start, and CoreAgent chains
+    turns through it (no persistent history anywhere).
     """
 
     def __init__(self):
@@ -165,15 +170,35 @@ class CapturingEngine:
         *,
         context,
         persona,
-        history,
+        last_turn=None,
         report_sink=None,
         sink=None,
     ):
+        # Mirror the real StepEngine contract: derive this
+        # turn's history snapshot from the last turn.
+        prior: tuple = ()
+
+        if last_turn is not None:
+            prior = (
+                last_turn.history
+                + last_turn.messages
+            )
+
+        turn = SimpleNamespace(
+            history=prior,
+            messages=(
+                SimpleNamespace(
+                    content="assistant-done",
+                ),
+            ),
+        )
+
         self.executions.append(
             CapturedExecution(
                 context=context,
                 persona=persona,
-                history=tuple(history),
+                last_turn=last_turn,
+                turn=turn,
             )
         )
 
@@ -190,17 +215,9 @@ class CapturingEngine:
             ):
                 await outcome
 
-        # Mirror the real StepEngine contract: history is
-        # maintained in place by the engine.
-        message = SimpleNamespace(
-            content="assistant-done",
-        )
-
-        history.append(message)
-
         return SimpleNamespace(
             content=self.reply,
-            messages=(message,),
+            turn=turn,
         )
 
 
@@ -239,16 +256,23 @@ def test_run_assembles_turn_boundaries():
 
     assert result.content == "done"
 
-    # One execution captured, one turn's messages retained.
+    # One execution captured, one turn chained.
     assert len(engine.executions) == 1
 
     captured = engine.executions[0]
 
     assert captured.persona == "You are NAN."
-    assert captured.history == ()
+
+    # First turn: no prior turn, nothing derived.
+    assert captured.last_turn is None
+
+    # The completed Turn rides on the result and is the
+    # whole turn record.
+    assert core.turns == [captured.turn]
 
     assert [
-        m.content for m in core.history
+        m.content
+        for m in captured.turn.messages
     ] == ["assistant-done"]
 
     # Per-turn boundaries: refresh + snapshot exactly once.
@@ -269,9 +293,14 @@ def test_run_extends_history_across_turns():
 
     first, second = engine.executions
 
-    assert first.history == ()
+    # First turn starts from nothing; the second turn derives
+    # its history snapshot from the first turn's record.
+    assert first.last_turn is None
+
+    assert second.last_turn is first.turn
+
     assert [
-        m.content for m in second.history
+        m.content for m in second.turn.history
     ] == ["assistant-done"]
 
 
@@ -311,6 +340,60 @@ def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
     assert "finish" in child_names
 
 
+def test_engine_derives_history_snapshot_from_last_turn():
+    llm = EchoLLM()
+
+    engine = StepEngine(
+        llm=llm,
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        agent_runtime=SimpleNamespace(),
+    )
+
+    context = SimpleNamespace(
+        agent_hash="hash123",
+        parent_hash=None,
+        depth=0,
+        task=None,
+        world={"state": {"value": 1}},
+    )
+
+    last_turn = SimpleNamespace(
+        history=(
+            Message(role="user", content="old"),
+        ),
+        messages=(
+            Message(role="assistant", content="last"),
+        ),
+    )
+
+    result = run(
+        engine.execute(
+            context=context,
+            persona="p",
+            last_turn=last_turn,
+        )
+    )
+
+    # The derived snapshot became the model-visible prefix:
+    # system + history + this turn's observation.
+    request = llm.requests[0]
+
+    assert len(request.messages) == 4
+
+    # The completed Turn carries the same snapshot plus this
+    # turn's messages (observation + assistant reply) -- the
+    # full model input is history + messages.
+    assert [
+        m.content for m in result.turn.history
+    ] == ["old", "last"]
+
+    assert [
+        m.content for m in result.turn.messages
+    ] == ["", "reply"]
+
+
 def test_engine_clears_history_over_char_limit():
     llm = EchoLLM()
 
@@ -331,33 +414,34 @@ def test_engine_clears_history_over_char_limit():
         world={"state": {"value": 1}},
     )
 
-    history = [
-        SimpleNamespace(
-            content="x" * 100,
+    last_turn = SimpleNamespace(
+        history=(
+            Message(role="user", content="x" * 100),
         ),
-    ]
+        messages=(),
+    )
 
     result = run(
         engine.execute(
             context=context,
             persona="p",
-            history=history,
+            last_turn=last_turn,
         )
     )
 
-    # The oversized history was cleared before the model call:
+    # The oversized snapshot was cleared at derivation time:
     # only the system message and this turn's observation
     # reached the model.
     assert len(llm.requests) == 1
 
     assert len(llm.requests[0].messages) == 2
 
-    # This turn's messages (observation + assistant reply)
-    # were appended in place.
-    assert result.content == "reply"
+    # The chain restarts fresh from the completed turn; the
+    # broken-off turns stay on record elsewhere.
+    assert result.turn.history == ()
 
     assert [
-        m.content for m in history
+        m.content for m in result.turn.messages
     ] == ["", "reply"]
 
 

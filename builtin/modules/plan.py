@@ -66,6 +66,20 @@ def _now_iso() -> str:
     )
 
 
+def _reply_of(record: Turn) -> str:
+    """
+    The turn's textual reply, derived from the message flow:
+    the last assistant message's content. '' when the turn
+    ended in tool calls or errored early (Turn has no reply
+    field; the messages are the single source).
+    """
+    for message in reversed(record.messages):
+        if getattr(message, "role", None) == "assistant":
+            return message.content or ""
+
+    return ""
+
+
 # ============================================================================
 # Entry model
 # ============================================================================
@@ -1000,9 +1014,11 @@ class PlanModule(Module):
         if record.task and record.depth > 0:
             lines.append(f"任务: {record.task[:200]}")
 
-        if record.reply:
+        reply = _reply_of(record)
+
+        if reply:
             lines.append(
-                f"NAN: {record.reply[: self.reply_cap]}"
+                f"NAN: {reply[: self.reply_cap]}"
             )
 
         if record.error:

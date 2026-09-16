@@ -29,13 +29,17 @@ class AgentResult:
     `finished` marks an explicit finish-tool completion: only a
     subagent loop terminates on it (plain text alone never does,
     so the main agent is unaffected).
+
+    `turn` is the completed Turn record of this execution: the
+    sole carrier of identity, snapshots (persona / history),
+    messages and response metadata. Callers chain turns by
+    passing it back as `last_turn` -- there is no persistent
+    history outside the Turn chain.
     """
 
     content: str | None
 
-    messages: tuple[Any, ...]
-
-    response: Any
+    turn: Any | None = None
 
     finished: bool = False
 
