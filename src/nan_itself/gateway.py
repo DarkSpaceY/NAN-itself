@@ -53,6 +53,10 @@ class Gateway:
         self._server: uvicorn.Server | None = None
         self._clients: set[WebSocket] = set()
 
+        # 回执去重：客户端断线重连会以同一 mid 补发（可能已投递过），
+        # 这里按 mid 保证恰好一次；容量有界，旧 mid 淘汰。
+        self._seen_mids: dict[str, None] = {}
+
     # ==================================================================
     # Lifecycle
     # ==================================================================
@@ -277,9 +281,14 @@ class Gateway:
         if kind == "input":
             text = str(data.get("text") or "").strip()
             mid = data.get("mid")
+            mid = mid if isinstance(mid, str) else None
+
             if text and self.on_input is not None:
+                if not self._accept_mid(mid):
+                    return
+
                 try:
-                    self.on_input(text, mid if isinstance(mid, str) else None)
+                    self.on_input(text, mid)
                 except Exception as e:
                     logger.error(f"on_input callback error: {e}")
             elif not text:
@@ -290,6 +299,35 @@ class Gateway:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _accept_mid(self, mid: str | None) -> bool:
+        """按 mid 去重：重复补发直接丢弃；容量有界，旧 mid 淘汰。"""
+        if mid is None:
+            return True
+
+        if mid in self._seen_mids:
+            logger.info("duplicate input dropped (mid={})", mid)
+            return False
+
+        self._seen_mids[mid] = None
+
+        if len(self._seen_mids) > 256:
+            for key in list(self._seen_mids)[:128]:
+                self._seen_mids.pop(key, None)
+
+        return True
+
+    def _latest_status(self) -> dict:
+        """bus 历史里最近一条 status 事件的快照；没有则 idle。"""
+        for event in reversed(self.bus.history()):
+            if event.get("t") == "status":
+                return {
+                    key: event[key]
+                    for key in ("state", "tools", "subagents", "next_hop")
+                    if key in event
+                }
+
+        return {"state": "idle"}
 
     async def _send(self, websocket: WebSocket, payload: dict) -> None:
         """发送消息，失败时记录并抛出异常（让上层处理）"""
@@ -314,4 +352,10 @@ class Gateway:
                 state = self.state_provider() or {}
             except Exception as e:
                 logger.error(f"State provider error: {e}")
+
+        # status 快照属于 gateway 职责：app 级 state 未携带时，
+        # 从 bus 历史取最近一条 status。
+        if "status" not in state:
+            state["status"] = self._latest_status()
+
         return {"t": "hello", "seq": self.bus.seq, **state}

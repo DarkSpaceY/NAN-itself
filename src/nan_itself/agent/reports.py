@@ -18,6 +18,20 @@ from .model import (
 REPORT_PREFIX = "[Subagent Report]"
 
 
+def report_record_name(
+    report: str,
+) -> str:
+    """
+    UI record name for a report: 'report · <task>' when the
+    report text carries a task line, else 'report'.
+    """
+    for line in report.splitlines():
+        if line.startswith("task: "):
+            return f"report · {line[6:]}"
+
+    return "report"
+
+
 async def format_child_report(
     child: ChildSubagent,
 ) -> str:

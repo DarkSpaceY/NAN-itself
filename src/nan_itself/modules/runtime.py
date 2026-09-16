@@ -9,11 +9,9 @@ from typing import Any, Mapping
 
 from loguru import logger
 
-from ..modules import (
-    deps as _deps,
-    loading as _loading,
-    persistence as _persistence,
-)
+from . import deps as _deps
+from . import loading as _loading
+from . import persistence as _persistence
 from .model import (
     DataSpace,
     DuplicateModuleError,

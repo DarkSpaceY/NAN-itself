@@ -26,6 +26,7 @@ from .model import (
 from .runtime import (
     SubagentLimitError,
 )
+from ..events import StreamSink
 from ..skills import (
     UnknownSkillError,
 )
@@ -63,8 +64,11 @@ class ExecutionState:
         self,
         *,
         persona: str,
+        sink: StreamSink | None = None,
     ) -> None:
         self.persona = persona
+
+        self.sink = sink
 
         self.children: list[ChildSubagent] = []
 
@@ -238,6 +242,27 @@ class SpawnVerb:
         state.children.append(
             child
         )
+
+        if state.sink is not None:
+            record_id = state.sink.record_started(
+                kind="agent",
+                name=task,
+            )
+
+            state.sink.record_detail(
+                record_id,
+                f"id: {child.id}",
+            )
+
+            state.sink.record_detail(
+                record_id,
+                f"depth: {handle.depth}",
+            )
+
+            state.sink.record_done(
+                record_id,
+                summary="spawned",
+            )
 
         return (
             "Subagent spawned.\n"

@@ -7,6 +7,7 @@ from loguru import logger
 
 from .engine import StepEngine
 from .model import AgentResult
+from .reports import report_record_name
 from .runtime import AgentRuntime
 from ..events import EventBus, StreamSink
 from ..utils.backoff import next_backoff
@@ -175,12 +176,39 @@ class CoreAgent:
         if sink is not None:
             sink.status_working()
 
+        def report_sink(reports: list[str]) -> None:
+            self._park_reports(reports)
+
+            if sink is None:
+                return
+
+            # Mirror every parked report as an agent record
+            # on the main stream.
+            for report in reports:
+                record_id = sink.record_started(
+                    kind="agent",
+                    name=report_record_name(
+                        report
+                    ),
+                )
+
+                for line in report.splitlines():
+                    sink.record_detail(
+                        record_id,
+                        line,
+                    )
+
+                sink.record_done(
+                    record_id,
+                    summary="report",
+                )
+
         try:
             result = await self.engine.execute(
                 context=root,
                 persona=persona,
                 history=self.history,
-                report_sink=self._park_reports,
+                report_sink=report_sink,
                 sink=sink,
             )
 

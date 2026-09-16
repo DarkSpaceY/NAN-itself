@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from .agent.core import CoreAgent
+from .agent import CoreAgent
 from .config import get_settings
 from .events import EventBus
 from .gateway import Gateway
@@ -286,35 +286,13 @@ async def run_agent_process() -> None:
 
         boot_id = uuid.uuid4().hex[:12]
 
-        # 回执去重：客户端断线重连会以同一 mid 补发（可能已投递过），
-        # 这里按 mid 保证恰好一次；容量有界，旧 mid 随 LRU 淘汰。
-        seen_mids: dict[str, None] = {}
-
         def ingest(
             text: str,
             mid: str | None = None,
         ) -> None:
             # 唯一的接收点：进入 Inbox 模块的同时立刻回显，
             # 用户消息不因 sleep/长回合而“消失”。
-            if mid:
-                if mid in seen_mids:
-                    logger.info(
-                        "duplicate input dropped (mid={})",
-                        mid,
-                    )
-                    return
-
-                seen_mids[mid] = None
-
-                if len(seen_mids) > 256:
-                    for key in list(
-                        seen_mids
-                    )[:128]:
-                        seen_mids.pop(
-                            key,
-                            None,
-                        )
-
+            # （mid 去重由 gateway 负责。）
             inbox = modules.get("inbox")
 
             if inbox is None:
@@ -344,12 +322,21 @@ async def run_agent_process() -> None:
         # Gateway.
         # ----------------------------------------------------------
 
+        def gateway_state() -> dict:
+            # status 快照由 gateway 负责（从 bus 历史提取），
+            # 这里只提供 app 才知道的身份信息。
+            return {
+                "boot": boot_id,
+                "model": settings.llm.model,
+                "base_url": settings.llm.base_url,
+            }
+
         gateway = Gateway(
             bus=bus,
             host=settings.gateway.host,
             port=settings.gateway.port,
             on_input=ingest,
-            state_provider=None,
+            state_provider=gateway_state,
             frontend_dir=(
                 Path(__file__).resolve().parents[2]
                 / "frontend"

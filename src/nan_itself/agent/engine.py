@@ -45,6 +45,11 @@ from .reports import (
 from .verbs import (
     INVOKE_SKILL_TOOL_NAME,
     INVOKE_TOOL_TOOL_NAME,
+    LIST_SKILLS_TOOL_NAME,
+    LIST_TOOLS_TOOL_NAME,
+    SHOW_SKILL_TOOL_NAME,
+    SHOW_TOOL_TOOL_NAME,
+    SLEEP_TOOL_NAME,
     SPAWN_TOOL_NAME,
     VERBS,
     ExecutionState,
@@ -99,6 +104,7 @@ class StepEngine:
 
         state = ExecutionState(
             persona=persona,
+            sink=sink,
         )
 
         turn = Turn(
@@ -357,26 +363,11 @@ class StepEngine:
         started = time.time()
 
         if sink is not None:
-            if (
-                call.name
-                == SPAWN_TOOL_NAME
-            ):
-                kind = "agent"
-            elif (
-                call.name
-                == INVOKE_SKILL_TOOL_NAME
-            ):
-                kind = "skill"
-            elif (
-                call.name
-                == INVOKE_TOOL_TOOL_NAME
-            ):
-                kind = "tool"
-            else:
-                kind = "verb"
-
             record_id = sink.record_started(
-                kind=kind,
+                kind=_RECORD_KINDS.get(
+                    call.name,
+                    "verb",
+                ),
                 name=call.name,
             )
 
@@ -563,6 +554,20 @@ class StepEngine:
 # ----------------------------------------------------------------------
 # Small helpers
 # ----------------------------------------------------------------------
+
+
+# UI record kind per verb: tools, skills, spawning and sleeping
+# each get their own kind; anything else stays a generic verb.
+_RECORD_KINDS = {
+    INVOKE_TOOL_TOOL_NAME: "tool",
+    LIST_TOOLS_TOOL_NAME: "tool",
+    SHOW_TOOL_TOOL_NAME: "tool",
+    INVOKE_SKILL_TOOL_NAME: "skill",
+    LIST_SKILLS_TOOL_NAME: "skill",
+    SHOW_SKILL_TOOL_NAME: "skill",
+    SPAWN_TOOL_NAME: "spawn",
+    SLEEP_TOOL_NAME: "sleep",
+}
 
 
 def _assistant_message(

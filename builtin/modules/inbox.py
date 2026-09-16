@@ -15,6 +15,7 @@ directly.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 
 from loguru import logger
@@ -54,8 +55,10 @@ class InboxModule(Module):
         self._items.append(item)
 
     async def start(self) -> None:
-        # State-only module: the queue lives in memory.
-        return
+        # Long-lived module: park forever. Returning would mark
+        # the module DOWN and drop puts until the facade
+        # restarts it.
+        await asyncio.Event().wait()
 
     async def on_turn(
         self,
