@@ -62,7 +62,6 @@ class FakeModules:
     async def query_snapshot(
         self,
         turn,
-        snapshot,
         **kwargs,
     ):
         self.query_calls += 1

@@ -17,23 +17,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class AgentTurn:
-    """
-    One Core / Subagent turn.
-
-    `data` is the shared world snapshot for the entire dispatch tree.
-    """
-
-    turn_id: str
-    agent_hash: str
-    depth: int
-
-    data: Any
-
-    task: str | None = None
-
-
-@dataclass(frozen=True)
 class AgentResult:
     """
     Result of one completed Agent execution.

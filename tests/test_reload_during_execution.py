@@ -219,7 +219,7 @@ class ExampleModule(Module):
     ):
         return (
             "module-version:"
-            f"{turn.data['example']['version']}"
+            f"{turn.world['example']['version']}"
         )
 """
 
@@ -249,7 +249,7 @@ class ExampleModule(Module):
     ):
         return (
             "module-version:"
-            f"{turn.data['example']['version']}"
+            f"{turn.world['example']['version']}"
         )
 """
 
@@ -342,19 +342,14 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
     async def tracked_query_snapshot(
         turn,
-        snapshot,
         **kwargs,
     ):
         query_calls.append(
-            (
-                turn,
-                snapshot,
-            )
+            turn
         )
 
         return await original_query_snapshot(
             turn,
-            snapshot,
             **kwargs,
         )
 
@@ -424,19 +419,12 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
             == 1
         )
 
-        first_turn, first_snapshot = (
+        first_turn = (
             query_calls[0]
         )
 
         assert (
-            first_snapshot[
-                "example"
-            ]["version"]
-            == 1
-        )
-
-        assert (
-            first_turn.data[
+            first_turn.world[
                 "example"
             ]["version"]
             == 1
@@ -509,14 +497,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # --------------------------------------------------------------
 
         assert (
-            first_snapshot[
-                "example"
-            ]["version"]
-            == 1
-        )
-
-        assert (
-            first_turn.data[
+            first_turn.world[
                 "example"
             ]["version"]
             == 1
@@ -590,19 +571,12 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
             == 2
         )
 
-        second_turn, second_snapshot = (
+        second_turn = (
             query_calls[1]
         )
 
         assert (
-            second_snapshot[
-                "example"
-            ]["version"]
-            == 2
-        )
-
-        assert (
-            second_turn.data[
+            second_turn.world[
                 "example"
             ]["version"]
             == 2
@@ -621,14 +595,14 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # --------------------------------------------------------------
 
         assert (
-            query_calls[0][1][
+            query_calls[0].world[
                 "example"
             ]["version"]
             == 1
         )
 
         assert (
-            query_calls[1][1][
+            query_calls[1].world[
                 "example"
             ]["version"]
             == 2

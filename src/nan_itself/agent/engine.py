@@ -27,14 +27,13 @@ import asyncio
 import json
 import os
 import time
-import uuid
+from dataclasses import replace
 from typing import Callable
 
 from loguru import logger
 
 from .model import (
     AgentResult,
-    AgentTurn,
 )
 from .prompts import (
     build_observation,
@@ -51,7 +50,7 @@ from .verbs import (
     ExecutionState,
 )
 from ..modules import (
-    TurnRecord,
+    Turn,
 )
 from ..events import (
     StreamSink,
@@ -102,12 +101,13 @@ class StepEngine:
             persona=persona,
         )
 
-        turn = AgentTurn(
-            turn_id=uuid.uuid4().hex,
+        turn = Turn(
             agent_hash=context.agent_hash,
+            parent_hash=context.parent_hash,
             depth=context.depth,
-            data=context.world,
             task=context.task,
+            world=context.world,
+            started_at=started_wall,
         )
 
         pending_query_records: dict[str, str] = {}
@@ -176,7 +176,6 @@ class StepEngine:
         ambient_context = (
             await self.modules.query_snapshot(
                 turn,
-                context.world,
                 **(
                     {
                         "on_start": on_module_start,
@@ -310,15 +309,10 @@ class StepEngine:
 
         finally:
             self.modules.deliver_turn(
-                TurnRecord(
-                    agent_hash=context.agent_hash,
-                    parent_hash=context.parent_hash,
-                    depth=context.depth,
-                    task=context.task,
-                    world=context.world,
+                replace(
+                    turn,
                     reply=reply_text,
                     error=error_text,
-                    started_at=started_wall,
                     ended_at=time.time(),
                 )
             )

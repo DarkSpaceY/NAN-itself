@@ -54,7 +54,7 @@ def _load_inbox():
     """
     Load the real InboxModule from its hot-reload file.
     """
-    import importlib.util
+    from nan_itself.modules.loading import import_module_class
 
     path = (
         Path(__file__)
@@ -65,18 +65,9 @@ def _load_inbox():
         / "inbox.py"
     )
 
-    spec = importlib.util.spec_from_file_location(
-        "inbox_module_e2e",
-        path,
-    )
+    cls, _, _ = import_module_class(path)
 
-    module = importlib.util.module_from_spec(
-        spec
-    )
-
-    spec.loader.exec_module(module)
-
-    return module.InboxModule()
+    return cls()
 
 
 class FakeModules:
@@ -121,7 +112,6 @@ class FakeModules:
     async def query_snapshot(
         self,
         turn,
-        snapshot,
         **kwargs,
     ):
         self.query_snapshot_calls += 1
@@ -131,7 +121,7 @@ class FakeModules:
         )
 
         self.query_snapshots.append(
-            snapshot
+            turn.world
         )
 
         ambient = []
@@ -496,7 +486,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
         # ----------------------------------------------------------
-        # World snapshot crosses into ModuleTurn / StepEngine.
+        # World snapshot crosses into Turn / StepEngine.
         #
         # Do not assume the world is directly rendered into the
         # final LLM prompt. CoreAgent passes it into StepEngine,
@@ -516,7 +506,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
         assert (
-            modules.query_turns[0].data[
+            modules.query_turns[0].world[
                 "state"
             ]["value"]
             == 7

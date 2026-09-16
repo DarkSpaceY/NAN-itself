@@ -5,7 +5,7 @@ Memory: semantic memory as an autonomous builtin Module.
 
 Three layers (see docs/memory-design.md):
 
-    journal.jsonl   loss-free capture of every TurnRecord
+    journal.jsonl   loss-free capture of every Turn
     WORKSTATE.md    hot bounded set of open threads
     MEMORY.md       long-term atomic facts (authoritative,
                     human-editable, hot-reloaded)
@@ -37,11 +37,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from ..model import (
-    Module,
-    TurnRecord,
-)
-from ...utils.llm import (
+from nan_itself.utils.llm import (
     LLMRequest,
     Message,
 )
@@ -257,7 +253,7 @@ class MemoryModule(Module):
 
     # ---- journal ----
 
-    def _append_journal(self, record: TurnRecord) -> int:
+    def _append_journal(self, record: Turn) -> int:
         self._ensure_dirs()
 
         seq = self._next_seq()
@@ -693,7 +689,7 @@ class MemoryModule(Module):
 
             await asyncio.sleep(self.poll_interval)
 
-    async def on_turn(self, record: TurnRecord) -> None:
+    async def on_turn(self, record: Turn) -> None:
         seq = self._append_journal(record)
 
         logger.debug(

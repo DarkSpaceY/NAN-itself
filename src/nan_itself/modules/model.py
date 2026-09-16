@@ -1,7 +1,7 @@
 """
 Vocabulary of the modules package.
 
-DataSpace / DataSpaceReader / ModuleTurn / Module / ModuleState /
+DataSpace / DataSpaceReader / Turn / Module / ModuleState /
 ModuleRecord. Pure contracts; imports nothing from siblings.
 """
 
@@ -109,45 +109,18 @@ class DataSpaceReader:
 
 
 @dataclass(frozen=True)
-class ModuleTurn:
+class Turn:
     """
-    Lightweight query view supplied to a Module.
+    One agent turn as seen by Modules.
 
-    `turn` is the opaque Agent turn object.
+    query() receives the in-flight turn: identity and world are
+    already fixed, the result fields are still None.
 
-    `data` is one consistent detached DataSpace snapshot.
+    on_turn() receives the same turn completed: reply / error /
+    started_at / ended_at are filled via dataclasses.replace().
 
-    Core may put additional identity information in `turn`, such as:
-        - agent_hash
-        - depth
-        - turn_id
-
-    Module is free to interpret those fields.
-    """
-
-    turn: Any
-    data: Mapping[str, Mapping[str, Any]]
-
-    def __getattr__(
-        self,
-        name: str,
-    ) -> Any:
-        return getattr(
-            self.turn,
-            name,
-        )
-
-
-@dataclass(frozen=True)
-class TurnRecord:
-    """
-    One completed agent execution: the full closed unit of a turn.
-
-    Seen side     -> task, world, depth / identity
-    Returned side -> reply on success, error otherwise
-
-    Facade delivers one record per finished execution to every
-    Module via on_turn().
+    `world` is one consistent detached DataSpace snapshot shared
+    by the entire dispatch tree.
     """
 
     agent_hash: str
@@ -158,11 +131,11 @@ class TurnRecord:
 
     world: Mapping[str, Mapping[str, Any]]
 
-    reply: str | None
-    error: str | None
+    reply: str | None = None
+    error: str | None = None
 
-    started_at: float
-    ended_at: float
+    started_at: float | None = None
+    ended_at: float | None = None
 
 
 class Module:
@@ -226,7 +199,7 @@ class Module:
 
     async def on_turn(
         self,
-        record: TurnRecord,
+        record: Turn,
     ) -> None:
         """
         Observe a completed agent execution.
@@ -238,7 +211,7 @@ class Module:
 
     async def query(
         self,
-        turn: ModuleTurn,
+        turn: Turn,
     ) -> str | None:
         """
         Produce Agent-facing context/prompt for this turn.

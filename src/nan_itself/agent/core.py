@@ -9,6 +9,7 @@ from .engine import StepEngine
 from .model import AgentResult
 from .runtime import AgentRuntime
 from ..events import EventBus, StreamSink
+from ..utils.backoff import next_backoff
 from ..utils.llm import Message
 
 
@@ -263,13 +264,11 @@ class CoreAgent:
                         raise
 
                     except Exception:
-                        delay = self.backoff[
-                            backoff_index
-                        ]
-
-                        backoff_index = min(
-                            backoff_index + 1,
-                            len(self.backoff) - 1,
+                        delay, backoff_index = (
+                            next_backoff(
+                                self.backoff,
+                                backoff_index,
+                            )
                         )
 
                         logger.exception(

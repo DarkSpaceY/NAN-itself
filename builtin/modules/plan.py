@@ -44,12 +44,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from ..model import (
-    Module,
-    TurnRecord,
-)
-
-from ...utils.llm import (
+from nan_itself.utils.llm import (
     LLMRequest,
     Message,
 )
@@ -455,7 +450,7 @@ class PlanModule(Module):
         self.settle_timeout: float = 120.0
 
         self._pending_records: list[
-            tuple[int, TurnRecord]
+            tuple[int, Turn]
         ] = []
 
         self._pending_user: list[str] = []
@@ -513,7 +508,7 @@ class PlanModule(Module):
 
             self._digest_task = None
 
-    async def on_turn(self, record: TurnRecord) -> None:
+    async def on_turn(self, record: Turn) -> None:
         """
         Execution backflow: enqueue for the planner's next settle.
 
@@ -995,7 +990,7 @@ class PlanModule(Module):
     def _render_record(
         self,
         seq: int,
-        record: TurnRecord,
+        record: Turn,
     ) -> str:
         lines = [f"--- r-{seq:06d}"]
 

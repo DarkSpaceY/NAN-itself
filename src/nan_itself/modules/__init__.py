@@ -15,8 +15,7 @@ from .model import (
     Module,
     ModuleRecord,
     ModuleState,
-    ModuleTurn,
-    TurnRecord,
+    Turn,
     DuplicateModuleError,
 )
 
@@ -31,8 +30,7 @@ __all__ = [
     "Module",
     "ModuleRecord",
     "ModuleState",
-    "ModuleTurn",
-    "TurnRecord",
+    "Turn",
     "DuplicateModuleError",
     "Facade",
 ]

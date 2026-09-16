@@ -17,6 +17,7 @@ from typing import Any
 from .model import (
     MODULE_HEADER,
     Module,
+    Turn,
 )
 
 
@@ -166,7 +167,12 @@ def import_module_class(
 
     module.__file__ = str(path)
 
+    # Inject the module vocabulary so hot-reload files work
+    # without any nan_itself imports. An explicit import of the
+    # same name simply shadows the injection.
     module.__dict__["Module"] = Module
+
+    module.__dict__["Turn"] = Turn
 
     sys.modules[
         module_name

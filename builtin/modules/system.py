@@ -18,12 +18,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from ..model import (
-    Module,
-    ModuleTurn,
-)
-
-from ...utils.system import (
+from nan_itself.utils.system import (
     HAS_PSUTIL,
     SystemProbe,
 )
@@ -97,7 +92,7 @@ class SystemModule(Module):
 
     # ------------------------------------------------------------------
 
-    async def query(self, turn: ModuleTurn) -> str | None:
+    async def query(self, turn: Turn) -> str | None:
         facts = self._latest
 
         if facts is None:

@@ -192,7 +192,7 @@ class ProviderRuntime:
         *,
         scan_interval: float = 1.0,
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
-        mcp_start_timeout: float = 30.0,
+        mcp_start_timeout: float = 60.0,
     ) -> None:
         project_root = (
             Path(__file__).resolve().parents[3]
@@ -1819,13 +1819,28 @@ class ProviderRuntime:
         It only tells worker tasks when they should stop.
         """
         try:
-            await self._scan_sources()
+            try:
+                await self._scan_sources()
+
+            except Exception:
+                # A degraded start (e.g. one MCP provider whose
+                # dependencies cannot be fetched yet) must not
+                # kill the runtime. The supervisor loop keeps
+                # reconciling and failed sources are retried
+                # with backoff.
+                logger.exception(
+                    "Initial provider source scan failed"
+                )
+
+            startup_future = (
+                self._startup_future
+            )
 
             if (
-                self._startup_future is not None
-                and not self._startup_future.done()
+                startup_future is not None
+                and not startup_future.done()
             ):
-                self._startup_future.set_result(
+                startup_future.set_result(
                     None
                 )
 

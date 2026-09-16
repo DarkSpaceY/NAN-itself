@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nan_itself.agent.core import CoreAgent
-from nan_itself.modules.model import DataSpace
-from nan_itself.modules.model import ModuleTurn
+from nan_itself.modules.loading import import_module_class
+from nan_itself.modules.model import DataSpace, Turn
 
 
 # ============================================================================
@@ -54,7 +54,6 @@ class FakeModules:
     async def query_snapshot(
         self,
         turn,
-        snapshot,
         **kwargs,
     ):
         return []
@@ -417,17 +416,16 @@ def test_run_forever_cancels_turn_after_grace():
 
 
 def _turn(depth=0):
-    return ModuleTurn(
-        turn=SimpleNamespace(
-            depth=depth,
-        ),
-        data={},
+    return Turn(
+        agent_hash="h",
+        parent_hash=None,
+        depth=depth,
+        task=None,
+        world={},
     )
 
 
 def _load_inbox(max_size=256):
-    import importlib.util
-
     path = (
         Path(__file__)
         .resolve()
@@ -437,18 +435,9 @@ def _load_inbox(max_size=256):
         / "inbox.py"
     )
 
-    spec = importlib.util.spec_from_file_location(
-        f"inbox_under_test_{max_size}",
-        path,
-    )
+    cls, _, _ = import_module_class(path)
 
-    module = importlib.util.module_from_spec(
-        spec
-    )
-
-    spec.loader.exec_module(module)
-
-    inbox = module.InboxModule()
+    inbox = cls()
 
     inbox.max_size = max_size
 

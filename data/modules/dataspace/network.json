@@ -1,0 +1,32 @@
+{
+  "dl": 1938841.5999999999,
+  "est": 107,
+  "events": [
+    [
+      1789519021.8546739,
+      "new outbound: Ollama -> 34.36.133.15:443"
+    ],
+    [
+      1789519021.854681,
+      "new outbound: Ollama -> 185.199.110.133:443"
+    ],
+    [
+      1789519021.854692,
+      "new outbound: ollama -> 34.36.133.15:443"
+    ]
+  ],
+  "gw": "192.168.1.1",
+  "gw_iface": "en0",
+  "latency": 484.42166598397307,
+  "listen": 23,
+  "local_ip": "192.168.1.121",
+  "now": 1789519027.201365,
+  "offline_since": null,
+  "online": true,
+  "primary_if": "en0",
+  "public_conns": 34,
+  "public_ip": "211.103.78.10",
+  "ssid": "TP-LINK_5G_SZZX",
+  "tunnel": null,
+  "ul": 568320.0
+}

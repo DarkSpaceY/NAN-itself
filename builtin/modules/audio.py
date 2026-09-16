@@ -35,13 +35,7 @@ from typing import Any
 
 from loguru import logger
 
-from ..model import (
-    Module,
-    ModuleTurn,
-    TurnRecord,
-)
-
-from ...utils.audio import (
+from nan_itself.utils.audio import (
     AudioPipeline,
     estimate_bpm,
     lpc_formants,
@@ -1172,11 +1166,11 @@ class AudioModule(Module):
     # Module contract
     # ==================================================================
 
-    async def on_turn(self, record: TurnRecord) -> None:
+    async def on_turn(self, record: Turn) -> None:
         with self._state_lock:
             self._turn_marks.append(record.started_at)
 
-    async def query(self, turn: ModuleTurn) -> str | None:
+    async def query(self, turn: Turn) -> str | None:
         with self._state_lock:
             stats = dict(self._stats)
 

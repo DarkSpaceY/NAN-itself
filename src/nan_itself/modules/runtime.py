@@ -20,7 +20,7 @@ from .model import (
     Module,
     ModuleRecord,
     ModuleState,
-    ModuleTurn,
+    Turn,
 )
 from .reload import (
     hot_reload,
@@ -76,7 +76,7 @@ class Facade:
         record,
     ) -> None:
         """
-        Broadcast one completed TurnRecord to every Module.
+        Broadcast one completed Turn to every Module.
 
         Each handler runs in its own task: a slow or failing
         module can never delay its peers, and never delays the
@@ -346,47 +346,20 @@ class Facade:
             snapshot
         )
 
-    async def query(
-        self,
-        turn: Any,
-    ) -> list[str]:
-        """
-        Compatibility convenience API.
-
-        Captures a fresh DataSpace snapshot and queries all RUNNING
-        Modules against it.
-        """
-        snapshot = self.snapshot()
-
-        return await self.query_snapshot(
-            turn,
-            snapshot,
-        )
-
     async def query_snapshot(
         self,
-        turn: Any,
-        snapshot: Mapping[
-            str,
-            Mapping[str, Any],
-        ],
+        turn: Turn,
         *,
         on_start: Any = None,
         on_result: Any = None,
     ) -> list[str]:
         """
-        Query all RUNNING Modules against an existing snapshot.
+        Query all RUNNING Modules against the turn's world.
 
-        The supplied snapshot is not recaptured.
-
-        This is the API used by Core Agent and Subagents so the entire
-        dispatch tree can observe exactly the same world state.
+        The turn carries the DataSpace snapshot captured when the
+        turn started, so the entire dispatch tree observes exactly
+        the same world state.
         """
-        module_turn = ModuleTurn(
-            turn=turn,
-            data=snapshot,
-        )
-
         records = [
             record
             for record in self.modules.values()
@@ -405,7 +378,7 @@ class Facade:
             try:
                 result = (
                     await record.instance.query(
-                        module_turn
+                        turn
                     )
                 )
                 failed = False
@@ -448,28 +421,6 @@ class Facade:
             if result is not None
             and result != ""
         ]
-
-    async def _query_record(
-        self,
-        record: ModuleRecord,
-        turn: ModuleTurn,
-    ) -> str | None:
-        try:
-            return await record.instance.query(
-                turn
-            )
-
-        except asyncio.CancelledError:
-            raise
-
-        except Exception:
-            logger.exception(
-                f"Module query failed: "
-                f"{record.id}"
-                f"[generation={record.generation}]"
-            )
-
-            return None
 
     # ==================================================================
     # Persistence

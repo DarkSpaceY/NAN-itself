@@ -19,11 +19,6 @@ from collections import deque
 
 from loguru import logger
 
-from nan_itself.modules.model import (
-    Module,
-    ModuleTurn,
-)
-
 
 class InboxModule(Module):
     id = "inbox"
@@ -72,7 +67,7 @@ class InboxModule(Module):
 
     async def query(
         self,
-        turn: ModuleTurn,
+        turn: Turn,
     ) -> str | None:
         # Subagents receive their task from the engine, never
         # the main inbox.

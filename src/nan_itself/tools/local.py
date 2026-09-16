@@ -36,6 +36,10 @@ import mcp.types as types
 from .provider import (
     Provider,
 )
+from .results import (
+    error_result,
+    text_result,
+)
 from .spec import (
     LOCAL_TOOL_HEADER,
     LOCAL_TOOL_HEADER_SCAN_LINES,
@@ -468,8 +472,16 @@ def load_class_from_file(
 
     module.__file__ = str(path)
 
+    # Inject the local-tool vocabulary so hot-reload files work
+    # without any nan_itself imports. An explicit import of the
+    # same name simply shadows the injection.
     module.__dict__["LocalToolProvider"] = LocalToolProvider
+
     module.__dict__["tool"] = tool
+
+    module.__dict__["text_result"] = text_result
+
+    module.__dict__["error_result"] = error_result
 
     sys.modules[
         module_name

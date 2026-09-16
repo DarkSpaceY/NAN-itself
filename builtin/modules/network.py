@@ -14,12 +14,7 @@ import asyncio
 from loguru import logger
 import time
 
-from ..model import (
-    Module,
-    ModuleTurn,
-)
-
-from ...utils.network import (
+from nan_itself.utils.network import (
     NetworkProbe,
     _fmt_bps,
 )
@@ -68,7 +63,7 @@ class NetworkModule(Module):
 
     # ------------------------------------------------------------------
 
-    async def query(self, turn: ModuleTurn) -> str | None:
+    async def query(self, turn: Turn) -> str | None:
         facts = self._latest
 
         if facts is None:

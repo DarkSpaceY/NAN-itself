@@ -1,0 +1,20 @@
+{
+  "battery": 100,
+  "charging": false,
+  "cpu": 31.0,
+  "disk": 53.9,
+  "events": [],
+  "focus": [
+    "TraeCode CN",
+    ""
+  ],
+  "idle": 0.11175,
+  "mem": 80.1,
+  "net_up": null,
+  "now": 1789519028.192527,
+  "self_cpu": 0.0,
+  "self_mem_mb": 118,
+  "swap": 58.2,
+  "uptime": 381878.2722260952,
+  "work_seconds": 10.35234016700997
+}
