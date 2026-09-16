@@ -16,9 +16,11 @@ registry. There is no in-engine loop: after tool calls the next
 observation is rebuilt (fresh modules, fresh inbox), which is
 what keeps the message prefix cacheable.
 
-`history` is owned by the caller (the main agent keeps it across
-turns; spawned agents pass an empty list). The engine never
-mutates it; this turn's messages are returned in AgentResult.
+`history` is maintained in place by the engine: the main agent
+and subagents alike pass their list here; the shared retention
+policy (clear-all over history_char_limit) is applied at entry,
+and this turn's messages are appended before returning. The
+caller never touches history itself.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from .reports import (
     format_child_report,
 )
 from .verbs import (
+    FINISH_TOOL_NAME,
     INVOKE_SKILL_TOOL_NAME,
     INVOKE_TOOL_TOOL_NAME,
     LIST_SKILLS_TOOL_NAME,
@@ -81,12 +84,21 @@ class StepEngine:
         tools,
         skills,
         agent_runtime,
+        history_char_limit: int = 100_000,
     ) -> None:
         self.llm = llm
         self.modules = modules
         self.tools = tools
         self.skills = skills
         self.agent_runtime = agent_runtime
+
+        # Shared history retention policy (main agent and
+        # subagents alike): full retention, clear-all over
+        # the character limit.
+        self.history_char_limit = max(
+            0,
+            history_char_limit,
+        )
 
     async def execute(
         self,
@@ -100,7 +112,33 @@ class StepEngine:
         | None = None,
         sink: StreamSink | None = None,
     ) -> AgentResult:
+        """
+        Run one turn: observe once, call the model once.
+
+        `history` is maintained in place: this turn's messages
+        are appended before returning, and the shared retention
+        policy (clear-all over history_char_limit) is applied at
+        entry. Both the main agent and subagents pass their
+        history list here, so the policy lives in exactly one
+        place.
+        """
         started_wall = time.time()
+
+        # ----------------------------------------------------------
+        # History: full retention, clear-all over the limit.
+        # ----------------------------------------------------------
+
+        if (
+            self._history_chars(history)
+            > self.history_char_limit
+        ):
+            logger.info(
+                "History exceeded {} characters; "
+                "clearing conversation history",
+                self.history_char_limit,
+            )
+
+            history.clear()
 
         state = ExecutionState(
             persona=persona,
@@ -219,7 +257,9 @@ class StepEngine:
                         *history,
                         *turn_messages,
                     ],
-                    tools=self._tool_definitions(),
+                    tools=self._tool_definitions(
+                        depth=context.depth
+                    ),
                 ),
                 sink=sink,
             )
@@ -295,6 +335,21 @@ class StepEngine:
                     )
                 )
 
+            # --------------------------------------------------
+            # finish: the subagent task is over; the report
+            # rides out as the result content.
+            # --------------------------------------------------
+
+            if state.finished:
+                return AgentResult(
+                    content=state.report,
+                    messages=tuple(
+                        turn_messages
+                    ),
+                    response=response,
+                    finished=True,
+                )
+
             return AgentResult(
                 content=None,
                 messages=tuple(
@@ -314,6 +369,10 @@ class StepEngine:
             raise
 
         finally:
+            history.extend(
+                turn_messages
+            )
+
             self.modules.deliver_turn(
                 replace(
                     turn,
@@ -527,11 +586,32 @@ class StepEngine:
 
     def _tool_definitions(
         self,
+        depth: int = 0,
     ) -> list[ToolDefinition]:
+        verbs = list(VERBS.values())
+
+        # finish ends a subagent's loop; the main agent has no
+        # such notion and must not see it.
+        if depth == 0:
+            verbs = [
+                verb
+                for verb in verbs
+                if verb.name != FINISH_TOOL_NAME
+            ]
+
         return [
             verb.definition()
-            for verb in VERBS.values()
+            for verb in verbs
         ]
+
+    @staticmethod
+    def _history_chars(
+        history: list[Message],
+    ) -> int:
+        return sum(
+            len(message.content or "")
+            for message in history
+        )
 
     async def _archive_children(
         self,
@@ -556,8 +636,9 @@ class StepEngine:
 # ----------------------------------------------------------------------
 
 
-# UI record kind per verb: tools, skills, spawning and sleeping
-# each get their own kind; anything else stays a generic verb.
+# UI record kind per verb: tools, skills, spawning, sleeping and
+# finishing each get their own kind; anything else stays a
+# generic verb.
 _RECORD_KINDS = {
     INVOKE_TOOL_TOOL_NAME: "tool",
     LIST_TOOLS_TOOL_NAME: "tool",
@@ -567,6 +648,7 @@ _RECORD_KINDS = {
     SHOW_SKILL_TOOL_NAME: "skill",
     SPAWN_TOOL_NAME: "spawn",
     SLEEP_TOOL_NAME: "sleep",
+    FINISH_TOOL_NAME: "finish",
 }
 
 

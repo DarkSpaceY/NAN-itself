@@ -958,10 +958,28 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
 
                 child_started.set()
 
-                await release_child.wait()
+                # First child turn: blocked, then replies with
+                # plain text -- which does NOT end a subagent
+                # task anymore; the loop starts a new turn.
+                if self.child_calls == 1:
+                    await release_child.wait()
 
+                    return make_response(
+                        content="late child result"
+                    )
+
+                # Second child turn: submit the report via
+                # the finish tool; only this ends the task.
                 return make_response(
-                    content="late child result"
+                    tool_calls=[
+                        make_tool_call(
+                            "finish-1",
+                            "finish",
+                            {
+                                "report": "late child result",
+                            },
+                        )
+                    ]
                 )
 
             # ------------------------------------------------------

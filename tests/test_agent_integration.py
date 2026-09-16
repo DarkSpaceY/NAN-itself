@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nan_itself.agent.core import CoreAgent
+from nan_itself.agent.engine import StepEngine
 from nan_itself.modules.loading import import_module_class
 from nan_itself.modules.model import DataSpace, Turn
 
@@ -106,6 +107,34 @@ class FakeLLM:
     provider = "fake-provider"
 
 
+class EchoLLM:
+    """
+    LLM that answers plain text and retains every request, used
+    for exercising the real StepEngine without tool calls.
+    """
+
+    model = "fake-model"
+    provider = "fake-provider"
+
+    def __init__(self):
+        self.requests = []
+
+    async def generate_complete(
+        self,
+        request,
+    ):
+        self.requests.append(request)
+
+        return SimpleNamespace(
+            content="reply",
+            tool_calls=[],
+            model="fake-model",
+            usage=None,
+            provider="fake-provider",
+            finish_reason="stop",
+        )
+
+
 @dataclass
 class CapturedExecution:
     context: object
@@ -161,13 +190,17 @@ class CapturingEngine:
             ):
                 await outcome
 
+        # Mirror the real StepEngine contract: history is
+        # maintained in place by the engine.
+        message = SimpleNamespace(
+            content="assistant-done",
+        )
+
+        history.append(message)
+
         return SimpleNamespace(
             content=self.reply,
-            messages=(
-                SimpleNamespace(
-                    content="assistant-done",
-                ),
-            ),
+            messages=(message,),
         )
 
 
@@ -242,26 +275,90 @@ def test_run_extends_history_across_turns():
     ] == ["assistant-done"]
 
 
-def test_run_clears_history_over_char_limit():
-    engine = CapturingEngine()
-    core = make_agent(engine=engine)
+def test_core_agent_forwards_history_char_limit_to_engine():
+    # The retention policy lives in the StepEngine; CoreAgent
+    # only forwards the configured limit at construction time.
+    core = make_agent(history_char_limit=5)
 
-    core.history_char_limit = 5
+    assert core.engine.history_char_limit == 5
 
-    core.history.append(
+
+def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
+    engine = StepEngine(
+        llm=FakeLLM(),
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        agent_runtime=SimpleNamespace(),
+    )
+
+    root_names = {
+        tool.name
+        for tool in engine._tool_definitions(
+            depth=0
+        )
+    }
+
+    child_names = {
+        tool.name
+        for tool in engine._tool_definitions(
+            depth=2
+        )
+    }
+
+    assert "finish" not in root_names
+
+    assert "finish" in child_names
+
+
+def test_engine_clears_history_over_char_limit():
+    llm = EchoLLM()
+
+    engine = StepEngine(
+        llm=llm,
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        agent_runtime=SimpleNamespace(),
+        history_char_limit=5,
+    )
+
+    context = SimpleNamespace(
+        agent_hash="hash123",
+        parent_hash=None,
+        depth=0,
+        task=None,
+        world={"state": {"value": 1}},
+    )
+
+    history = [
         SimpleNamespace(
             content="x" * 100,
+        ),
+    ]
+
+    result = run(
+        engine.execute(
+            context=context,
+            persona="p",
+            history=history,
         )
     )
 
-    run(core.run())
+    # The oversized history was cleared before the model call:
+    # only the system message and this turn's observation
+    # reached the model.
+    assert len(llm.requests) == 1
 
-    # History was cleared before the turn; the new turn's
-    # messages are then appended.
-    assert engine.executions[0].history == ()
+    assert len(llm.requests[0].messages) == 2
+
+    # This turn's messages (observation + assistant reply)
+    # were appended in place.
+    assert result.content == "reply"
+
     assert [
-        m.content for m in core.history
-    ] == ["assistant-done"]
+        m.content for m in history
+    ] == ["", "reply"]
 
 
 # ============================================================================

@@ -21,8 +21,14 @@ class AgentResult:
     """
     Result of one completed Agent execution.
 
-    `content` is the model's plain-text reply; None when the turn
-    ended with tool calls (the next turn continues from them).
+    `content` is the model's plain-text reply, or the finish
+    report when the model ended a subagent task via finish;
+    None when the turn ended with tool calls (the next turn
+    continues from them).
+
+    `finished` marks an explicit finish-tool completion: only a
+    subagent loop terminates on it (plain text alone never does,
+    so the main agent is unaffected).
     """
 
     content: str | None
@@ -30,6 +36,8 @@ class AgentResult:
     messages: tuple[Any, ...]
 
     response: Any
+
+    finished: bool = False
 
 
 @dataclass

@@ -51,6 +51,8 @@ SHOW_SKILL_TOOL_NAME = "show_skill"
 
 INVOKE_SKILL_TOOL_NAME = "invoke_skill"
 
+FINISH_TOOL_NAME = "finish"
+
 
 class ExecutionState:
     """
@@ -71,6 +73,11 @@ class ExecutionState:
         self.sink = sink
 
         self.children: list[ChildSubagent] = []
+
+        # Set by FinishVerb; the subagent loop checks it.
+        self.finished = False
+
+        self.report: str | None = None
 
 
 def serialize_tool_result(
@@ -217,11 +224,22 @@ class SpawnVerb:
         async def worker(
             child_context,
         ):
-            return await engine.execute(
-                context=child_context,
-                persona=state.persona,
-                history=[],
-            )
+            # Subagent loop: identical to the main agent cycle
+            # (obs -> model call -> result), but only the finish
+            # tool ends it. History follows the same retention
+            # policy as the main agent -- the engine maintains
+            # it in place, clearing over the char limit.
+            history: list = []
+
+            while True:
+                result = await engine.execute(
+                    context=child_context,
+                    persona=state.persona,
+                    history=history,
+                )
+
+                if result.finished:
+                    return result
 
         try:
             handle = engine.agent_runtime.dispatch(
@@ -712,6 +730,70 @@ class InvokeSkillVerb:
         return result
 
 
+class FinishVerb:
+    """
+    Subagent-only tool: submit the final report and end the
+    task. The main agent never gets this definition, so a
+    depth-0 call is rejected defensively.
+    """
+
+    name: ClassVar[str] = FINISH_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Submit your final report and end this "
+                "subagent task. Only this tool ends the task: "
+                "a plain-text reply keeps the task running. "
+                "Call it exactly once, when the task is fully "
+                "complete."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "report": {
+                        "type": "string",
+                        "description": (
+                            "The final report of the task: "
+                            "outcome, findings and anything "
+                            "the spawner needs."
+                        ),
+                    },
+                },
+                "required": ["report"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        if context.depth == 0:
+            return (
+                "finish is only available to subagents."
+            )
+
+        report = call.arguments.get("report")
+
+        if not isinstance(report, str) or not report.strip():
+            return (
+                "finish requires "
+                "a non-empty 'report'."
+            )
+
+        state.finished = True
+
+        state.report = report
+
+        return "Report submitted; task finished."
+
+
 VERBS: dict[str, Any] = {
     SleepVerb.name: SleepVerb(),
     SpawnVerb.name: SpawnVerb(),
@@ -721,4 +803,5 @@ VERBS: dict[str, Any] = {
     ListSkillsVerb.name: ListSkillsVerb(),
     ShowSkillVerb.name: ShowSkillVerb(),
     InvokeSkillVerb.name: InvokeSkillVerb(),
+    FinishVerb.name: FinishVerb(),
 }

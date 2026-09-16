@@ -41,9 +41,9 @@ class CoreAgent:
         - a turn that ends with tool calls returns content=None;
           run_forever() immediately starts the next turn, whose
           observation is rebuilt fresh (modules, inbox included)
-        - conversation history keeps every turn's messages; when
-          its character count exceeds history_char_limit the
-          whole history is cleared and the next turn starts fresh
+        - conversation history is maintained in place by the
+          step engine, which applies the shared retention policy
+          (clear-all over history_char_limit) for subagents too
 
     run_forever() owns the autonomous loop: failed turns retry
     with escalating backoff, stop requests get a grace window,
@@ -73,11 +73,6 @@ class CoreAgent:
 
         self.max_subagent_depth = max_subagent_depth
 
-        self.history_char_limit = max(
-            0,
-            history_char_limit,
-        )
-
         self.turn_grace = max(
             0.0,
             turn_grace,
@@ -106,6 +101,7 @@ class CoreAgent:
             tools=tools,
             skills=skills,
             agent_runtime=self.agent_runtime,
+            history_char_limit=history_char_limit,
         )
 
         # Loop lifecycle (run_forever).
@@ -150,22 +146,6 @@ class CoreAgent:
         root = self.agent_runtime.create_root(
             world=world,
         )
-
-        # --------------------------------------------------------------
-        # History: full retention, clear-all over the limit.
-        # --------------------------------------------------------------
-
-        if (
-            self._history_chars()
-            > self.history_char_limit
-        ):
-            logger.info(
-                "History exceeded {} characters; "
-                "clearing conversation history",
-                self.history_char_limit,
-            )
-
-            self.history.clear()
 
         sink = (
             StreamSink(self.bus)
@@ -215,10 +195,6 @@ class CoreAgent:
         finally:
             if sink is not None:
                 sink.status_idle()
-
-        self.history.extend(
-            result.messages
-        )
 
         return result
 
@@ -466,15 +442,3 @@ class CoreAgent:
 
         for report in reports:
             inbox.put(report)
-
-    # ==================================================================
-    # History
-    # ==================================================================
-
-    def _history_chars(
-        self,
-    ) -> int:
-        return sum(
-            len(message.content or "")
-            for message in self.history
-        )
