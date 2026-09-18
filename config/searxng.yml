@@ -1,0 +1,20 @@
+# SearXNG CLI settings override for the builtin 'search' local tool.
+#
+# Injected via SEARXNG_CLI_SETTINGS on every searxng-cli invocation.
+# Only keys that differ from the embedded SearXNG defaults are listed
+# here (use_default_settings merge). Set NAN_SEARXNG_SETTINGS to point
+# at a different settings file to replace this one entirely.
+use_default_settings: true
+
+outgoing:
+  # Upstream engines are unreachable from the default network without
+  # a proxy; edit here or point NAN_SEARXNG_SETTINGS elsewhere to change.
+  request_timeout: 10.0
+  max_request_timeout: 20.0
+  proxies:
+    all://:
+      - http://127.0.0.1:33210
+
+valkey:
+  # One process per search: the in-memory cache is enough.
+  url: false

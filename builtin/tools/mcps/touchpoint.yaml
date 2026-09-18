@@ -1,0 +1,10 @@
+name: touchpoint
+command: uvx
+args:
+  - "--from"
+  - "touchpoint-py"
+  # touchpoint-py still uses the mcp 1.x FastMCP API but does not pin
+  # its dependency; force mcp<2 or the server crashes on import.
+  - "--with"
+  - "mcp<2"
+  - "touchpoint-mcp"

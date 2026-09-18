@@ -176,6 +176,12 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
     )
 
     runtime = ProviderRuntime(
+        # Isolate the builtin root: builtin/tools/local now ships a
+        # real provider ('search') and this test must only see its
+        # own temporary source.
+        builtin_tools_dir=(
+            tmp_path / "builtin"
+        ),
         workspace_local_dir=tool_dir,
     )
 
