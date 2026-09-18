@@ -266,9 +266,9 @@ def test_run_assembles_turn_boundaries():
     # First turn: no prior turn, nothing derived.
     assert captured.last_turn is None
 
-    # The completed Turn rides on the result and is the
-    # whole turn record.
-    assert core.turns == [captured.turn]
+    # The completed Turn rides on the result and becomes the
+    # single last_turn reference; nothing else is retained.
+    assert core.last_turn is captured.turn
 
     assert [
         m.content

@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from nan_itself.utils.paths import repo_root
+
 
 class LLMConfig(BaseModel):
     provider: str = "openai"
@@ -78,10 +80,14 @@ class Settings(BaseModel):
 
 
 def load_settings(
-    config_file: str = "config/settings.yaml",
+    config_file: str | Path | None = None,
 ) -> Settings:
-    """加载配置"""
-    path = Path(config_file)
+    """加载配置（默认锚定仓库根目录，与 cwd 无关）"""
+    path = (
+        Path(config_file)
+        if config_file is not None
+        else repo_root() / "config" / "settings.yaml"
+    )
 
     if not path.exists():
         return Settings()

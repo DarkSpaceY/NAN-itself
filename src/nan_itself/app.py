@@ -6,7 +6,6 @@ import signal
 import sys
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -20,6 +19,7 @@ from .modules import (
 )
 from .skills import SkillRuntime
 from .tools import ProviderRuntime
+from .utils import paths as _paths
 from .utils.llm import LLMProvider
 
 settings = get_settings()
@@ -190,7 +190,7 @@ async def run_agent_process() -> None:
     )
 
     persona_path = (
-        Path(__file__).resolve().parents[2]
+        _paths.repo_root()
         / "workspace"
         / "persona.md"
     )
@@ -338,7 +338,7 @@ async def run_agent_process() -> None:
             on_input=ingest,
             state_provider=gateway_state,
             frontend_dir=(
-                Path(__file__).resolve().parents[2]
+                _paths.repo_root()
                 / "frontend"
                 / "app"
                 / "dist"

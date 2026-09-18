@@ -28,6 +28,8 @@ from mcp import (
 )
 from mcp.client.stdio import stdio_client
 
+from nan_itself.utils import paths as _paths
+
 from .provider import Provider
 from .spec import (
     PROVIDER_KIND_MCP,
@@ -301,6 +303,15 @@ def spec_from_mapping(
         cwd = str(
             cwd
         )
+
+        if not Path(cwd).is_absolute():
+            # Relative cwd in an MCP config is repo-anchored,
+            # never process-cwd-anchored: launching nan from
+            # any directory must not move the server's
+            # working directory (same rule as utils/paths.py).
+            cwd = str(
+                _paths.repo_root() / cwd
+            )
 
     return ProviderSpec(
         name=name,

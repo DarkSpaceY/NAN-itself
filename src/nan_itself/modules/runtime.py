@@ -12,6 +12,7 @@ from loguru import logger
 from . import deps as _deps
 from . import loading as _loading
 from . import persistence as _persistence
+from nan_itself.utils import paths as _paths
 from .model import (
     DataSpace,
     DuplicateModuleError,
@@ -120,18 +121,14 @@ class Facade:
         workspace_modules: str | Path | None = None,
         *,
         builtin_modules_dir: str | Path | None = None,
-        data_dir: str | Path = "./data/modules",
+        data_dir: str | Path | None = None,
         retry_interval: float = 1.0,
         scan_interval: float = 1.0,
         llm=None,
     ) -> None:
         self.llm = llm
 
-        project_root = (
-            Path(__file__)
-            .resolve()
-            .parents[3]
-        )
+        project_root = _paths.repo_root()
 
         # Builtin and workspace module files live in parallel
         # directory layouts and are scanned with exactly the same
@@ -163,6 +160,8 @@ class Facade:
 
         self.data_dir = (
             Path(data_dir).resolve()
+            if data_dir is not None
+            else _paths.data_dir() / "modules"
         )
 
         self.private_dir = (

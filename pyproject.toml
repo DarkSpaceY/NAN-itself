@@ -30,7 +30,14 @@ dependencies = [
     "sherpa-onnx>=1.13.6",
     "soar-sml>=9.6.5",
     "sounddevice>=0.5.6",
+    "transformers>=4.49.0",
     "webrtcvad>=2.0.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [project.scripts]

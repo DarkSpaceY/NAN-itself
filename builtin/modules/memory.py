@@ -37,6 +37,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.llm import (
     LLMRequest,
     Message,
@@ -234,7 +235,10 @@ class MemoryModule(Module):
     entry_cap: int = 120
 
     def __init__(self):
-        base = os.getenv("NAN_MEMORY_DIR", "data/databases/memory")
+        base = (
+            os.getenv("NAN_MEMORY_DIR")
+            or _paths.data_dir() / "databases" / "memory"
+        )
 
         self.base = Path(base)
 

@@ -1,5 +1,6 @@
 name: files
 command: npx
+cwd: .
 args:
   - "--yes"
   - "@modelcontextprotocol/server-filesystem@2026.7.10"

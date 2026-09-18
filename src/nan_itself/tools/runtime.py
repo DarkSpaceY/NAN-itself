@@ -67,6 +67,8 @@ from typing import Any
 import mcp.types as types
 from loguru import logger
 
+from nan_itself.utils import paths as _paths
+
 from . import local as local_backend
 from . import mcp as mcp_backend
 from .provider import Provider
@@ -194,9 +196,7 @@ class ProviderRuntime:
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
         mcp_start_timeout: float = 60.0,
     ) -> None:
-        project_root = (
-            Path(__file__).resolve().parents[3]
-        )
+        project_root = _paths.repo_root()
 
         self.tool_timeout = tool_timeout
         self.mcp_start_timeout = (

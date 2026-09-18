@@ -44,6 +44,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.llm import (
     LLMRequest,
     Message,
@@ -418,7 +419,10 @@ class PlanModule(Module):
     # ------------------------------------------------------------------
 
     def __init__(self):
-        base = os.getenv("NAN_PLAN_DIR", "data/databases/plan")
+        base = (
+            os.getenv("NAN_PLAN_DIR")
+            or _paths.data_dir() / "databases" / "plan"
+        )
 
         self.base = Path(base)
 

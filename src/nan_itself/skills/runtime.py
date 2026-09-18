@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+from nan_itself.utils import paths as _paths
+
 from .model import (
     SkillMetadata,
     UnknownSkillError,
@@ -75,7 +77,7 @@ class SkillRuntime:
         resource_char_limit: int = 100_000,
         script_timeout: float = 300.0,
     ) -> None:
-        project_root = Path(__file__).resolve().parents[3]
+        project_root = _paths.repo_root()
 
         self.builtin_skills = (
             Path(builtin_skills).resolve()

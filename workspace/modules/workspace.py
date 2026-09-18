@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from nan_itself.utils import paths as _paths
+
 
 class WorkspaceModule(Module):
     id = "workspace"
@@ -26,7 +28,7 @@ class WorkspaceModule(Module):
     })
 
     def __init__(self) -> None:
-        self.root = Path.cwd().resolve()
+        self.root = _paths.repo_root()
 
         # Private Module state.
         self._files: dict[str, tuple[int, int]] = {}

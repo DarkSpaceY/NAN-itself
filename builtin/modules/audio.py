@@ -35,6 +35,7 @@ from typing import Any
 
 from loguru import logger
 
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.audio import (
     AudioPipeline,
     estimate_bpm,
@@ -48,11 +49,6 @@ from nan_itself.utils.audio import (
     Utterance,
     WhisperTranscriber,
 )
-
-
-def _repo_root() -> Path:
-    # .../builtin/modules/audio.py -> repo root
-    return Path(__file__).resolve().parents[2]
 
 
 class AudioModule(Module):
@@ -153,7 +149,7 @@ class AudioModule(Module):
         self.speaker_model_path = (
             Path(speaker_model)
             if speaker_model
-            else _repo_root()
+            else _paths.repo_root()
             / "models"
             / "speaker"
             / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
@@ -164,7 +160,7 @@ class AudioModule(Module):
         self.registry_path = (
             Path(registry)
             if registry
-            else _repo_root() / "data" / "databases" / "audio" / "voices.json"
+            else _paths.data_dir() / "databases" / "audio" / "voices.json"
         )
 
         self.matcher = SpeakerMatcher(
@@ -216,7 +212,7 @@ class AudioModule(Module):
         self.tagger_model_path = (
             Path(tagger_model)
             if tagger_model
-            else _repo_root()
+            else _paths.repo_root()
             / "models"
             / "audio_tag"
             / "model.int8.onnx"
@@ -227,7 +223,7 @@ class AudioModule(Module):
         self.tagger_labels_path = (
             Path(tagger_labels)
             if tagger_labels
-            else _repo_root()
+            else _paths.repo_root()
             / "models"
             / "audio_tag"
             / "class_labels_indices.csv"
@@ -248,7 +244,7 @@ class AudioModule(Module):
         self.emotion_model_path = (
             Path(emotion_model)
             if emotion_model
-            else _repo_root()
+            else _paths.repo_root()
             / "models"
             / "emotion"
             / "emotion2vec_plus_base.onnx"
@@ -259,7 +255,7 @@ class AudioModule(Module):
         self.emotion_head_path = (
             Path(emotion_head)
             if emotion_head
-            else _repo_root()
+            else _paths.repo_root()
             / "models"
             / "emotion"
             / "emotion2vec_head.json"
@@ -292,7 +288,7 @@ class AudioModule(Module):
         self.models_dir = (
             Path(models_dir)
             if models_dir
-            else _repo_root() / "models" / "whisper"
+            else _paths.repo_root() / "models" / "whisper"
         )
 
         self.pipeline = AudioPipeline(
