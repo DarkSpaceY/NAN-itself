@@ -5,7 +5,8 @@ A turn is exactly ONE cycle of three phases:
 
     observation   one user message carrying ambient Module
                   context (the inbox included); a subagent's
-                  task is appended the same way
+                  task and its finished children's late
+                  reports are appended the same way
     model call    the model sees [system, *history, *turn]
     result        plain text ends the turn; tool calls are run,
                   their results appended, and the turn ends --
@@ -31,6 +32,7 @@ import json
 import os
 import time
 from dataclasses import replace
+from collections.abc import Sequence
 from typing import Callable
 
 from loguru import logger
@@ -107,10 +109,12 @@ class StepEngine:
         context,
         persona: str,
         last_turn: Turn | None = None,
+        state: ExecutionState | None = None,
         report_sink: Callable[
             [list[str]], None
         ]
         | None = None,
+        pending_reports: Sequence[str] = (),
         sink: StreamSink | None = None,
     ) -> AgentResult:
         """
@@ -121,6 +125,20 @@ class StepEngine:
         turn's history snapshot; the clear-all policy applies at
         derivation time. The completed Turn rides out on
         AgentResult.turn -- callers keep no history themselves.
+
+        `state` is the execution state verbs may read or change.
+        Callers that omit it get a fresh per-turn state (the main
+        agent); the subagent worker passes one instance per AGENT
+        so its children list spans the whole task.
+
+        `report_sink` receives the formatted reports of this
+        turn's finished children: the root parks them into the
+        inbox, a subagent's worker buffers them for its own next
+        observation.
+
+        `pending_reports` are already-finished child reports to
+        fold into this turn's observation -- the delivery path
+        that hands a subagent its own children's reports.
         """
         started_wall = time.time()
 
@@ -149,10 +167,11 @@ class StepEngine:
 
                 prior = ()
 
-        state = ExecutionState(
-            persona=persona,
-            sink=sink,
-        )
+        if state is None:
+            state = ExecutionState(
+                persona=persona,
+                sink=sink,
+            )
 
         turn = Turn(
             agent_hash=context.agent_hash,
@@ -254,6 +273,7 @@ class StepEngine:
                     if context.depth > 0
                     else None
                 ),
+                reports=pending_reports,
             )
         ]
 
@@ -406,12 +426,21 @@ class StepEngine:
                 child
                 for child in state.children
                 if not child.reported
+                and not child.archiving
             ]
 
+            # A finished subagent's worker delivers its children's
+            # reports inline (_settle_children in verbs.py);
+            # background archiving here would only double-format
+            # them into a buffer nobody drains anymore.
             if (
                 pending
                 and report_sink is not None
+                and not state.finished
             ):
+                for child in pending:
+                    child.archiving = True
+
                 task = asyncio.create_task(
                     self._archive_children(
                         pending,
@@ -650,6 +679,11 @@ class StepEngine:
         if reports:
             sink(reports)
 
+            # Delivery done: exclude these children from any
+            # later archive pass.
+            for child in pending:
+                child.reported = True
+
 
 # ----------------------------------------------------------------------
 # Small helpers
@@ -686,8 +720,9 @@ def _assistant_message_with_calls(
 ) -> Message:
     """
     Tool-call-only assistant messages are allowed to have no textual
-    content. Message itself expects a concrete content value, so
-    normalize None to an empty string at the agent boundary.
+    content (Message.content is `str | None`). Normalize a missing
+    content to an empty string at the agent boundary so downstream
+    snapshot handling never has to handle None.
     """
     return Message(
         role="assistant",

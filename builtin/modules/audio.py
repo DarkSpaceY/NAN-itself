@@ -623,8 +623,9 @@ class AudioModule(Module):
 
     def _get_embedder(self) -> Any | None:
         """
-        Lazy singleton; a failing backend disables tagging for
-        the session instead of poisoning every utterance.
+        Lazy singleton; a failing backend disables speaker
+        attribution for the session instead of poisoning every
+        utterance (tagging runs on an independent tagger).
         """
         if self._embedder is not None:
             return self._embedder
@@ -1332,7 +1333,8 @@ class AudioModule(Module):
         return f"{hours:.1f}h"
 
     # ==================================================================
-    # Persistence (counters only; senses reset on reboot)
+    # Persistence (counters plus the noise-floor seed; senses reset
+    # on reboot except the restored noise floor)
     # ==================================================================
 
     def serialize_state(self) -> dict[str, Any]:

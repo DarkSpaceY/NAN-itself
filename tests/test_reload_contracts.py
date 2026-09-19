@@ -867,9 +867,9 @@ def test_module_reload_does_not_rebind_unrelated_module(
     # ------------------------------------------------------------------
     # Strongest isolation assertion.
     #
-    # Current implementation is expected to fail here because
-    # hot_reload() calls _rebuild_dependency_graph(), which calls
-    # _bind_instance() for every Module.
+    # hot_reload() must bind ONLY the candidate:
+    # _rebuild_dependency_graph(bind=False) must not re-bind other
+    # modules, so "b" never appears in bind_calls.
     # ------------------------------------------------------------------
 
     assert "b" not in bind_calls

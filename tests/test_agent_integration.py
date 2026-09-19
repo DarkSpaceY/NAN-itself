@@ -7,9 +7,11 @@ from types import SimpleNamespace
 
 from nan_itself.agent.core import CoreAgent
 from nan_itself.agent.engine import StepEngine
+from nan_itself.agent.runtime import AgentRuntime
+from nan_itself.agent.verbs import ExecutionState, SpawnVerb
 from nan_itself.modules.loading import import_module_class
 from nan_itself.modules.model import DataSpace, Turn
-from nan_itself.utils.llm import Message
+from nan_itself.utils.llm import Message, ToolCall
 
 
 # ============================================================================
@@ -484,6 +486,253 @@ def test_park_reports_drops_without_inbox():
         [
             "[Subagent Report]\nstatus: completed",
         ]
+    )
+
+
+# ============================================================================
+# Child report delivery (one level up)
+# ============================================================================
+
+
+class ScriptedLLM:
+    """
+    LLM driven by each turn's observation (messages[-1] at the
+    first model call of every turn):
+
+        - the depth-2 grandchild finishes with its report
+          (optionally gated, to simulate a slow child);
+        - the depth-1 parent spawns on its first turn, then
+          finishes once the child report reached its observation
+          (or immediately when finish_on_call is set).
+    """
+
+    model = "fake-model"
+    provider = "fake-provider"
+
+    def __init__(
+        self,
+        *,
+        finish_on_call: int | None = None,
+        grandchild_gate: asyncio.Event | None = None,
+    ):
+        self.requests = []
+        self.finish_on_call = finish_on_call
+        self.grandchild_gate = grandchild_gate
+        self.parent_calls = 0
+        self._call_ids = 0
+
+    def _id(self) -> str:
+        self._call_ids += 1
+
+        return f"call-{self._call_ids}"
+
+    def _finish(
+        self,
+        report: str,
+    ):
+        return SimpleNamespace(
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id=self._id(),
+                    name="finish",
+                    arguments={"report": report},
+                ),
+            ],
+            model="fake-model",
+            usage=None,
+            provider="fake-provider",
+            finish_reason="tool_calls",
+        )
+
+    def _spawn(self, task: str):
+        return SimpleNamespace(
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id=self._id(),
+                    name="spawn",
+                    arguments={"task": task},
+                ),
+            ],
+            model="fake-model",
+            usage=None,
+            provider="fake-provider",
+            finish_reason="tool_calls",
+        )
+
+    @staticmethod
+    def _text(text: str):
+        return SimpleNamespace(
+            content=text,
+            tool_calls=[],
+            model="fake-model",
+            usage=None,
+            provider="fake-provider",
+            finish_reason="stop",
+        )
+
+    async def generate_complete(
+        self,
+        request,
+    ):
+        self.requests.append(request)
+
+        # A real yield point: without it the all-inline fakes
+        # would never let sibling tasks (the spawned grandchild,
+        # the report archive) run between this agent's turns.
+        await asyncio.sleep(0)
+
+        observation = (
+            request.messages[-1].content or ""
+        )
+
+        # The parent's observation always carries its task; check
+        # it FIRST, because a delivered child report quotes the
+        # grandchild task verbatim in its header.
+        if "parent task" in observation:
+            self.parent_calls += 1
+
+            if self.parent_calls == 1:
+                return self._spawn("grandchild task")
+
+            if (
+                self.finish_on_call is not None
+                and self.parent_calls
+                >= self.finish_on_call
+            ):
+                # Finish while the grandchild is still running:
+                # unblock it only after the parent called
+                # finish.
+                if self.grandchild_gate is not None:
+                    self.grandchild_gate.set()
+
+                return self._finish("parent report")
+
+            if "[Subagent Report]" in observation:
+                return self._finish("parent report")
+
+            if self.parent_calls > 50:
+                raise AssertionError(
+                    "parent never received the child report"
+                )
+
+            return self._text("still working")
+
+        if "grandchild task" in observation:
+            if self.grandchild_gate is not None:
+                await self.grandchild_gate.wait()
+
+            return self._finish(
+                "grandchild report"
+            )
+
+        raise AssertionError(
+            "unrouted observation: {!r:.200}".format(
+                observation
+            )
+        )
+
+
+async def _run_spawn_scenario(
+    llm,
+):
+    """
+    Spawn through the real SpawnVerb so the real worker loop runs:
+    the spawned agent (depth 2, task 'parent task') spawns its own
+    grandchild (depth 3, task 'grandchild task'), then finishes.
+    Returns the spawned agent's settled result.
+    """
+    engine = StepEngine(
+        llm=llm,
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        agent_runtime=AgentRuntime(
+            max_subagent_depth=3
+        ),
+    )
+
+    state = ExecutionState(persona="p")
+
+    context = SimpleNamespace(
+        agent_hash="parent-hash",
+        parent_hash="root-hash",
+        depth=1,
+        task="parent task",
+        world={},
+    )
+
+    call = SimpleNamespace(
+        id="call-0",
+        name="spawn",
+        arguments={"task": "parent task"},
+    )
+
+    await SpawnVerb().execute(
+        call=call,
+        context=context,
+        state=state,
+        engine=engine,
+    )
+
+    result = await state.children[0].handle.wait()
+
+    await engine.agent_runtime.shutdown()
+
+    return result
+
+
+def test_child_report_reaches_parent_observation():
+    llm = ScriptedLLM()
+
+    result = run(_run_spawn_scenario(llm))
+
+    # The parent finished by synthesizing the report that was
+    # delivered into its observation.
+    assert result.finished is True
+
+    assert result.content == "parent report"
+
+    # Some parent turn's observation carried the [Subagent
+    # Report] block from the grandchild.
+    observations = [
+        request.messages[-1].content or ""
+        for request in llm.requests
+    ]
+
+    assert any(
+        "[Subagent Report]" in observation
+        and "grandchild report" in observation
+        for observation in observations
+    )
+
+
+def test_early_finish_waits_out_running_children():
+    gate = asyncio.Event()
+
+    llm = ScriptedLLM(
+        finish_on_call=2,
+        grandchild_gate=gate,
+    )
+
+    result = run(_run_spawn_scenario(llm))
+
+    # The parent finished before the grandchild; the worker
+    # waited the grandchild out and its report rode out with the
+    # finish report instead of being lost.
+    assert result.finished is True
+
+    assert (result.content or "").startswith(
+        "parent report"
+    )
+
+    assert "[Subagent Report]" in (
+        result.content or ""
+    )
+
+    assert "grandchild report" in (
+        result.content or ""
     )
 
 

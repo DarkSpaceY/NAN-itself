@@ -244,7 +244,7 @@ class MotionTracker:
     pipeline as events:
 
         motion_active   scene content moved (ratio + energy gates)
-        scene_cut       histogram collapsed while diff spiked
+        scene_cut       structural correlation collapsed while diff spiked
         light_change    uniform luminance jump (lamp/flash), no cut
         flicker         >= flicker_count light changes in the window
     """
@@ -1748,7 +1748,7 @@ class VisionPipeline:
     process() returns typed events:
 
         {"type": "motion_start", "ratio": float}
-        {"type": "light_change", "delta": float}
+        {"type": "light_change"}
         {"type": "scene_cut"}
         {"type": "occlusion"} / {"type": "recovery"}
         {"type": "glance", "glance": Glance}

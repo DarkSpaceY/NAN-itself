@@ -12,7 +12,7 @@ def _worker_process(model_path: Path, messages_queue, running_event, maxsize: in
     
     Args:
         model_path: 模型路径
-        messages_queue: 共享的 deque 队列
+        messages_queue: 跨进程共享的 Manager list 代理
         running_event: 运行状态 Event
         maxsize: 队列最大长度
     """

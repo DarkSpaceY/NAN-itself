@@ -3,7 +3,7 @@
 """
 Vision: seeing as an autonomous builtin Module.
 
-Layers implemented (docs/vision-design.md, minus VLM content):
+Layers implemented (docs/vision-design.md):
 
     L1  photometry    brightness/contrast/clipping/sharpness/...
     L2  motion        frame-diff energy, quiet spans, cuts, light
@@ -12,11 +12,13 @@ Layers implemented (docs/vision-design.md, minus VLM content):
     L5  objects       faces via face_recognition; YOLO if a model
                       has been dropped into models/vision/object
     L6  semantics     person registry, QR, OCR (easyocr)
+    L7  caption       VLM caption of the current glance
+                      (SmolVLM2-500M-Video-Instruct)
 
 Two daemon threads outside the event loop:
 
     capture     camera frames -> VisionPipeline -> glance queue
-    inference   glance queue -> face/QR/OCR/YOLO -> ring
+    inference   glance queue -> face/QR/OCR/YOLO/caption -> ring
 
 query() is a pure projection of already-computed rings/stats; it
 never touches models or OpenCV. Hardware failure degrades to

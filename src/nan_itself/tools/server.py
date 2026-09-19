@@ -102,8 +102,10 @@ class MCPFacade:
         @self.server.list_tools()
         async def list_tools() -> list[types.Tool]:
             return [
-                tool
-                for _, tool in (
+                tool.model_copy(
+                    update={"name": f"{provider}/{tool.name}"}
+                )
+                for provider, tool in (
                     self.runtime.list_all_tools()
                 )
             ]

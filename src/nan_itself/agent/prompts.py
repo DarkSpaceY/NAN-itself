@@ -16,6 +16,8 @@ here — they live beside the code that emits those messages.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from ..utils.llm import (
     Message,
 )
@@ -59,10 +61,13 @@ def build_observation(
     *,
     ambient_context: list[str],
     task: str | None = None,
+    reports: Sequence[str] = (),
 ) -> Message:
     """
     One user message per turn: ambient Module observations
-    (including the inbox) first, then a subagent's task.
+    (including the inbox) first, then finished child reports
+    delivered to this agent, then a subagent's task. The reports
+    carry their own [Subagent Report] labels from reports.py.
     """
     parts: list[str] = []
 
@@ -79,6 +84,10 @@ def build_observation(
         parts.append(
             section
         )
+
+    parts.extend(
+        reports
+    )
 
     if task:
         parts.append(

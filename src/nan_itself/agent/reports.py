@@ -2,8 +2,11 @@
 Subagent report formatting.
 
 When a spawned Subagent finishes, its final report is formatted
-here and parked into the Inbox by the engine, so the next turn's
-observation carries it.
+here. Delivery is exactly one level up: the root agent parks
+reports into the shared Inbox, while a subagent's own engine
+folds its children's reports into that subagent's next-turn
+observation -- or, when the subagent finishes first, its worker
+appends them to the finish report.
 """
 
 from __future__ import annotations

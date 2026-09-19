@@ -170,35 +170,6 @@ def foreground_app() -> tuple[str, str] | None:
     return None
 
 
-def wifi_ssid() -> str | None:
-    system = platform.system()
-
-    if system == "Darwin":
-        for device in ("en0", "en1"):
-            out = _run(f"ipconfig getsummary {device}")
-
-            match = re.search(r"^\s*SSID\s*:\s*(.+)$", out, re.M)
-
-            if match:
-                return match.group(1).strip()
-
-        return None
-
-    if system == "Linux":
-        out = _run("iwgetid -r").strip()
-
-        return out or None
-
-    if system == "Windows":
-        out = _run("netsh wlan show interfaces")
-
-        match = re.search(r"^\s*SSID\s*:\s*(.+)$", out, re.M)
-
-        return match.group(1).strip() if match else None
-
-    return None
-
-
 def display_count() -> int | None:
     try:
         import mss

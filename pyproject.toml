@@ -1,10 +1,20 @@
 [project]
 name = "nan-itself"
 version = "0.1.0"
-description = "Add your description here"
+description = "A self-contained, local-first agent framework with hot-reloadable tools, skills and perception modules"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "DarkSpaceY", email = "yif.chien.nolimit@gmail.com" }
+]
+keywords = ["agent", "llm", "mcp", "hot-reload", "local-first", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 requires-python = ">=3.12"
 dependencies = [

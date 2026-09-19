@@ -8,20 +8,26 @@ One registry, one protocol:
     execute(...)    performs the action, may mutate
                     the execution state
 
-Every agent sees every verb. Tools and skills are NOT exposed to
-the model directly: they are reached only through these verbs,
-and their content therefore arrives as tool results.
+Every agent sees every verb except finish, which is filtered out at
+depth 0: only subagents may end their own loop. Tools and skills are
+NOT exposed to the model directly: they are reached only through these
+verbs, and their content therefore arrives as tool results.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, ClassVar
 
 import mcp.types as mcp_types
 
 from .model import (
+    AgentResult,
     ChildSubagent,
+)
+from .reports import (
+    format_child_report,
 )
 from .runtime import (
     SubagentLimitError,
@@ -56,10 +62,11 @@ FINISH_TOOL_NAME = "finish"
 
 class ExecutionState:
     """
-    Per-execution mutable state a verb may read or change.
+    Per-agent mutable state a verb may read or change.
 
-    One instance per StepEngine.execute call; never shared
-    across agents.
+    The main agent gets a fresh one per turn; a subagent's worker
+    owns one per AGENT and passes it into every engine.execute
+    call, so its children list spans the whole task.
     """
 
     def __init__(
@@ -231,6 +238,19 @@ class SpawnVerb:
             # turn derives its history snapshot from the last one
             # (same retention policy as the main agent). The
             # child's turn chain dies with the worker.
+            #
+            # Report delivery is one level up: this agent's own
+            # children are archived into `report_buffer` at turn
+            # boundaries and drained into the next observation;
+            # on finish, any child whose report was not delivered
+            # yet is waited out and appended to the finish report
+            # (_settle_children), so nothing is orphaned.
+            child_state = ExecutionState(
+                persona=state.persona,
+            )
+
+            report_buffer: list[str] = []
+
             last_turn = None
 
             while True:
@@ -238,12 +258,20 @@ class SpawnVerb:
                     context=child_context,
                     persona=state.persona,
                     last_turn=last_turn,
+                    state=child_state,
+                    report_sink=report_buffer.extend,
+                    pending_reports=(
+                        _drain(report_buffer)
+                    ),
                 )
 
                 last_turn = result.turn
 
                 if result.finished:
-                    return result
+                    return await _settle_children(
+                        child_state,
+                        result,
+                    )
 
         try:
             handle = engine.agent_runtime.dispatch(
@@ -293,6 +321,66 @@ class SpawnVerb:
             "It runs in parallel; its report will be "
             "delivered automatically."
         )
+
+
+def _drain(
+    buffer: list[str],
+) -> list[str]:
+    """
+    Take everything currently buffered. Reports that arrive while
+    a turn is running stay buffered until the next turn's
+    observation picks them up.
+    """
+    reports = list(buffer)
+
+    buffer.clear()
+
+    return reports
+
+
+async def _settle_children(
+    state: ExecutionState,
+    result: AgentResult,
+) -> AgentResult:
+    """
+    A finishing subagent must not orphan its children: wait out
+    every child whose report has not been delivered yet and
+    append the reports to the finish report, so they still reach
+    this agent's parent one level up. Reports already archived
+    into earlier observations stay where they are.
+    """
+    pending = [
+        child
+        for child in state.children
+        if not child.reported
+    ]
+
+    if not pending:
+        return result
+
+    reports: list[str] = []
+
+    for child in pending:
+        reports.append(
+            await format_child_report(
+                child
+            )
+        )
+
+        child.reported = True
+
+    content = result.content or ""
+
+    appended = "\n\n".join(reports)
+
+    return replace(
+        result,
+        content=(
+            f"{content}\n\n{appended}"
+            if content
+            else appended
+        ),
+    )
 
 
 class ListToolsVerb:

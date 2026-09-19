@@ -1984,7 +1984,8 @@ class PlanModule(Module):
     ) -> None:
         """
         Emit ✓ / · / ▶ lines down the active path; the deepest
-        active entry gets the ▶ marker with its shadow.
+        active leaf gets the ▶ marker with its shadow, non-leaf
+        focal entries get ◌ with a status suffix.
         """
         prefix = "  " * depth
 

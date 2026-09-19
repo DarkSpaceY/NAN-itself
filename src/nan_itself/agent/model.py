@@ -49,12 +49,19 @@ class ChildSubagent:
     """
     Execution-local record of one dispatched child.
 
-    Handles are never exposed to the model. Reports are delivered
-    automatically at step boundaries or into the next turn when
-    they arrive late.
+    Handles are never exposed to the model. A finished child's
+    report is delivered exactly one level up: the parent's engine
+    archives it in the background and the report rides into the
+    parent's next-turn observation (the root agent parks it into
+    the shared inbox instead).
+
+    `archiving` marks a child whose delivery task is scheduled but
+    has not sunk its report yet; `reported` turns True once the
+    report reached the parent-side sink.
     """
 
     id: str
     task: str
     handle: "SubagentHandle"
+    archiving: bool = False
     reported: bool = False

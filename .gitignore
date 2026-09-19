@@ -8,4 +8,18 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Caches and tooling
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Environment / secrets
+.env
+
+# Runtime data (databases, downloads, workspace content)
+data/
+workspace/
+
+# Model weights (large binaries, managed outside git)
 models/
