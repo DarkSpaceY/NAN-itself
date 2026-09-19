@@ -429,10 +429,10 @@ class StepEngine:
                 and not child.archiving
             ]
 
-            # A finished subagent's worker delivers its children's
-            # reports inline (_settle_children in verbs.py);
-            # background archiving here would only double-format
-            # them into a buffer nobody drains anymore.
+            # A finished subagent drops its undelivered children's
+            # reports (warning logged worker-side); archiving them
+            # here would only format them into a buffer nobody
+            # drains anymore.
             if (
                 pending
                 and report_sink is not None

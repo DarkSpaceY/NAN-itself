@@ -5,8 +5,8 @@ When a spawned Subagent finishes, its final report is formatted
 here. Delivery is exactly one level up: the root agent parks
 reports into the shared Inbox, while a subagent's own engine
 folds its children's reports into that subagent's next-turn
-observation -- or, when the subagent finishes first, its worker
-appends them to the finish report.
+observation. A child that has not delivered by the time its
+parent finishes loses its report (dropped with a warning).
 """
 
 from __future__ import annotations

@@ -708,7 +708,7 @@ def test_child_report_reaches_parent_observation():
     )
 
 
-def test_early_finish_waits_out_running_children():
+def test_early_finish_drops_running_children_reports():
     gate = asyncio.Event()
 
     llm = ScriptedLLM(
@@ -718,22 +718,11 @@ def test_early_finish_waits_out_running_children():
 
     result = run(_run_spawn_scenario(llm))
 
-    # The parent finished before the grandchild; the worker
-    # waited the grandchild out and its report rode out with the
-    # finish report instead of being lost.
+    # The parent finished before the grandchild delivered: the
+    # late report is dropped, not appended to the finish report.
     assert result.finished is True
 
-    assert (result.content or "").startswith(
-        "parent report"
-    )
-
-    assert "[Subagent Report]" in (
-        result.content or ""
-    )
-
-    assert "grandchild report" in (
-        result.content or ""
-    )
+    assert result.content == "parent report"
 
 
 # ============================================================================

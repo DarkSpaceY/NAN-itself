@@ -17,17 +17,13 @@ verbs, and their content therefore arrives as tool results.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Any, ClassVar
 
 import mcp.types as mcp_types
+from loguru import logger
 
 from .model import (
-    AgentResult,
     ChildSubagent,
-)
-from .reports import (
-    format_child_report,
 )
 from .runtime import (
     SubagentLimitError,
@@ -241,10 +237,10 @@ class SpawnVerb:
             #
             # Report delivery is one level up: this agent's own
             # children are archived into `report_buffer` at turn
-            # boundaries and drained into the next observation;
-            # on finish, any child whose report was not delivered
-            # yet is waited out and appended to the finish report
-            # (_settle_children), so nothing is orphaned.
+            # boundaries and drained into the next observation.
+            # A child that has not delivered by the time this
+            # agent finishes loses its report (warning logged) --
+            # the parent decided not to wait for it.
             child_state = ExecutionState(
                 persona=state.persona,
             )
@@ -268,10 +264,22 @@ class SpawnVerb:
                 last_turn = result.turn
 
                 if result.finished:
-                    return await _settle_children(
-                        child_state,
-                        result,
-                    )
+                    lost = [
+                        child
+                        for child in child_state.children
+                        if not child.reported
+                    ]
+
+                    if lost:
+                        logger.warning(
+                            "Subagent {} finished with {} "
+                            "undelivered child report(s); "
+                            "dropped",
+                            child_context.agent_hash[:8],
+                            len(lost),
+                        )
+
+                    return result
 
         try:
             handle = engine.agent_runtime.dispatch(
@@ -336,51 +344,6 @@ def _drain(
     buffer.clear()
 
     return reports
-
-
-async def _settle_children(
-    state: ExecutionState,
-    result: AgentResult,
-) -> AgentResult:
-    """
-    A finishing subagent must not orphan its children: wait out
-    every child whose report has not been delivered yet and
-    append the reports to the finish report, so they still reach
-    this agent's parent one level up. Reports already archived
-    into earlier observations stay where they are.
-    """
-    pending = [
-        child
-        for child in state.children
-        if not child.reported
-    ]
-
-    if not pending:
-        return result
-
-    reports: list[str] = []
-
-    for child in pending:
-        reports.append(
-            await format_child_report(
-                child
-            )
-        )
-
-        child.reported = True
-
-    content = result.content or ""
-
-    appended = "\n\n".join(reports)
-
-    return replace(
-        result,
-        content=(
-            f"{content}\n\n{appended}"
-            if content
-            else appended
-        ),
-    )
 
 
 class ListToolsVerb:
