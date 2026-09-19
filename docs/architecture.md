@@ -70,7 +70,11 @@ query:
 - the module surface exposed to the agent is a pure `query()` projection,
 - missing model weights degrade a backend to an explicit `unavailable`
   state instead of failing the module,
-- private state counters are persisted through `serialize_state`.
+- private state counters are persisted through `serialize_state`,
+- modules that opt in (`ActionSurface`) also expose **channels**:
+  write-only data slots the model reaches through the
+  `list_channels` / `show_channels` / `invoke_channels` verb triple;
+  see [design/reactive-modules.md](design/reactive-modules.md).
 
 ## Gateway and events
 

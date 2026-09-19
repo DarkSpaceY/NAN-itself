@@ -12,6 +12,10 @@ Every agent sees every verb except finish, which is filtered out at
 depth 0: only subagents may end their own loop. Tools and skills are
 NOT exposed to the model directly: they are reached only through these
 verbs, and their content therefore arrives as tool results.
+
+The interface-face verb triples share one mental model -- list
+enumerates, show inspects, invoke acts -- for tools, skills and
+module channels alike.
 """
 
 from __future__ import annotations

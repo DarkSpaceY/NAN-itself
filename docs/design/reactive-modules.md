@@ -64,20 +64,21 @@ Modules that declare no channels behave exactly as today (zero regression).
 
 ## Channel contract
 
-- **Declaration** (on the module class): `name` + `schema` (JSON schema
-  derived from type annotations, the same mechanism `@tool` uses — *open:
-  exact annotation form*) + `depth`.
+- **Declaration** (on the module class): `name` + `schema` (a pydantic
+  model class — the same annotation-driven mechanism `@tool` uses;
+  `None` means unvalidated passthrough) + `depth`.
 - **Depth is declarative**:
   - `depth = 1` — overwrite slot; the newest target wins. Sensible default
     for goal / intent messages (no stale goals ever queue up). The write
     result is `replaced` when a previous target was present, `written`
     otherwise.
   - `depth = N` — FIFO queue. For command streams where no message may be
-    dropped (e.g. key sequences). Overflow drops oldest (*open*).
+    dropped (e.g. key sequences). Overflow drops oldest (a bounded
+    `deque(maxlen=N)`).
 - **One-way downlink** (model → module). The uplink remains
   `DataSpace` / `query()` projection + events / inbox. No new uplink
   semantics.
-- **Write contract**: `update_target(module_id, channel, payload)` → schema
+- **Write contract**: `invoke_channels(module, channel, payload)` → schema
   validation → **deep copy** into the slot → returns `written` /
   `replaced` / `rejected`. Validation failures are rejected at the
   boundary; a module's tick never sees malformed payloads.
@@ -93,12 +94,12 @@ Aligned with the existing interface-face verb triple (`list_tools` /
 `invoke_skill`) — the model keeps exactly one mental model for every
 interface face: **list enumerates, show inspects, invoke acts.**
 
-- `list_channels` — enumerate a module's exposed channels, rendering each
-  channel's schema so the model can construct valid payloads;
-- `show_channels` — channel details: schema, depth, occupancy state.
-  Slots are **write-only**: the current payload is never rendered back to
-  the model — once written it can only be consumed by the module or
-  overwritten;
+- `list_channels` — enumerate every RUNNING action module's channels as
+  `module/channel` with its depth discipline;
+- `show_channels` — channel details: description, schema, depth,
+  occupancy state. Slots are **write-only**: the current payload is never
+  rendered back to the model — once written it can only be consumed by
+  the module or overwritten;
 - `invoke_channels` — write the slot: schema validation → deep copy →
   returns `written` / `replaced` / `rejected`.
 
@@ -124,9 +125,11 @@ side.
 
 ## Interaction with existing architecture
 
-- **Snapshot**: channel + current-target summaries are injected into the
-  derived snapshot so the model does not re-send targets it already sent.
-  Exact format and budget: *open*.
+- **Snapshot**: the channel registry summary (name, depth, occupancy)
+  and one-shot feedback events are rendered by each action module's own
+  `query()` via `render_action_section()` — the engine needs no changes,
+  and the model does not re-send targets it already sent. Events are
+  drained on render.
 - **Hot reload**: slot residue is dropped when an instance is rebuilt.
   Channel state is transient and does **not** participate in
   `serialize_state()`.
@@ -180,13 +183,13 @@ case is expressed as multiple channels, not as a task queue.
 
 ## Open implementation details
 
-- Exact schema annotation form for channel declarations and where
-  validation errors are surfaced to the model on `rejected`.
-- Snapshot summary format and character budget for channel / target state.
-- Overflow discipline for `depth > 1` queues (single-consumer FIFO; the
-  leaning is drop-oldest).
 - Target granularity convention: one target = one unit the module can
   close the loop on within its own domain; cross-domain orchestration stays
   with the agent.
 - Tick frequency and budget semantics are module-private; the core does
   not see them.
+
+(Decided during implementation: channel schemas are pydantic models;
+validation errors are returned verbatim to the model on `rejected`;
+the registry summary is module-rendered; `depth > 1` overflow is
+drop-oldest.)

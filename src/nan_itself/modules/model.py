@@ -1,8 +1,9 @@
 """
 Vocabulary of the modules package.
 
-DataSpace / DataSpaceReader / Turn / Module / ModuleState /
-ModuleRecord. Pure contracts; imports nothing from siblings.
+DataSpace / DataSpaceReader / Turn / ChannelSpec / Module /
+ModuleState / ModuleRecord. Pure contracts; imports nothing
+from siblings.
 """
 
 from __future__ import annotations

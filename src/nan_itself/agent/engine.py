@@ -693,9 +693,9 @@ class StepEngine:
 # ----------------------------------------------------------------------
 
 
-# UI record kind per verb: tools, skills, spawning, sleeping and
-# finishing each get their own kind; anything else stays a
-# generic verb.
+# UI record kind per verb: tools, skills, channels (targets),
+# spawning, sleeping and finishing each get their own kind;
+# anything else stays a generic verb.
 _RECORD_KINDS = {
     INVOKE_TOOL_TOOL_NAME: "tool",
     LIST_TOOLS_TOOL_NAME: "tool",

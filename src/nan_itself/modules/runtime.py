@@ -52,6 +52,7 @@ class Facade:
         - persistence
         - Agent-turn DataSpace snapshots
         - Module querying
+        - channel downlink routing (never raises)
 
     Important isolation rule:
 
