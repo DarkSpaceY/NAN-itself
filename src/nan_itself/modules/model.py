@@ -104,6 +104,52 @@ class DataSpaceReader:
 
 
 # ============================================================================
+# Action channels
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class ChannelSpec:
+    """
+    One action channel a Module exposes to the agent.
+
+    Declared as class-level `channels` on a Module. Every declared
+    channel becomes one tool named `module:<module_id>/<channel>`;
+    `input_schema` is that tool's schema. The Module itself owns
+    payload semantics (task vs cancel is just a message the Module
+    defines) and validates payloads on receipt.
+
+    The ack-only contract below is what keeps modules decoupled
+    from the agent loop:
+
+        on_message returns an acknowledgement, never a task
+        outcome; outcomes surface through the Module's own
+        query() projection.
+    """
+
+    description: str
+
+    input_schema: dict[str, Any]
+
+    messages: tuple[str, ...] = ("task", "cancel")
+
+
+@dataclass(frozen=True)
+class MessageReceipt:
+    """
+    Synchronous acknowledgement returned by on_message.
+    """
+
+    accepted: bool
+
+    task_id: str | None = None
+
+    channel_state: str = ""
+
+    reason: str | None = None
+
+
+# ============================================================================
 # Module
 # ============================================================================
 
@@ -201,6 +247,12 @@ class Module:
         tuple[str, ...]
     ] = ()
 
+    # Action face: channel name -> spec. Empty by default; a
+    # Module that declares channels must implement on_message.
+    channels: ClassVar[
+        Mapping[str, ChannelSpec]
+    ] = {}
+
     data: DataSpace
 
     dependencies: Mapping[
@@ -238,6 +290,23 @@ class Module:
         the agents themselves. Heavy processing is allowed here;
         keep query() a cheap projection of the results.
         """
+
+    async def on_message(
+        self,
+        channel: str,
+        message: dict,
+    ) -> MessageReceipt:
+        """
+        Receive one message on a declared action channel.
+
+        Ack-only: return quickly with a MessageReceipt; heavy work
+        belongs to the Module's own background loop, and task
+        outcomes surface via query().
+
+        Payload semantics (task / cancel / ...) are owned by the
+        Module; this contract only requires an acknowledgement.
+        """
+        raise NotImplementedError
 
     async def query(
         self,

@@ -392,6 +392,15 @@ def validate_class(
             "define a non-empty string id"
         )
 
+    # Reserved for externally-owned providers (module action
+    # faces); a file-derived provider must never shadow them.
+    if provider_id.startswith("module:"):
+        raise ValueError(
+            f"Local tool provider id "
+            f"'{provider_id}' must not use the "
+            "reserved 'module:' prefix"
+        )
+
 
 def has_tool_header(
     path: Path,

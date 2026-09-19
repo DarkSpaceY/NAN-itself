@@ -454,6 +454,34 @@ class ProviderRuntime:
             name
         )
 
+    def attach_provider(
+        self,
+        provider: Provider,
+    ) -> None:
+        """
+        Register an externally-owned live provider.
+
+        The caller owns the full lifecycle; the runtime neither
+        starts nor stops it. Used e.g. by the modules runtime to
+        expose module action faces as ordinary providers named
+        `module:<id>`.
+        """
+        self.providers[
+            provider.spec.name
+        ] = provider
+
+    def detach_provider(
+        self,
+        name: str,
+    ) -> None:
+        """
+        Remove an externally-owned provider.
+        """
+        self.providers.pop(
+            name,
+            None,
+        )
+
     def list_all_tools(
         self,
     ) -> list[
