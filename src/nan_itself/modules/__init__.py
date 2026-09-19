@@ -14,6 +14,7 @@ for it at import time.
 """
 
 from .model import (
+    ChannelSpec,
     DataSpace,
     DataSpaceReader,
     MODULE_HEADER,
@@ -25,6 +26,8 @@ from .model import (
 )
 
 __all__ = [
+    "ChannelSpec",
+    "ActionSurface",
     "DataSpace",
     "DataSpaceReader",
     "MODULE_HEADER",
@@ -44,6 +47,11 @@ def __getattr__(name: str):
         from .runtime import Facade
 
         return Facade
+
+    if name == "ActionSurface":
+        from .action import ActionSurface
+
+        return ActionSurface
 
     raise AttributeError(
         f"module {__name__!r} has no attribute {name!r}"

@@ -11,7 +11,10 @@ import asyncio
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
+
+from pydantic import BaseModel
 
 
 MODULE_HEADER = "# @module"
@@ -168,6 +171,86 @@ class Turn:
     ended_at: float | None = None
 
 
+class ChannelSpec:
+    """
+    Declaration of one downlink channel on a Module.
+
+    A channel is a data slot the model may write to through the
+    invoke_channels verb. The payload shape is declared with a
+    pydantic model -- the same annotation-driven mechanism @tool
+    uses -- so the JSON schema handed to the model and the
+    validation applied at write time derive from one source.
+
+        model   pydantic model classifying valid payloads;
+                None means the channel accepts any JSON value
+                unvalidated
+        depth   slot discipline: 1 = overwrite (newest target
+                wins, the default for goals/intents); N > 1 =
+                FIFO queue with drop-oldest overflow
+    """
+
+    __slots__ = ("description", "model", "depth")
+
+    def __init__(
+        self,
+        model: type[BaseModel] | None = None,
+        *,
+        description: str = "",
+        depth: int = 1,
+    ) -> None:
+        if depth < 1:
+            raise ValueError(
+                "ChannelSpec depth must be >= 1"
+            )
+
+        self.model = model
+        self.description = description
+        self.depth = depth
+
+    def json_schema(self) -> dict[str, Any] | None:
+        """
+        JSON schema for the model, or None when unvalidated.
+        """
+        if self.model is None:
+            return None
+
+        schema = self.model.model_json_schema()
+
+        schema.pop("title", None)
+
+        for property_schema in schema.get(
+            "properties",
+            {},
+        ).values():
+            property_schema.pop("title", None)
+
+        return schema
+
+    def validate(
+        self,
+        payload: Any,
+    ) -> tuple[Any, str | None]:
+        """
+        Validate one payload against the declared model.
+
+        Returns (normalized_payload, None) on success and
+        (None, error_message) on rejection. Unvalidated channels
+        pass the payload through unchanged.
+        """
+        if self.model is None:
+            return payload, None
+
+        try:
+            validated = self.model.model_validate(
+                payload
+            )
+
+        except Exception as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+
+        return validated.model_dump(), None
+
+
 class Module:
     """
     Base class for all Modules.
@@ -200,6 +283,12 @@ class Module:
     requires: ClassVar[
         tuple[str, ...]
     ] = ()
+
+    # Downlink channels the model may write to. Declared only by
+    # ActionSurface subclasses; plain Modules stay channel-free.
+    channels: ClassVar[
+        Mapping[str, ChannelSpec]
+    ] = MappingProxyType({})
 
     data: DataSpace
 

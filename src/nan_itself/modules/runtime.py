@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -20,6 +22,9 @@ from .model import (
     ModuleRecord,
     ModuleState,
     Turn,
+)
+from .action import (
+    ActionSurface,
 )
 from .reload import (
     hot_reload,
@@ -418,6 +423,196 @@ class Facade:
             if result is not None
             and result != ""
         ]
+
+    # ==================================================================
+    # Channel downlink routing
+    # ==================================================================
+    #
+    # Routing never raises: every failure (unknown module /
+    # channel, module not running, no action surface, schema
+    # rejection) comes back as a result string.
+
+    def list_module_channels(self) -> str:
+        """
+        Enumerate every RUNNING action module's channels.
+        """
+        lines: list[str] = []
+
+        for record in self.modules.values():
+            if record.state is not ModuleState.RUNNING:
+                continue
+
+            if not isinstance(
+                record.instance,
+                ActionSurface,
+            ):
+                continue
+
+            for name, spec in (
+                record.instance.channels.items()
+            ):
+                depth = (
+                    str(spec.depth)
+                    if spec.depth > 1
+                    else "overwrite"
+                )
+
+                lines.append(
+                    f"{record.id}/{name} "
+                    f"(depth={depth})"
+                )
+
+        if not lines:
+            return (
+                "No module exposes channels. "
+                "Channels appear when a module "
+                "declares them and is RUNNING."
+            )
+
+        return "\n".join(lines)
+
+    def show_module_channel(
+        self,
+        module_id: str,
+        channel: str | None = None,
+    ) -> str:
+        """
+        Show channel details: schema, depth, occupancy.
+
+        Slots are write-only: the current payload is never
+        rendered back.
+        """
+        record = self.modules.get(module_id)
+
+        if record is None:
+            return (
+                f"Unknown module '{module_id}'. "
+                "Use list_channels to see "
+                "available channels."
+            )
+
+        if record.state is not ModuleState.RUNNING:
+            return (
+                f"Module '{module_id}' is not "
+                "RUNNING."
+            )
+
+        if not isinstance(
+            record.instance,
+            ActionSurface,
+        ):
+            return (
+                f"Module '{module_id}' exposes "
+                "no channels."
+            )
+
+        channels = record.instance.channels
+
+        if channel is not None:
+            if channel not in channels:
+                return (
+                    f"Unknown channel "
+                    f"'{module_id}/{channel}'."
+                )
+
+            selected = {channel: channels[channel]}
+
+        else:
+            selected = dict(channels)
+
+        if not selected:
+            return (
+                f"Module '{module_id}' exposes "
+                "no channels."
+            )
+
+        lines: list[str] = []
+
+        for name, spec in selected.items():
+            occupancy = len(
+                record.instance._slot(name)
+            )
+
+            detail: dict[str, Any] = {
+                "name": f"{module_id}/{name}",
+                "description": spec.description,
+                "depth": spec.depth,
+                "occupancy": occupancy,
+                "schema": spec.json_schema(),
+            }
+
+            lines.append(
+                json.dumps(
+                    detail,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+
+        return "\n".join(lines)
+
+    def write_module_channel(
+        self,
+        module_id: str,
+        channel: str,
+        payload: Any,
+    ) -> str:
+        """
+        Validate and fire one payload into a channel slot.
+
+        Returns 'written' / 'replaced' / 'rejected' or an error
+        string. Validation failures are rejected at the boundary;
+        the module's tick never sees malformed payloads.
+        """
+        record = self.modules.get(module_id)
+
+        if record is None:
+            return (
+                f"Unknown module '{module_id}'. "
+                "Use list_channels to see "
+                "available channels."
+            )
+
+        if record.state is not ModuleState.RUNNING:
+            return (
+                f"Module '{module_id}' is not "
+                "RUNNING; target not delivered."
+            )
+
+        if not isinstance(
+            record.instance,
+            ActionSurface,
+        ):
+            return (
+                f"Module '{module_id}' exposes "
+                "no channels."
+            )
+
+        channels = record.instance.channels
+
+        if channel not in channels:
+            return (
+                f"Unknown channel "
+                f"'{module_id}/{channel}'. "
+                "Use show_channels for schemas."
+            )
+
+        validated, error = channels[
+            channel
+        ].validate(payload)
+
+        if error is not None:
+            return (
+                f"rejected: payload failed "
+                f"schema validation for "
+                f"'{module_id}/{channel}': "
+                f"{error}"
+            )
+
+        return record.instance.set_target(
+            channel,
+            deepcopy(validated),
+        )
 
     # ==================================================================
     # Persistence

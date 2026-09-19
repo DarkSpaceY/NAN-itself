@@ -53,6 +53,12 @@ SHOW_SKILL_TOOL_NAME = "show_skill"
 
 INVOKE_SKILL_TOOL_NAME = "invoke_skill"
 
+LIST_CHANNELS_TOOL_NAME = "list_channels"
+
+SHOW_CHANNELS_TOOL_NAME = "show_channels"
+
+INVOKE_CHANNELS_TOOL_NAME = "invoke_channels"
+
 FINISH_TOOL_NAME = "finish"
 
 
@@ -785,6 +791,193 @@ class InvokeSkillVerb:
         return result
 
 
+class ListChannelsVerb:
+    name: ClassVar[str] = LIST_CHANNELS_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "List every module channel the model may "
+                "write to, as 'module/channel'. Channels are "
+                "downlink data slots: use show_channels to "
+                "inspect one and invoke_channels to write a "
+                "target."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        try:
+            return (
+                engine.modules.list_module_channels()
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+
+class ShowChannelsVerb:
+    name: ClassVar[str] = SHOW_CHANNELS_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Show channel details: description, JSON "
+                "schema, depth and occupancy. Slots are "
+                "write-only: payloads already written are "
+                "never rendered back."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "module": {
+                        "type": "string",
+                        "description": (
+                            "Module id, e.g. 'desktop'."
+                        ),
+                    },
+                    "channel": {
+                        "type": "string",
+                        "description": (
+                            "Channel name; omit to show "
+                            "every channel of the module."
+                        ),
+                    },
+                },
+                "required": ["module"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        module_id = call.arguments.get("module")
+
+        if not isinstance(module_id, str) or (
+            not module_id.strip()
+        ):
+            return "show_channels requires 'module'."
+
+        channel = call.arguments.get("channel")
+
+        if channel is not None and (
+            not isinstance(channel, str)
+            or not channel.strip()
+        ):
+            return (
+                "'channel' must be a string."
+            )
+
+        try:
+            return engine.modules.show_module_channel(
+                module_id,
+                channel,
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+
+class InvokeChannelsVerb:
+    name: ClassVar[str] = INVOKE_CHANNELS_TOOL_NAME
+
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name=self.name,
+            description=(
+                "Write one target into a module channel: "
+                "schema validation, then fire-into-slot. "
+                "Returns 'written', 'replaced' or "
+                "'rejected'. To retract a not-yet-consumed "
+                "target, write a new one (overwrite "
+                "semantics)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "module": {
+                        "type": "string",
+                        "description": (
+                            "Module id, e.g. 'desktop'."
+                        ),
+                    },
+                    "channel": {
+                        "type": "string",
+                        "description": (
+                            "Channel name, e.g. 'goal'."
+                        ),
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "Target payload, shaped by the "
+                            "channel schema (see "
+                            "show_channels)."
+                        ),
+                    },
+                },
+                "required": ["module", "channel", "payload"],
+                "additionalProperties": False,
+            },
+        )
+
+    async def execute(
+        self,
+        *,
+        call,
+        context,
+        state,
+        engine,
+    ) -> str:
+        module_id = call.arguments.get("module")
+
+        if not isinstance(module_id, str) or (
+            not module_id.strip()
+        ):
+            return "invoke_channels requires 'module'."
+
+        channel = call.arguments.get("channel")
+
+        if not isinstance(channel, str) or (
+            not channel.strip()
+        ):
+            return "invoke_channels requires 'channel'."
+
+        if "payload" not in call.arguments:
+            return "invoke_channels requires 'payload'."
+
+        payload = call.arguments["payload"]
+
+        try:
+            return engine.modules.write_module_channel(
+                module_id,
+                channel,
+                payload,
+            )
+
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+
 class FinishVerb:
     """
     Subagent-only tool: submit the final report and end the
@@ -858,5 +1051,8 @@ VERBS: dict[str, Any] = {
     ListSkillsVerb.name: ListSkillsVerb(),
     ShowSkillVerb.name: ShowSkillVerb(),
     InvokeSkillVerb.name: InvokeSkillVerb(),
+    ListChannelsVerb.name: ListChannelsVerb(),
+    ShowChannelsVerb.name: ShowChannelsVerb(),
+    InvokeChannelsVerb.name: InvokeChannelsVerb(),
     FinishVerb.name: FinishVerb(),
 }

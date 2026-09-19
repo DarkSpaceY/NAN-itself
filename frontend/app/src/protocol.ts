@@ -13,7 +13,7 @@ export type ServerEvent =
   | { t: 'status'; state: StatusState; tools?: number; subagents?: number; next_hop?: string }
   | { t: 'user_input'; id: string; text: string; mid?: string }
   | { t: 'divider'; label: string }
-  | { t: 'record_started'; id: string; kind: 'tool' | 'skill' | 'spawn' | 'sleep' | 'finish' | 'module' | 'agent' | 'error'; name: string; summary?: string }
+  | { t: 'record_started'; id: string; kind: 'tool' | 'skill' | 'spawn' | 'sleep' | 'finish' | 'module' | 'agent' | 'target' | 'error'; name: string; summary?: string }
   | { t: 'record_detail'; id: string; line: string }
   | { t: 'record_done'; id: string; summary?: string; note?: string }
   | { t: 'record_failed'; id: string; summary?: string }
@@ -34,5 +34,6 @@ export const GLYPH_BY_KIND: Record<string, string> = {
   finish: '⏻',
   module: '◈',
   agent: '◈',
+  target: '⌖',
   error: '✗',
 };

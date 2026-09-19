@@ -36,7 +36,7 @@
 | `hello` | — | `seq, boot, model, base_url, status` | 握手;`boot` 为进程唯一 id,客户端检测到变化即清空本地流并重置 seq 基线 |
 | `status` | Pulse | `state:"idle"\|"working"\|"error"`, `tools?`, `subagents?`, `next_hop?` | 循环状态机变化 |
 | `user_input` | Message | `id, text` | 用户输入回显(进了 Inbox 才发) |
-| `record_started` | Record | `id, kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
+| `record_started` | Record | `id, kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"target"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
 | `record_detail` | Record | `id, line(html-free 纯文本)` | 详节逐行追加 |
 | `record_done` | Record | `id, summary?, note?` | ✓ 自动折叠 |
 | `record_failed` | Record | `id, summary?` | ✗ 保持展开 |
@@ -50,6 +50,6 @@
 
 1. `id` 由 server 生成,单调递增;前端不生成 id。
 2. `record_detail.line` 为纯文本;前端可对 `·`、`✓`、`✗` 做轻量着色,不做 HTML 注入。
-3. verb 的 kind 映射:invoke_tool/list_tools/show_tool → `tool`,invoke_skill/list_skills/show_skill → `skill`,spawn → `spawn`,sleep → `sleep`,finish → `finish`(glyph ⏻);未知 verb 落 `verb` 兜底(前端 glyph '•')。
+3. verb 的 kind 映射:invoke_tool/list_tools/show_tool → `tool`,invoke_skill/list_skills/show_skill → `skill`,invoke_channels/list_channels/show_channels → `target`(glyph ⌖),spawn → `spawn`,sleep → `sleep`,finish → `finish`(glyph ⏻);未知 verb 落 `verb` 兜底(前端 glyph '•')。
 4. 子代理简报 = `record_started(kind:"spawn")` 的 detail;报告 = 独立 `record_started(kind:"agent", name:"report · <task>")`。
 5. 断线重连:client 重连后收到 `hello`,随后 server 重放最近 200 条事件的**折叠投影**(当前流快照),前端以快照重建流。
