@@ -3,28 +3,17 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-import mcp.types as types
 from loguru import logger
-
-from nan_itself.tools.provider import (
-    Provider,
-)
-from nan_itself.tools.spec import (
-    PROVIDER_KIND_LOCAL,
-    ProviderSpec,
-)
 
 from . import deps as _deps
 from . import loading as _loading
 from . import persistence as _persistence
 from nan_itself.utils import paths as _paths
 from .model import (
-    ChannelSpec,
     DataSpace,
     DuplicateModuleError,
     Module,
@@ -35,103 +24,6 @@ from .model import (
 from .reload import (
     hot_reload,
 )
-
-
-# Ack-only contract: on_message must answer well within this
-# bound; a hung handler surfaces as a tool error, never as a
-# frozen agent loop.
-_MESSAGE_ACK_TIMEOUT = 10.0
-
-
-# ============================================================================
-# Action face
-# ============================================================================
-
-
-@dataclass(frozen=True)
-class _ChannelMethod:
-    """
-    One declared action channel as an invocable method.
-
-    Duck-typed for Provider._call_local (only .invoke is called).
-    Payloads pass through unvalidated: the Module owns schema
-    semantics and acknowledges via MessageReceipt.
-    """
-
-    record: ModuleRecord
-
-    channel: str
-
-    spec: ChannelSpec
-
-    @property
-    def name(
-        self,
-    ) -> str:
-        return self.channel
-
-    @property
-    def description(
-        self,
-    ) -> str:
-        return self.spec.description
-
-    def input_schema(
-        self,
-    ) -> dict[str, Any]:
-        return dict(self.spec.input_schema)
-
-    async def invoke(
-        self,
-        arguments: dict[str, Any] | None,
-    ) -> Any:
-        instance = self.record.instance
-
-        receipt = await asyncio.wait_for(
-            instance.on_message(
-                self.channel,
-                dict(arguments or {}),
-            ),
-            timeout=_MESSAGE_ACK_TIMEOUT,
-        )
-
-        return receipt
-
-
-class ModuleActionFace:
-    """
-    Adapter presenting one Module's action channels as an
-    in-process local tool provider instance.
-
-    The face holds the ModuleRecord (not the instance), so
-    retries always reach the current instance of that record;
-    hot reload swaps the whole provider via detach/attach.
-    """
-
-    def __init__(
-        self,
-        record: ModuleRecord,
-    ) -> None:
-        self.record = record
-
-    def get_tool_method(
-        self,
-        name: str,
-    ) -> _ChannelMethod | None:
-        spec = type(
-            self.record.instance
-        ).channels.get(
-            name
-        )
-
-        if spec is None:
-            return None
-
-        return _ChannelMethod(
-            record=self.record,
-            channel=name,
-            spec=spec,
-        )
 
 
 # ============================================================================
@@ -233,17 +125,8 @@ class Facade:
         retry_interval: float = 1.0,
         scan_interval: float = 1.0,
         llm=None,
-        tool_runtime=None,
     ) -> None:
         self.llm = llm
-
-        # Optional ProviderRuntime used to expose modules with a
-        # declared action face as ordinary providers named
-        # `module:<id>`. Duck-typed: needs attach_provider /
-        # detach_provider / providers.
-        self.tool_runtime = (
-            tool_runtime
-        )
 
         project_root = _paths.repo_root()
 
@@ -989,126 +872,6 @@ class Facade:
             self.dataspaces,
         )
 
-    # ==================================================================
-    # Action face attach/detach
-    # ==================================================================
-
-    def _sync_action_provider(
-        self,
-        record: ModuleRecord,
-    ) -> None:
-        """
-        Make the live tools view match the record's current state.
-
-        A RUNNING record with declared channels is exposed as an
-        ordinary provider named `module:<id>`; anything else must
-        not be. Idempotent, and safe across hot reloads: a stale
-        face never detaches a newer record's provider.
-        """
-        runtime = self.tool_runtime
-
-        if runtime is None:
-            return
-
-        name = f"module:{record.id}"
-
-        existing = (
-            runtime.providers.get(name)
-        )
-
-        owned = (
-            existing is not None
-            and isinstance(
-                existing.instance,
-                ModuleActionFace,
-            )
-            and existing.instance.record
-            is record
-        )
-
-        channels = type(
-            record.instance
-        ).channels
-
-        running = (
-            record.state
-            is ModuleState.RUNNING
-            and bool(channels)
-        )
-
-        if not running:
-            if owned:
-                runtime.detach_provider(
-                    name
-                )
-
-                logger.info(
-                    "Detached action face: "
-                    "{}",
-                    name,
-                )
-
-            return
-
-        if owned:
-            return
-
-        for channel in channels:
-            if (
-                not channel
-                or "/" in channel
-            ):
-                logger.error(
-                    "Module '{}' declares an "
-                    "invalid channel name "
-                    "{!r}; action face "
-                    "not attached",
-                    record.id,
-                    channel,
-                )
-
-                return
-
-        tools = {
-            channel: types.Tool(
-                name=channel,
-                description=(
-                    spec.description
-                ),
-                inputSchema=dict(
-                    spec.input_schema
-                ),
-            )
-            for channel, spec in (
-                channels.items()
-            )
-        }
-
-        provider = Provider(
-            spec=ProviderSpec(
-                name=name,
-                kind=PROVIDER_KIND_LOCAL,
-                source=(
-                    f"module:{record.id}"
-                ),
-            ),
-            tools=tools,
-            instance=ModuleActionFace(
-                record
-            ),
-        )
-
-        runtime.attach_provider(
-            provider
-        )
-
-        logger.info(
-            "Attached action face: {} "
-            "({} channels)",
-            name,
-            len(tools),
-        )
-
     def _find_record_by_source(
         self,
         path: Path,
@@ -1326,13 +1089,6 @@ class Facade:
         if started is not None:
             started.set()
 
-        # Expose (or refresh) the action face as soon as the
-        # record is RUNNING; long-running modules never reach
-        # the finally block below while they serve.
-        self._sync_action_provider(
-            record
-        )
-
         try:
             await record.instance.start()
 
@@ -1405,12 +1161,6 @@ class Facade:
 
             if record.task is current_task:
                 record.task = None
-
-            # Terminal state (DOWN / STOPPING): retract the
-            # action face if this record owned one.
-            self._sync_action_provider(
-                record
-            )
 
     async def _stop_record(
         self,

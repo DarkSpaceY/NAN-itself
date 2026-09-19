@@ -180,7 +180,6 @@ async def run_agent_process() -> None:
         llm=llm,
         retry_interval=settings.modules.retry_interval,
         scan_interval=settings.modules.scan_interval,
-        tool_runtime=providers,
     )
 
     skills = SkillRuntime(
