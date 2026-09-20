@@ -9,7 +9,7 @@ NAN_MODELS_DIR); feature-specific envs (NAN_AUDIO_SPEAKER_MODEL,
 NAN_VISION_VLM_DIR, ...) keep precedence at their call sites.
 
 Anchoring relies on the editable install: nan_itself.__file__
-resolves into <repo>/src/nan_itself, so three levels up from
+resolves into <repo>/backend/nan_itself, so three levels up from
 this file is the repository root.
 """
 

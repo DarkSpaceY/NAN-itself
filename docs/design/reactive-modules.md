@@ -148,7 +148,7 @@ side.
 ## Prior attempt & lessons
 
 A previous implementation (ActionSurface + ChannelSpec in
-`src/nan_itself/modules/model.py`, Facade routing in `runtime.py`, the three
+`backend/nan_itself/modules/model.py`, Facade routing in `runtime.py`, the three
 verbs above in `verbs.py`, plus a temporary validation module) was built,
 validated end-to-end, and then reverted. The lessons carry over:
 

@@ -5,11 +5,11 @@ as of the current development state; interfaces may still change.
 
 ## Composition
 
-`src/nan_itself/app.py` is the composition root. On startup it:
+`backend/nan_itself/app.py` is the composition root. On startup it:
 
 1. loads `config/settings.yaml` (`config.py`),
 2. anchors all repo-relative directories through
-   [`src/nan_itself/utils/paths.py`](../src/nan_itself/utils/paths.py),
+   [`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py),
 3. starts the tool provider runtime,
 4. wires the builtin modules and skills,
 5. starts the gateway (FastAPI/uvicorn) which serves the API and the web UI.
@@ -37,7 +37,7 @@ The agent is a turn-based loop:
 
 ## Tool runtime
 
-[`src/nan_itself/tools/runtime.py`](../src/nan_itself/tools/runtime.py)
+[`backend/nan_itself/tools/runtime.py`](../backend/nan_itself/tools/runtime.py)
 (`ProviderRuntime`) reconciles sources across two parallel directory
 layouts — builtin (`builtin/tools/`) and workspace
 (`workspace/tools/`) — with identical hot-reload semantics:

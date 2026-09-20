@@ -67,7 +67,7 @@ tool on every invocation; you normally never set it by hand.
   affecting other layers.
 
 All of these locations resolve through
-[`src/nan_itself/utils/paths.py`](../src/nan_itself/utils/paths.py) and are
+[`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py) and are
 therefore independent of the process working directory.
 
 ## Tool-level settings

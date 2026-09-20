@@ -16,7 +16,7 @@ strict mode).
 
 - **Path anchoring.** Every repo-relative path (`data/`, `models/`,
   `config/`, `builtin/`) must resolve through
-  [`src/nan_itself/utils/paths.py`](../src/nan_itself/utils/paths.py)
+  [`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py)
   (`repo_root()` / `data_dir()` / `models_dir()`). Never use
   cwd-relative defaults or private `parents[N]` lookups — the process
   must behave identically when started from any directory.
@@ -33,7 +33,7 @@ strict mode).
 - **Lazy heavy imports.** Import expensive dependencies inside the tool
   method body, not at module top level.
 - **Retries** use the shared exponential backoff helper in
-  [`src/nan_itself/utils/backoff.py`](../src/nan_itself/utils/backoff.py)
+  [`backend/nan_itself/utils/backoff.py`](../backend/nan_itself/utils/backoff.py)
   (`next_backoff(values, index)`).
 - **Logging** goes through `loguru`.
 - **Comments and identifiers are in English.**

@@ -87,7 +87,7 @@ NAN-itself/
 ├── docs/                 # Documentation
 ├── frontend/             # Web UI
 ├── models/               # Model weights (gitignored, auto-downloaded)
-├── src/nan_itself/       # Framework source
+├── backend/nan_itself/   # Framework source
 │   ├── agent/            # Core agent loop (turns, engine, verbs)
 │   ├── tools/            # Provider runtime (MCP + local backends, hot reload)
 │   ├── modules/          # Module base machinery

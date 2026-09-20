@@ -70,5 +70,8 @@ nan-itself = "nan_itself:main"
 requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+module-root = "backend"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
