@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # The lockfile is synced minus the heavy local-inference stack
+      # (torch, dlib, whisper, ...). CI runs the framework/contract
+      # test suite; tests that import the builtin audio/vision modules
+      # (and therefore the full ML stack) are excluded.
+      - name: Install dependencies
+        run: |
+          uv sync \
+            --no-install-package easyocr \
+            --no-install-package face-recognition \
+            --no-install-package face-recognition-models \
+            --no-install-package faster-whisper \
+            --no-install-package pywhispercpp \
+            --no-install-package realtimestt \
+            --no-install-package sherpa-onnx \
+            --no-install-package sounddevice \
+            --no-install-package torch \
+            --no-install-package torchvision \
+            --no-install-package transformers \
+            --no-install-package webrtcvad-wheels \
+            --no-install-package opencv-python-headless
+
+      - name: Run tests
+        run: |
+          uv run pytest -q \
+            --ignore=tests/test_vision.py \
+            --deselect "tests/test_paths_anchoring.py::test_builtin_modules_anchor_from_foreign_cwd"
