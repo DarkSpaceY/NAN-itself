@@ -383,6 +383,8 @@ class VisionModule(Module):
 
         self._load_registry()
 
+        self._provision_backends()
+
         for target, name in (
             (self._capture_loop, "vision-capture"),
             (self._inference_loop, "vision-inference"),
@@ -424,6 +426,82 @@ class VisionModule(Module):
         self._close_camera()
 
         logger.info("vision module stopped")
+
+    # ==================================================================
+    # Backend provisioning
+    # ==================================================================
+
+    def _provision_backends(self) -> None:
+        """
+        Load every enabled model-backed backend before the loops
+        start.
+
+        First-run weight downloads (and model RAM residency)
+        happen here, in the service lifetime phase -- never
+        inside the tick loops. A failing backend stays
+        unavailable for the session instead of poisoning the
+        loops.
+        """
+        for attr, failed, stats_key, factory, label in (
+            (
+                "_faces",
+                "_faces_failed",
+                "faces_backend",
+                self.face_factory,
+                "face",
+            ),
+            (
+                "_ocr",
+                "_ocr_failed",
+                "ocr_backend",
+                self.ocr_factory,
+                "ocr",
+            ),
+            (
+                "_objects",
+                "_objects_failed",
+                "objects_backend",
+                self.objects_factory,
+                "object",
+            ),
+            (
+                "_vlm",
+                "_vlm_failed",
+                "vlm_backend",
+                self.vlm_factory,
+                "vlm",
+            ),
+        ):
+            if getattr(self, failed):
+                continue
+
+            try:
+                backend = factory()
+
+                backend.load()
+
+            except Exception as exc:
+                setattr(self, failed, True)
+
+                with self._state_lock:
+                    self._stats[stats_key] = (
+                        f"unavailable: {exc}"
+                    )
+
+                logger.warning(
+                    "{} backend unavailable: {}", label, exc
+                )
+
+                continue
+
+            setattr(self, attr, backend)
+
+            with self._state_lock:
+                self._stats[stats_key] = type(
+                    backend
+                ).__name__
+
+            logger.info("{} backend ready: {}", label, type(backend).__name__)
 
     # ==================================================================
     # Threads
@@ -615,42 +693,13 @@ class VisionModule(Module):
 
     def _get_faces(self) -> Any | None:
         """
-        Lazy singleton; a failing backend disables face work for
-        the session instead of poisoning every glance.
+        Provisioned in start(); a failing backend disables face
+        work for the session instead of poisoning every glance.
         """
-        if self._faces is not None:
-            return self._faces
-
         if self._faces_failed:
             return None
 
-        try:
-            analyzer = self.face_factory()
-
-            analyzer.load()
-
-        except Exception as exc:
-            self._faces_failed = True
-
-            with self._state_lock:
-                self._stats["faces_backend"] = (
-                    f"unavailable: {exc}"
-                )
-
-            logger.warning(
-                "face backend unavailable: {}", exc
-            )
-
-            return None
-
-        self._faces = analyzer
-
-        with self._state_lock:
-            self._stats["faces_backend"] = type(
-                analyzer
-            ).__name__
-
-        return analyzer
+        return self._faces
 
     def _recognize_faces(
         self,
@@ -900,31 +949,7 @@ class VisionModule(Module):
             return
 
         if self._ocr is None:
-            try:
-                reader = self.ocr_factory()
-
-                reader.load()
-
-            except Exception as exc:
-                self._ocr_failed = True
-
-                with self._state_lock:
-                    self._stats["ocr_backend"] = (
-                        f"unavailable: {exc}"
-                    )
-
-                logger.warning(
-                    "ocr backend unavailable: {}", exc
-                )
-
-                return
-
-            self._ocr = reader
-
-            with self._state_lock:
-                self._stats["ocr_backend"] = type(
-                    reader
-                ).__name__
+            return
 
         self._last_ocr_at = now
 
@@ -971,31 +996,7 @@ class VisionModule(Module):
             return
 
         if self._objects is None:
-            try:
-                detector = self.objects_factory()
-
-                detector.load()
-
-            except Exception as exc:
-                self._objects_failed = True
-
-                with self._state_lock:
-                    self._stats["objects_backend"] = (
-                        f"unavailable: {exc}"
-                    )
-
-                logger.warning(
-                    "object backend unavailable: {}", exc
-                )
-
-                return
-
-            self._objects = detector
-
-            with self._state_lock:
-                self._stats["objects_backend"] = type(
-                    detector
-                ).__name__
+            return
 
         self._last_objects_at = now
 
@@ -1041,31 +1042,7 @@ class VisionModule(Module):
             return
 
         if self._vlm is None:
-            try:
-                captioner = self.vlm_factory()
-
-                captioner.load()
-
-            except Exception as exc:
-                self._vlm_failed = True
-
-                with self._state_lock:
-                    self._stats["vlm_backend"] = (
-                        f"unavailable: {exc}"
-                    )
-
-                logger.warning(
-                    "vlm backend unavailable: {}", exc
-                )
-
-                return
-
-            self._vlm = captioner
-
-            with self._state_lock:
-                self._stats["vlm_backend"] = type(
-                    captioner
-                ).__name__
+            return
 
         self._last_vlm_at = now
 

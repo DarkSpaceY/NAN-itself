@@ -310,6 +310,8 @@ class AudioModule(Module):
             ),
         )
 
+        self._transcriber_failed = False
+
         self.mic_factory = lambda: SoundDeviceMicSource(
             sample_rate=self.sample_rate,
             blocksize=self.sample_rate * self.frame_ms // 1000,
@@ -395,6 +397,8 @@ class AudioModule(Module):
 
         self._load_registry()
 
+        self._provision_backends()
+
         for target, name in (
             (self._capture_loop, "audio-capture"),
             (self._transcribe_loop, "audio-transcribe"),
@@ -436,6 +440,91 @@ class AudioModule(Module):
         self._close_mic()
 
         logger.info("audio module stopped")
+
+    # ==================================================================
+    # Backend provisioning
+    # ==================================================================
+
+    def _provision_backends(self) -> None:
+        """
+        Load every model-backed backend before the loops start.
+
+        First-run weight downloads (whisper, tagging, speaker,
+        emotion models) happen here, in the service lifetime
+        phase -- never inside the tick loops. A failing backend
+        stays unavailable for the session instead of poisoning
+        the loops.
+        """
+        for attr, failed, stats_key, factory, label in (
+            (
+                "_embedder",
+                "_embedder_failed",
+                "speaker_backend",
+                self.embedder_factory,
+                "speaker embedding",
+            ),
+            (
+                "_tagger",
+                "_tagger_failed",
+                "tagger_backend",
+                self.tagger_factory,
+                "audio tagger",
+            ),
+            (
+                "_emotion",
+                "_emotion_failed",
+                "emotion_backend",
+                self.emotion_factory,
+                "emotion",
+            ),
+        ):
+            if getattr(self, failed):
+                continue
+
+            try:
+                backend = factory()
+
+                backend.load()
+
+            except Exception as exc:
+                setattr(self, failed, True)
+
+                with self._state_lock:
+                    self._stats[stats_key] = (
+                        f"unavailable: {exc}"
+                    )
+
+                logger.warning(
+                    "{} backend unavailable: {}", label, exc
+                )
+
+                continue
+
+            setattr(self, attr, backend)
+
+            with self._state_lock:
+                self._stats[stats_key] = type(
+                    backend
+                ).__name__
+
+            logger.info("{} backend ready: {}", label, type(backend).__name__)
+
+        if not self._transcriber_failed:
+            try:
+                self.transcriber.load()
+
+                logger.info("whisper backend ready: {}", self.whisper_model)
+
+            except Exception as exc:
+                self._transcriber_failed = True
+
+                self._stats["transcribe_backend"] = (
+                    f"unavailable: {exc}"
+                )
+
+                logger.warning(
+                    "whisper backend unavailable: {}", exc
+                )
 
     # ==================================================================
     # Threads
@@ -574,6 +663,10 @@ class AudioModule(Module):
 
                 continue
 
+            if self._transcriber_failed:
+
+                continue
+
             try:
                 result = self._transcribe(utt)
 
@@ -623,44 +716,14 @@ class AudioModule(Module):
 
     def _get_embedder(self) -> Any | None:
         """
-        Lazy singleton; a failing backend disables speaker
-        attribution for the session instead of poisoning every
-        utterance (tagging runs on an independent tagger).
+        Provisioned in start(); a failing backend disables
+        speaker attribution for the session instead of poisoning
+        every utterance (tagging runs on an independent tagger).
         """
-        if self._embedder is not None:
-            return self._embedder
-
         if self._embedder_failed:
             return None
 
-        try:
-            embedder = self.embedder_factory()
-
-            embedder.load()
-
-        except Exception as exc:
-            self._embedder_failed = True
-
-            with self._state_lock:
-                self._stats["speaker_backend"] = (
-                    f"unavailable: {exc}"
-                )
-
-            logger.warning(
-                "speaker embedding backend unavailable: {}",
-                exc,
-            )
-
-            return None
-
-        self._embedder = embedder
-
-        with self._state_lock:
-            self._stats["speaker_backend"] = type(
-                embedder
-            ).__name__
-
-        return embedder
+        return self._embedder
 
     def _load_registry(self) -> None:
         """
@@ -818,35 +881,10 @@ class AudioModule(Module):
     # ------------------------------------------------------------------
 
     def _get_tagger(self) -> Any | None:
-        if self._tagger is not None:
-            return self._tagger
-
         if self._tagger_failed:
             return None
 
-        try:
-            tagger = self.tagger_factory()
-
-            tagger.load()
-
-        except Exception as exc:
-            self._tagger_failed = True
-
-            with self._state_lock:
-                self._stats["tagger_backend"] = (
-                    f"unavailable: {exc}"
-                )
-
-            logger.warning("audio tagger unavailable: {}", exc)
-
-            return None
-
-        self._tagger = tagger
-
-        with self._state_lock:
-            self._stats["tagger_backend"] = type(tagger).__name__
-
-        return tagger
+        return self._tagger
 
     def _tag_ambient(self) -> None:
         """
@@ -935,39 +973,10 @@ class AudioModule(Module):
     # ------------------------------------------------------------------
 
     def _get_emotion(self) -> Any | None:
-        if self._emotion is not None:
-            return self._emotion
-
         if self._emotion_failed:
             return None
 
-        try:
-            recognizer = self.emotion_factory()
-
-            recognizer.load()
-
-        except Exception as exc:
-            self._emotion_failed = True
-
-            with self._state_lock:
-                self._stats["emotion_backend"] = (
-                    f"unavailable: {exc}"
-                )
-
-            logger.warning(
-                "emotion backend unavailable: {}", exc
-            )
-
-            return None
-
-        self._emotion = recognizer
-
-        with self._state_lock:
-            self._stats["emotion_backend"] = type(
-                recognizer
-            ).__name__
-
-        return recognizer
+        return self._emotion
 
     def _recognize_emotion(self, utt: Utterance) -> None:
         recognizer = self._get_emotion()

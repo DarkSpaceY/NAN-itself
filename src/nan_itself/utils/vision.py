@@ -1541,10 +1541,11 @@ class VlmCaptioner:
     transformers/torch runs on any OS (CPU), CUDA (NVIDIA) and
     MPS (Apple Silicon) -- no MLX, no GGUF toolchain, no per-OS
     builds. Weights live under models/vision/vlm/<snapshot>;
-    a missing directory is auto-downloaded from the Hub on first
-    use (respects HF_ENDPOINT / proxy env vars), and a failing
-    download keeps the backend marked unavailable without
-    touching any other layer.
+    a missing directory is downloaded from the Hub during module
+    provisioning in start() (respects HF_ENDPOINT / proxy env
+    vars), never inside the tick loops, and a failing download
+    keeps the backend marked unavailable without touching any
+    other layer.
 
     Scope is honest: this class captions ONE keyframe. Change
     descriptions, VQA and cross-modal grounding are future

@@ -969,6 +969,8 @@ def test_vlm_caption_glance_via_fake_backend():
 
     module.vlm_factory = lambda: FakeCaptioner()
 
+    module._provision_backends()
+
     entry: dict[str, Any] = {}
 
     module._caption_glance(_motion_glance(), entry)
@@ -1015,6 +1017,8 @@ def test_vlm_caption_failure_marks_backend():
             raise RuntimeError("no weights")
 
     module.vlm_factory = lambda: Broken()
+
+    module._provision_backends()
 
     entry: dict[str, Any] = {}
 
