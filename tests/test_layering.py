@@ -4,7 +4,10 @@ Layering regression locks.
 Keeps the internal import graph honest:
 
     - the agent layer couples to the modules data model only
-      (nan_itself.modules.model), never to the modules runtime
+      (nan_itself.modules.model), never to the modules runtime:
+      importing the engine must not load nan_itself.modules.runtime
+      (the package surface eagerly exports it, so the agent layer
+      imports the pure-contract submodule directly)
     - the gateway owns its protocol helpers (mid dedup, status
       snapshot) without app-level help
 """

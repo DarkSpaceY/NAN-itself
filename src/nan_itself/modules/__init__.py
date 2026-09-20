@@ -8,9 +8,11 @@ Layering (dependencies point downward only):
 Import from this package, never from sibling modules.
 
 The runtime (and everything it pulls in) loads lazily on first
-attribute access, so light consumers of this package -- such as
-the agent layer, which only needs the data model -- do not pay
-for it at import time.
+attribute access. This is the enabling mechanism of the
+agent -> modules layering lock (tests/test_layering.py): light
+consumers of this package -- such as the agent layer, which only
+needs the data model -- import nan_itself.modules.model directly
+and never pay for the runtime at import time.
 """
 
 from .model import (
@@ -41,8 +43,9 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    # Lazy export: keeps the heavy runtime machinery out of the
-    # import of this package.
+    # Lazy re-export of the runtime machinery: keeps the agent
+    # layer's `import nan_itself.modules.model` free of runtime
+    # side effects. Do NOT hoist these two imports.
     if name == "Facade":
         from .runtime import Facade
 

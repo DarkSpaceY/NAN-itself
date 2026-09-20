@@ -8,7 +8,7 @@ adapters behind small interfaces.
 Blocks (see docs/audio-design.md §2):
 
     FeatureTracker        RMS / noise floor / quiet span bookkeeping
-    VadGate               webrtcvad wrapper w/ energy-gate fallback
+    VadGate               webrtcvad wrapper
     UtteranceSegmenter    pre-roll + trailing-silence utterance slicer
     AudioPipeline         composes the three above over 30ms frames
     WhisperTranscriber    lazy faster-whisper adapter
@@ -20,11 +20,20 @@ Frame contract: mono int16 PCM at 16 kHz; one frame == frame_ms.
 from __future__ import annotations
 
 import array
+import json
 import math
+import multiprocessing as mp
 import queue
 import time
 from collections import deque
 from dataclasses import dataclass
+
+import numpy as np
+import onnxruntime as ort
+import sherpa_onnx
+import sounddevice as sd
+import webrtcvad
+from faster_whisper import WhisperModel
 from loguru import logger
 
 
@@ -69,8 +78,6 @@ def zero_crossing_rate(pcm: bytes | memoryview) -> float:
     Fraction of adjacent-sample sign changes in one chunk.
     Pure tone -> low; hiss/clatter -> high.
     """
-    import array
-
     samples = array.array("h")
 
     samples.frombytes(bytes(pcm))
@@ -94,8 +101,6 @@ def zero_crossing_rate(pcm: bytes | memoryview) -> float:
 
 
 def _spectrum(pcm: bytes | memoryview):
-    import numpy as np
-
     samples = np.frombuffer(
         bytes(pcm),
         dtype=np.int16,
@@ -130,8 +135,6 @@ def spectral_flatness(pcm: bytes | memoryview) -> float:
     Geometric/arithmetic mean ratio of the spectrum: 0 = tonal,
     1 = white noise. Guarded for near-silent frames.
     """
-    import numpy as np
-
     _, magnitude = _spectrum(pcm)
 
     floor = 1e-10
@@ -183,8 +186,6 @@ class PitchTracker:
         self.strength = 0.0
 
     def feed(self, pcm: bytes) -> dict[str, float]:
-        import numpy as np
-
         x = np.frombuffer(
             bytes(pcm),
             dtype=np.int16,
@@ -394,32 +395,20 @@ class FeatureTracker:
 
 class VadGate:
     """
-    webrtcvad when available; energy gate fallback otherwise.
-
-    The energy gate compares against a supplied reference (noise
-    floor + margin), so it degrades gracefully instead of dying.
+    Thin webrtcvad wrapper over the frame contract.
     """
 
     def __init__(
         self,
         aggressiveness: int = 2,
     ) -> None:
-        self.engine = None
-
-        try:
-            import webrtcvad
-
-            self.engine = webrtcvad.Vad(
-                int(aggressiveness),
-            )
-
-        except Exception:
-
-            self.engine = None
+        self.engine = webrtcvad.Vad(
+            int(aggressiveness),
+        )
 
     @property
     def mode(self) -> str:
-        return "webrtcvad" if self.engine else "energy"
+        return "webrtcvad"
 
     def classify(
         self,
@@ -428,19 +417,10 @@ class VadGate:
         reference_dbfs: float,
         rise_db: float = 10.0,
     ) -> bool:
-        if self.engine is not None:
-            try:
-                return self.engine.is_speech(
-                    pcm,
-                    sample_rate,
-                )
-
-            except Exception:
-
-                # Malformed frame sizes fall back to energy.
-                pass
-
-        return rms_dbfs(pcm) > reference_dbfs + rise_db
+        return self.engine.is_speech(
+            pcm,
+            sample_rate,
+        )
 
 
 @dataclass
@@ -865,8 +845,6 @@ class SoundDeviceMicSource:
         self._stream = None
 
     def start(self) -> None:
-        import sounddevice as sd
-
         def _callback(data, frames, t, status):
             payload = bytes(data)
 
@@ -1026,8 +1004,6 @@ class WhisperTranscriber:
         if self._model is not None:
             return
 
-        from faster_whisper import WhisperModel
-
         kwargs: dict = {
             "device": "cpu",
             "compute_type": "int8",
@@ -1043,8 +1019,6 @@ class WhisperTranscriber:
         )
 
     def transcribe(self, utt: Utterance) -> dict:
-        import numpy as np
-
         self.load()
 
         audio = np.frombuffer(
@@ -1157,8 +1131,6 @@ def cosine_similarity(a, b) -> float:
     """
     Plain cosine over 1-D float vectors; zero vectors -> 0.0.
     """
-    import numpy as np
-
     va = np.asarray(a, dtype=np.float32)
 
     vb = np.asarray(b, dtype=np.float32)
@@ -1224,8 +1196,6 @@ class SpeakerMatcher:
         score is the nearest similarity even when it falls
         below the threshold (a new cluster opens then).
         """
-        import numpy as np
-
         now = time.time()
 
         best_label: str | None = None
@@ -1330,8 +1300,6 @@ class SpeakerMatcher:
         }
 
     def restore(self, data: Any) -> None:
-        import numpy as np
-
         if not isinstance(data, dict):
             raise TypeError("voice registry must be an object")
 
@@ -1413,8 +1381,6 @@ class SherpaSpeakerEmbedder:
         if self._extractor is not None:
             return
 
-        import sherpa_onnx
-
         config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=self.model_path,
         )
@@ -1434,8 +1400,6 @@ class SherpaSpeakerEmbedder:
         int16 mono PCM -> embedding vector. None when the chunk
         carries no usable audio.
         """
-        import numpy as np
-
         self.load()
 
         samples = np.frombuffer(
@@ -1494,8 +1458,6 @@ class SherpaAudioTagger:
         if self._tagger is not None:
             return
 
-        import sherpa_onnx
-
         config = sherpa_onnx.AudioTaggingConfig(
             model=sherpa_onnx.AudioTaggingModelConfig(
                 ced=self.model_path,
@@ -1508,8 +1470,6 @@ class SherpaAudioTagger:
         self._tagger = sherpa_onnx.AudioTagging(config)
 
     def tag(self, pcm: bytes) -> list[tuple[str, float]]:
-        import numpy as np
-
         self.load()
 
         samples = np.frombuffer(
@@ -1563,17 +1523,12 @@ class OnnxEmotionRecognizer:
         if self._session is not None:
             return
 
-        import json as _json
-
-        import numpy as np
-        import onnxruntime as ort
-
         self._session = ort.InferenceSession(
             self.model_path,
             providers=["CPUExecutionProvider"],
         )
 
-        head = _json.load(
+        head = json.load(
             open(self.head_path, encoding="utf-8"),
         )
 
@@ -1588,8 +1543,6 @@ class OnnxEmotionRecognizer:
         }
 
     def recognize(self, pcm: bytes) -> dict | None:
-        import numpy as np
-
         self.load()
 
         samples = np.frombuffer(
@@ -1641,8 +1594,6 @@ def spectral_bandwidth(pcm: bytes | memoryview) -> float:
     Std-dev of the spectrum around its centroid: spread of
     energy across frequencies (Hz).
     """
-    import numpy as np
-
     freqs, magnitude = _spectrum(pcm)
 
     total = magnitude.sum()
@@ -1668,8 +1619,6 @@ def spectral_rolloff(
     Telephone-band audio rolls off near 3.4 kHz; full-band
     content reaches much higher.
     """
-    import numpy as np
-
     freqs, magnitude = _spectrum(pcm)
 
     total = magnitude.sum()
@@ -1691,8 +1640,6 @@ def peak_stats(pcm: bytes | memoryview) -> tuple[float, bool]:
     (peak_dbfs, clipped) for one chunk. Clipped means samples
     touch >= 99% of full scale -- distortion happened.
     """
-    import array
-
     samples = array.array("h")
 
     samples.frombytes(bytes(pcm))
@@ -1723,8 +1670,6 @@ def lpc_formants(
     imaginary part are candidate formants. Pure numpy; runs
     per-utterance, never per-frame.
     """
-    import numpy as np
-
     x = np.frombuffer(
         bytes(pcm),
         dtype=np.int16,
@@ -1830,8 +1775,6 @@ def estimate_bpm(
     Returns None when no periodicity stands out -- silence and
     plain speech yield None, steady music yields a number.
     """
-    import numpy as np
-
     x = np.frombuffer(
         bytes(pcm),
         dtype=np.int16,
@@ -1888,8 +1831,6 @@ def pitch_register(f0s: list[float]) -> str | None:
     if len(f0s) < 10:
         return None
 
-    import numpy as np
-
     median = float(np.median(np.asarray(f0s)))
 
     if median < 140.0:
@@ -1922,10 +1863,6 @@ def _whisper_worker_main(
     segment (noise loops, memory balloon) degrades THIS process
     only; the supervisor restarts it on timeout.
     """
-    import numpy as np
-
-    from faster_whisper import WhisperModel
-
     kwargs: dict = {"device": "cpu", "compute_type": "int8"}
 
     if models_dir:
@@ -2077,8 +2014,6 @@ class WhisperWorkerProxy:
         self._process = None
 
     def _ensure(self) -> None:
-        import multiprocessing as mp
-
         if self._process is not None and self._process.is_alive():
             return
 

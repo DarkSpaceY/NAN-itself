@@ -25,24 +25,37 @@ dependencies = [
     "fastapi>=0.141.1",
     "faster-whisper>=1.2.1",
     "fastmcp>=2.14.1",
+    "huggingface-hub>=0.30.0",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "mcp<3",
     "mss>=10.2.0",
+    "numpy>=1.26.0",
+    "onnxruntime>=1.20.0",
     "openai>=3.2.0",
+    "opencv-python-headless>=4.10.0",
     "pillow>=12.3.0",
     "psutil>=7.0.0",
+    "pydantic>=2.11.0",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
     "pywhispercpp>=1.5.0",
     "realtimestt>=1.0.2",
-    "setuptools>=84.0.0",
+    # Pinned below 81: face_recognition_models still uses
+    # pkg_resources (removed from setuptools 81+).
+    "setuptools>=80.9.0,<81",
     "sherpa-onnx>=1.13.6",
     "soar-sml>=9.6.5",
     "sounddevice>=0.5.6",
     "transformers>=4.49.0",
-    "webrtcvad>=2.0.10",
+    "uvicorn>=0.30.0",
+    "webrtcvad-wheels>=2.0.14",
 ]
+
+[project.urls]
+Homepage = "https://github.com/DarkSpaceY/NAN-itself"
+Repository = "https://github.com/DarkSpaceY/NAN-itself"
+Issues = "https://github.com/DarkSpaceY/NAN-itself/issues"
 
 [dependency-groups]
 dev = [

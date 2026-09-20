@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
+import webbrowser
 from pathlib import Path
 from typing import Any, Callable
 
@@ -104,8 +106,6 @@ class Gateway:
 
         if open_browser:
             # 等待服务器真正启动（尝试建立TCP连接）
-            import socket
-            import webbrowser
             start = asyncio.get_event_loop().time()
             connected = False
             while not connected and (asyncio.get_event_loop().time() - start) < 10:

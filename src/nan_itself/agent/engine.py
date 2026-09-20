@@ -63,7 +63,7 @@ from .verbs import (
     VERBS,
     ExecutionState,
 )
-from ..modules import (
+from ..modules.model import (
     Turn,
 )
 from ..events import (

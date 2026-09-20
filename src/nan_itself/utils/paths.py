@@ -5,9 +5,8 @@ Every repo-relative location (data/, models/) resolves through
 this module so the process never depends on its working
 directory: launching nan from any cwd still writes inside the
 repository. Generic overrides stay env-driven (NAN_DATA_DIR,
-NAN_MODELS_DIR); feature-specific envs (NAN_MEMORY_DIR,
-NAN_AUDIO_SPEAKER_MODEL, NAN_VISION_VLM_DIR, ...) keep
-precedence at their call sites.
+NAN_MODELS_DIR); feature-specific envs (NAN_AUDIO_SPEAKER_MODEL,
+NAN_VISION_VLM_DIR, ...) keep precedence at their call sites.
 
 Anchoring relies on the editable install: nan_itself.__file__
 resolves into <repo>/src/nan_itself, so three levels up from

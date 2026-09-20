@@ -11,6 +11,10 @@ from loguru import logger
 
 from typing import Any, Mapping
 
+from .model import (
+    DataSpaceReader,
+)
+
 
 
 def build_dependency_maps(
@@ -55,10 +59,6 @@ def bind_instance(
     dataspaces: Mapping[str, "DataSpace"],
 ) -> None:
     record.instance.data = record.data
-
-    from .model import (
-        DataSpaceReader,
-    )
 
     dependencies: dict[
         str,

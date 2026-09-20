@@ -16,6 +16,7 @@ injected and monkeypatchable; tests never touch real hardware.
 
 from __future__ import annotations
 
+import ctypes
 import platform
 import re
 import subprocess
@@ -23,6 +24,8 @@ import time
 from collections import deque
 from typing import Any, Callable
 
+
+import mss
 
 try:
     import psutil
@@ -90,8 +93,6 @@ def idle_seconds() -> float | None:
             return None
 
     if system == "Windows":
-        import ctypes
-
         class LASTINPUTINFO(ctypes.Structure):
             _fields_ = [
                 ("cbSize", ctypes.c_uint),
@@ -152,8 +153,6 @@ def foreground_app() -> tuple[str, str] | None:
         return None
 
     if system == "Windows":
-        import ctypes
-
         hwnd = ctypes.windll.user32.GetForegroundWindow()
 
         if not hwnd:
@@ -172,8 +171,6 @@ def foreground_app() -> tuple[str, str] | None:
 
 def display_count() -> int | None:
     try:
-        import mss
-
         monitors = mss.mss().monitors
 
         return max(0, len(monitors) - 1)  # [0] is the union

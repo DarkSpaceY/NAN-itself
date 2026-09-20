@@ -14,7 +14,7 @@ Blocks:
     spectral_saliency     L3 frequency-domain attention peak
     GlanceSegmenter       L4 event-driven slicing of the frame stream
     CameraSource          default camera source (OpenCV/AVFoundation)
-    FaceAnalyzer          L5 lazy face_recognition adapter (detect+encode)
+    FaceAnalyzer          L5 face_recognition adapter (detect+encode)
     FaceMatcher           L6 auto-enrolling person registry
     QrScanner             L6 QR decode via OpenCV
     OcrReader             L6 lazy easyocr adapter
@@ -28,6 +28,7 @@ original frame is kept only as a glance keyframe candidate.
 
 from __future__ import annotations
 
+import sys
 import time
 import threading
 from collections import deque
@@ -35,7 +36,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import cv2
+import easyocr
+import face_recognition
+import huggingface_hub
+import numpy as np
+import onnxruntime as ort
+import torch
 from loguru import logger
+from PIL import Image
+from transformers import (
+    AutoModelForImageTextToText,
+    AutoProcessor,
+)
 
 
 # ============================================================================
@@ -50,8 +63,6 @@ def to_small_gray(
     """
     Downscaled grayscale proxy used by every temporal computation.
     """
-    import cv2
-
     height, width = frame.shape[:2]
 
     if width <= small_width:
@@ -79,9 +90,6 @@ def frame_stats(frame: Any) -> dict[str, float]:
     noise       robust high-frequency estimate (MAD of Laplacian)
     entropy     luminance histogram entropy (bits)
     """
-    import cv2
-    import numpy as np
-
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     f = gray.astype(np.float32)
@@ -156,8 +164,6 @@ def edge_density(
     """
     Fraction of edge pixels in the small gray proxy (0..1).
     """
-    import cv2
-
     edges = cv2.Canny(
         small_gray,
         canny_low,
@@ -178,9 +184,6 @@ def spectral_saliency(
     Returns the normalized centroid (0..1) of the saliency map
     and its peak value -- where the eye would go first.
     """
-    import cv2
-    import numpy as np
-
     height, width = small_gray.shape[:2]
 
     windowed = small_gray.astype(np.float32)
@@ -306,9 +309,6 @@ class MotionTracker:
         small_gray: Any,
         now: float,
     ) -> dict[str, Any]:
-        import cv2
-        import numpy as np
-
         if self.prev is None:
             self.prev = small_gray
 
@@ -448,9 +448,6 @@ def optical_flow_summary(
     everything drifting the same way is the CAMERA moving, while
     heterogeneous flow is the SCENE moving.
     """
-    import cv2
-    import numpy as np
-
     flow = cv2.calcOpticalFlowFarneback(
         prev_gray,
         gray,
@@ -495,9 +492,6 @@ def motion_blob(
     Largest connected motion region as normalized fractions
     (small-proxy coordinates). None when nothing moved.
     """
-    import cv2
-    import numpy as np
-
     if mask is None or not mask.any():
         return None
 
@@ -797,8 +791,6 @@ class CameraSource:
         self._cap: Any = None
 
     def start(self) -> None:
-        import cv2
-
         device = self.device
 
         if (
@@ -908,21 +900,19 @@ class CameraSource:
 
 
 def sys_darwin() -> bool:
-    import sys
-
     return sys.platform == "darwin"
 
 
 # ============================================================================
-# L5/L6: model-backed analyzers (all lazy, all optional)
+# L5/L6: model-backed analyzers
 # ============================================================================
 
 
 class FaceAnalyzer:
     """
-    Lazy face_recognition adapter: detect faces and produce 128-d
-    encodings. import happens on first use so units without dlib
-    still collect cleanly.
+    face_recognition adapter: detect faces and produce 128-d
+    encodings. The import happens at module load; dlib is a hard
+    dependency of the vision stack.
     """
 
     def __init__(
@@ -940,8 +930,6 @@ class FaceAnalyzer:
         if self._loaded:
             return
 
-        import face_recognition  # noqa: F401
-
         self._loaded = True
 
     def analyze(self, frame: Any) -> list[dict]:
@@ -950,9 +938,6 @@ class FaceAnalyzer:
         "encoding": ndarray|None}, ...] in ORIGINAL frame
         coordinates.
         """
-        import cv2
-        import face_recognition
-
         self.load()
 
         height, width = frame.shape[:2]
@@ -1068,8 +1053,6 @@ class FaceMatcher:
         distance is the nearest gallery entry even when it falls
         below the threshold (a new person opens then).
         """
-        import numpy as np
-
         vec = np.asarray(encoding, dtype=np.float32)
 
         now = time.time()
@@ -1173,8 +1156,6 @@ class FaceMatcher:
         }
 
     def restore(self, data: Any) -> None:
-        import numpy as np
-
         if not isinstance(data, dict):
             raise TypeError(
                 "person registry must be an object",
@@ -1253,8 +1234,6 @@ class QrScanner:
 
     def _get(self) -> Any:
         if self._detector is None:
-            import cv2
-
             self._detector = cv2.QRCodeDetector()
 
         return self._detector
@@ -1294,8 +1273,6 @@ class OcrReader:
     def load(self) -> None:
         if self._reader is not None:
             return
-
-        import easyocr
 
         self._reader = easyocr.Reader(
             list(self.languages),
@@ -1361,8 +1338,6 @@ class YoloOnnxDetector:
     def load(self) -> None:
         if self._session is not None:
             return
-
-        import onnxruntime as ort
 
         self._labels = [
             line.strip()
@@ -1443,8 +1418,6 @@ class YoloOnnxDetector:
         Pure decode of one YOLOv8-style output tensor
         ([1, 4+classes, N]) back into ORIGINAL frame coordinates.
         """
-        import numpy as np
-
         predictions = np.asarray(output)[0]
 
         # (4+classes, N) -> (N, 4+classes)
@@ -1517,9 +1490,6 @@ class YoloOnnxDetector:
         return detections
 
     def detect(self, frame: Any) -> list[dict]:
-        import cv2
-        import numpy as np
-
         self.load()
 
         height, width = frame.shape[:2]
@@ -1612,8 +1582,6 @@ class VlmCaptioner:
         )
 
     def _download(self) -> None:
-        from huggingface_hub import snapshot_download
-
         logger.info(
             "vlm weights missing at {}; downloading {} "
             "(~1 GB, honors HF_ENDPOINT and proxy envs)",
@@ -1621,7 +1589,7 @@ class VlmCaptioner:
             self.repo_id,
         )
 
-        snapshot_download(
+        huggingface_hub.snapshot_download(
             repo_id=self.repo_id,
             local_dir=self.model_path,
         )
@@ -1632,13 +1600,6 @@ class VlmCaptioner:
 
         if not self._weights_present():
             self._download()
-
-        import torch
-
-        from transformers import (
-            AutoModelForVision2Seq,
-            AutoProcessor,
-        )
 
         if torch.cuda.is_available():
             device = "cuda"
@@ -1662,9 +1623,9 @@ class VlmCaptioner:
         )
 
         self._model = (
-            AutoModelForVision2Seq.from_pretrained(
+            AutoModelForImageTextToText.from_pretrained(
                 path,
-                torch_dtype=dtype,
+                dtype=dtype,
             )
             .to(device)
             .eval()
@@ -1684,10 +1645,6 @@ class VlmCaptioner:
         """
         One-sentence description of one BGR frame.
         """
-        import torch
-
-        from PIL import Image
-
         self.load()
 
         image = Image.fromarray(
@@ -1731,8 +1688,6 @@ class VlmCaptioner:
 
 
 def cvt_rgb(frame: Any) -> Any:
-    import cv2
-
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 

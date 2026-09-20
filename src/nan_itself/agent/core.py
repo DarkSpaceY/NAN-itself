@@ -10,7 +10,7 @@ from .model import AgentResult
 from .reports import report_record_name
 from .runtime import AgentRuntime
 from ..events import EventBus, StreamSink
-from ..modules import Turn
+from ..modules.model import Turn
 from ..utils.backoff import next_backoff
 
 

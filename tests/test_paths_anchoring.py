@@ -150,33 +150,15 @@ def test_builtin_modules_anchor_from_foreign_cwd(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    monkeypatch.delenv("NAN_MEMORY_DIR", raising=False)
-
-    monkeypatch.delenv("NAN_PLAN_DIR", raising=False)
-
     monkeypatch.delenv("NAN_VISION_FACES_REGISTRY", raising=False)
 
     monkeypatch.delenv("NAN_AUDIO_VOICES_REGISTRY", raising=False)
 
     _chdir_out(monkeypatch, tmp_path)
 
-    memory = _load_builtin_module("memory")
-
-    plan = _load_builtin_module("plan")
-
     vision = _load_builtin_module("vision")
 
     audio = _load_builtin_module("audio")
-
-    assert (
-        memory.MemoryModule().base
-        == REPO / "data" / "databases" / "memory"
-    )
-
-    assert (
-        plan.PlanModule().base
-        == REPO / "data" / "databases" / "plan"
-    )
 
     assert (
         vision.VisionModule().registry_path
