@@ -473,7 +473,8 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
     )
 
     runtime = SkillRuntime(
-        workspace_skills=root
+        workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()

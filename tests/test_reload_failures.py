@@ -793,6 +793,7 @@ def test_skill_invalid_candidate_keeps_old_record(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()
@@ -898,6 +899,7 @@ def test_skill_name_collision_keeps_old_record(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()
@@ -1012,6 +1014,7 @@ def test_skill_removed_file_does_not_touch_other_skill(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()

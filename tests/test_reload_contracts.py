@@ -337,6 +337,7 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()
@@ -435,6 +436,7 @@ def test_skill_reload_preserves_generation(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()
@@ -509,6 +511,7 @@ def test_removed_skill_disappears_completely(
 
     runtime = SkillRuntime(
         workspace_skills=root,
+        builtin_skills=tmp_path / "builtin-skills",
     )
 
     runtime.refresh()
