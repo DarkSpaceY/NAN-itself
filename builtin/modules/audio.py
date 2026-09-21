@@ -3,16 +3,21 @@
 """
 Audio: hearing as an autonomous builtin Module.
 
-MVP layers (docs/audio-design.md):
+This module owns the microphone. It publishes everything it
+hears as facts and never interprets speech content -- STT
+lives downstream (the voice module) which consumes the
+rolling PCM ring published here.
+
+Layers:
 
     L1  energy      RMS + noise floor bookkeeping
     L4  events      VAD slicing, silence spans, transient bangs
-    L7  content     faster-whisper transcription
+    L5  identity    speaker match, ambient/utterance tags, emotion
 
 Two daemon threads outside the event loop:
 
     capture     mic frames -> AudioPipeline -> utterance queue
-    transcript  utterance queue -> WhisperTranscriber -> ring
+    analyze     utterance queue -> tagging/speaker/emotion -> ring
 
 query() is a pure projection of already-computed rings/stats;
 it never touches DSP or LLM work. Missing weights or no input
@@ -24,6 +29,7 @@ it reopens every retry_interval seconds.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -49,7 +55,6 @@ from nan_itself.utils.audio import (
     SoundDeviceMicSource,
     SpeakerMatcher,
     Utterance,
-    WhisperTranscriber,
 )
 
 
@@ -63,8 +68,6 @@ class AudioModule(Module):
     frame_ms: int = 30
 
     sample_rate: int = 16000
-
-    confidence_threshold: float = 0.6  # 低于此值的转录将被丢弃
 
     vad_aggressiveness: int = 2
 
@@ -84,10 +87,6 @@ class AudioModule(Module):
 
     hear_render_limit: int = 5
 
-    hear_preview_cap: int = 200
-
-    dedup_window_s: float = 60.0
-
     quiet_report_after_s: float = 120.0
 
     retry_interval: float = 30.0
@@ -96,11 +95,9 @@ class AudioModule(Module):
 
     publish_interval: float = 2.0
 
-    whisper_model: str = "base"
-
-    whisper_language: str | None = None
-
-    hotwords: tuple[str, ...] = ()
+    # Rolling raw-PCM window published as facts for downstream
+    # consumers (voice). The ambient tagger tags this same ring.
+    pcm_ring_window_s: float = 10.0
 
     speaker_threshold: float = 0.62
 
@@ -116,34 +113,15 @@ class AudioModule(Module):
 
     ambient_tag_interval_s: float = 10.0
 
-    ambient_tag_window_s: float = 8.0
-
     utt_tag_min_prob: float = 0.4
 
     emotion_min_voiced_ms: int = 800
-
-    whisper_subprocess: bool = True
-
-    whisper_result_timeout: float = 30.0
 
     def __init__(self) -> None:
         self.sample_rate = 16000
 
         self.device: int | str | None = (
             os.getenv("NAN_AUDIO_DEVICE") or None
-        )
-
-        self.whisper_model = os.getenv(
-            "NAN_AUDIO_WHISPER_MODEL",
-            "base",
-        )
-
-        hotword_env = os.getenv("NAN_AUDIO_HOTWORDS", "")
-
-        self.hotwords = tuple(
-            self._normalize_text(part)
-            for part in hotword_env.split(",")
-            if part.strip()
         )
 
         speaker_model = os.getenv("NAN_AUDIO_SPEAKER_MODEL")
@@ -185,27 +163,6 @@ class AudioModule(Module):
         )
 
         self._embedder: Any = None
-
-        # Default: in-thread. The subprocess proxy exists for
-        # hardened deployments, but macOS spawn re-imports the
-        # unguarded __main__ console script (recursive agent!);
-        # the ratio + hallucination gates already keep whisper
-        # away from pathological inputs.
-        self.whisper_subprocess = (
-            os.getenv("NAN_AUDIO_WHISPER_SUBPROCESS", "0") == "1"
-        )
-
-        self.whisper_worker_factory = lambda: WhisperWorkerProxy(
-            model_size=self.whisper_model,
-            models_dir=str(self.models_dir),
-            language=self.whisper_language,
-            translate_enabled=(
-                os.getenv("NAN_AUDIO_TRANSLATE", "0") == "1"
-            ),
-            result_timeout=self.whisper_result_timeout,
-        )
-
-        self._whisper_worker: Any = None
 
         tagger_model = os.getenv("NAN_AUDIO_TAGGER_MODEL")
 
@@ -266,26 +223,25 @@ class AudioModule(Module):
 
         self._emotion: Any = None
 
-        # Rolling raw-PCM window for periodic ambient tagging.
+        # Rolling raw-PCM window published as facts. The capture
+        # thread appends; the publish ticker snapshots it from
+        # the event loop, so all access is guarded by the lock.
         self._pcm_ring: deque[bytes] = deque()
 
         self._pcm_ring_bytes = 0
 
         self._pcm_ring_budget = int(
-            self.ambient_tag_window_s
+            self.pcm_ring_window_s
             * self.sample_rate
             * 2
         )
 
+        # Monotonic counter of every chunk ever appended. Chunk
+        # i in the ring corresponds to seq - len(ring) + i, so
+        # consumers resync by arithmetic, not by handshake.
+        self._pcm_seq = 0
+
         self._last_ambient_tag = 0.0
-
-        models_dir = os.getenv("NAN_AUDIO_MODELS_DIR")
-
-        self.models_dir = (
-            Path(models_dir)
-            if models_dir
-            else _paths.repo_root() / "models" / "whisper"
-        )
 
         self.pipeline = AudioPipeline(
             vad_aggressiveness=self.vad_aggressiveness,
@@ -295,15 +251,6 @@ class AudioModule(Module):
             max_utterance_frames=self.max_utterance_frames,
             transient_rise_db=self.transient_rise_db,
             ambient_window_frames=self.ambient_window_frames,
-        )
-
-        self.transcriber = WhisperTranscriber(
-            model_size=self.whisper_model,
-            models_dir=str(self.models_dir),
-            language=self.whisper_language,
-            translate_enabled=(
-                os.getenv("NAN_AUDIO_TRANSLATE", "0") == "1"
-            ),
         )
 
         self.mic_factory = lambda: SoundDeviceMicSource(
@@ -331,18 +278,13 @@ class AudioModule(Module):
             "last_heard_ts": None,
             "last_transient_ts": None,
             "utterances_total": 0,
-            "transcripts_total": 0,
             "transients_total": 0,
-            "dedup_skipped_total": 0,
             "dropped_frames_total": 0,
             "dropped_utterances_total": 0,
             "load_error": None,
             "f0_hz": 0.0,
             "pitch_strength": 0.0,
             "pitch_trend": "",
-            "last_speech_rate": None,
-            "last_hotword": None,
-            "hotwords_total": 0,
             "speaker_backend": "not loaded",
             "last_speaker": None,
             "last_speaker_score": None,
@@ -359,12 +301,7 @@ class AudioModule(Module):
             "last_formants": [],
             "last_pauses": None,
             "last_register": None,
-            "last_translation": None,
-            "whisper_timeouts": 0,
-            "whisper_restarts": 0,
         }
-
-        self._last_normalized_text: str = ""
 
         self._stop_event = threading.Event()
 
@@ -383,11 +320,7 @@ class AudioModule(Module):
     # ==================================================================
 
     async def start(self) -> None:
-        logger.info(
-            "audio module starting (model={}, dir={})",
-            self.whisper_model,
-            self.models_dir,
-        )
+        logger.info("audio module starting")
 
         self._load_registry()
 
@@ -400,7 +333,7 @@ class AudioModule(Module):
 
         for target, name in (
             (self._capture_loop, "audio-capture"),
-            (self._transcribe_loop, "audio-transcribe"),
+            (self._analyze_loop, "audio-analyze"),
         ):
             thread = threading.Thread(
                 target=target,
@@ -448,7 +381,7 @@ class AudioModule(Module):
         """
         Load every model-backed backend before the loops start.
 
-        First-run weight downloads (whisper, tagging, speaker,
+        First-run weight downloads (tagging, speaker,
         emotion models) happen here, in the service lifetime
         phase -- never inside the tick loops. A failing backend
         raises out of start(): the Facade marks the module DOWN
@@ -487,10 +420,6 @@ class AudioModule(Module):
                 ).__name__
 
             logger.info("{} backend ready: {}", label, type(backend).__name__)
-
-        self.transcriber.load()
-
-        logger.info("whisper backend ready: {}", self.whisper_model)
 
     # ==================================================================
     # Threads
@@ -539,14 +468,17 @@ class AudioModule(Module):
 
             now = time.monotonic()
 
-            self._pcm_ring.append(pcm)
+            with self._state_lock:
+                self._pcm_ring.append(pcm)
 
-            self._pcm_ring_bytes += len(pcm)
+                self._pcm_ring_bytes += len(pcm)
 
-            while self._pcm_ring_bytes > self._pcm_ring_budget:
-                dropped = self._pcm_ring.popleft()
+                self._pcm_seq += 1
 
-                self._pcm_ring_bytes -= len(dropped)
+                while self._pcm_ring_bytes > self._pcm_ring_budget:
+                    dropped = self._pcm_ring.popleft()
+
+                    self._pcm_ring_bytes -= len(dropped)
 
             if (
                 now - self._last_ambient_tag
@@ -618,7 +550,7 @@ class AudioModule(Module):
             with self._state_lock:
                 self._stats["dropped_utterances_total"] += 1
 
-    def _transcribe_loop(self) -> None:
+    def _analyze_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
                 utt = self._utterance_queue.get(
@@ -630,47 +562,47 @@ class AudioModule(Module):
                 continue
 
             try:
-                result = self._transcribe(utt)
+                self._analyze_utterance(utt)
 
             except Exception as exc:
                 logger.exception(
-                    "audio transcription failed: {}", exc
+                    "audio utterance analysis failed: {}", exc
                 )
 
                 with self._state_lock:
                     self._stats["load_error"] = str(exc)
 
-                continue
+    def _analyze_utterance(self, utt: Utterance) -> None:
+        """
+        One finished utterance: record the event as a fact (no
+        content -- transcription belongs downstream), then enrich
+        the event with whatever the cheap DSP backends attribute.
+        """
+        with self._state_lock:
+            self._heard.append(
+                {
+                    "ts": time.time(),
+                    "voiced_ms": utt.voiced_ms,
+                },
+            )
 
-            with self._state_lock:
-                self._stats["whisper_timeouts"] = getattr(
-                    self._whisper_worker,
-                    "timeouts",
-                    0,
-                ) if self._whisper_worker else 0
+            self._stats["last_heard_ts"] = (
+                self._heard[-1]["ts"]
+            )
 
-                self._stats["whisper_restarts"] = getattr(
-                    self._whisper_worker,
-                    "restarts",
-                    0,
-                ) if self._whisper_worker else 0
+        self._tag_utterance(utt)
 
-            if not self._accept_transcript(result):
-                continue
+        # W4: attribute the utterance to a voice when it is
+        # long enough to carry a stable embedding.
+        if utt.voiced_ms >= self.embed_min_voiced_ms:
+            self._attribute_speaker(utt)
 
-            self._tag_utterance(utt)
+        # W6: paralinguistic emotion needs more audio than
+        # speaker identity to mean anything.
+        if utt.voiced_ms >= self.emotion_min_voiced_ms:
+            self._recognize_emotion(utt)
 
-            # W4: attribute the utterance to a voice when it is
-            # long enough to carry a stable embedding.
-            if utt.voiced_ms >= self.embed_min_voiced_ms:
-                self._attribute_speaker(utt)
-
-            # W6: paralinguistic emotion needs more audio than
-            # speaker identity to mean anything.
-            if utt.voiced_ms >= self.emotion_min_voiced_ms:
-                self._recognize_emotion(utt)
-
-            self._utterance_extras(utt)
+        self._utterance_extras(utt)
 
     # ------------------------------------------------------------------
     # Speaker identity (W4)
@@ -855,7 +787,8 @@ class AudioModule(Module):
         if tagger is None:
             return
 
-        window = b"".join(self._pcm_ring)
+        with self._state_lock:
+            window = b"".join(self._pcm_ring)
 
         try:
             events = tagger.tag(window)
@@ -993,133 +926,52 @@ class AudioModule(Module):
             if register:
                 self._stats["last_register"] = register
 
-
-    def _transcribe(self, utt: Utterance) -> dict:
-        """
-        Route one utterance to whisper. Subprocess mode keeps
-        pathological inputs (noise loops, memory balloons) away
-        from the agent process; direct mode serves unit tests.
-        """
-        if not self.whisper_subprocess:
-            return self.transcriber.transcribe(utt)
-
-        if self._whisper_worker is None:
-            self._whisper_worker = self.whisper_worker_factory()
-
-        return self._whisper_worker.transcribe(utt)
-
-    # ------------------------------------------------------------------
-    # Transcript bookkeeping (extracted for direct unit driving)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _normalize_text(text: str) -> str:
-        return "".join(text.split()).lower()
-
-    def _accept_transcript(self, result: dict[str, Any]) -> bool:
-        """Record one transcription; False when deduplicated/empty."""
-        text = (result.get("text") or "").strip()
-
-        if not text:
-            return False
-
-        confidence = float(result.get("confidence", 0.0))
-        if confidence < self.confidence_threshold:
-            logger.debug(f"Transcription below confidence threshold: {confidence:.2f} < {self.confidence_threshold}")
-            return False
-
-        normalized = self._normalize_text(text)
-
-        now_ts = time.time()
-
-        with self._state_lock:
-            if (
-                normalized == self._last_normalized_text
-                and self._heard
-                and now_ts - self._heard[-1]["ts"]
-                <= self.dedup_window_s
-            ):
-                self._stats["dedup_skipped_total"] += 1
-
-                self._last_normalized_text = normalized
-
-                return False
-
-            self._last_normalized_text = normalized
-
-            words = result.get("words") or []
-
-            voiced_s = float(result.get("voiced_s") or 0.0)
-
-            rate = (
-                round(
-                    len(words) / max(voiced_s, 0.3),
-                    2,
-                )
-                if words and voiced_s > 0
-                else None
-            )
-
-            hotword = next(
-                (
-                    hw
-                    for hw in self.hotwords
-                    if hw in normalized
-                ),
-                None,
-            )
-
-            translation = result.get("translation")
-
-            self._heard.append(
-                {
-                    "ts": now_ts,
-                    "text": text,
-                    "confidence": round(
-                        float(result.get("confidence", 0.0)),
-                        2,
-                    ),
-                    "language": result.get("language"),
-                    "rate": rate,
-                    "hotword": hotword,
-                    "translation": translation,
-                },
-            )
-
-            self._stats["transcripts_total"] += 1
-
-            self._stats["last_heard_ts"] = now_ts
-
-            if rate is not None:
-                self._stats["last_speech_rate"] = rate
-
-            if hotword:
-                self._stats["last_hotword"] = hotword
-
-                self._stats["hotwords_total"] = (
-                    self._stats.get("hotwords_total", 0) + 1
-                )
-
-            if translation:
-                self._stats["last_translation"] = translation
-
-        return True
-
     # ==================================================================
     # Publishing
     # ==================================================================
+
+    def _pcm_ring_snapshot(self) -> dict[str, Any]:
+        """
+        JSON-safe rolling PCM window for downstream consumers.
+
+        `seq` counts every chunk ever appended; the chunk at
+        index i corresponds to global sequence number
+        seq - len(chunks) + i, so a consumer that has consumed
+        up to S resyncs by arithmetic (S < seq - len(chunks)
+        means the window overtook it: take everything). Chunks
+        are base64 strings because DataSpace persists to JSON.
+        """
+        with self._state_lock:
+            chunks = list(self._pcm_ring)
+
+            seq = self._pcm_seq
+
+        return {
+            "seq": seq,
+            "sample_rate": self.sample_rate,
+            "frame_ms": self.frame_ms,
+            "chunks": [
+                base64.b64encode(chunk).decode("ascii")
+                for chunk in chunks
+            ],
+        }
 
     async def _publish_ticker(self) -> None:
         while True:
             await asyncio.sleep(self.publish_interval)
 
-            with self._state_lock:
-                payload = {
-                    key: value
-                    for key, value in self._stats.items()
-                }
+            self._publish_once()
 
-            self.data.publish(payload)
+    def _publish_once(self) -> None:
+        with self._state_lock:
+            payload = {
+                key: value
+                for key, value in self._stats.items()
+            }
+
+        payload["pcm_ring"] = self._pcm_ring_snapshot()
+
+        self.data.publish(payload)
 
     # ==================================================================
     # Module contract
@@ -1218,7 +1070,7 @@ class AudioModule(Module):
             not heard_lines
             and not stats.get("speech_active")
             and (quiet is None or quiet >= self.quiet_report_after_s)
-            and stats.get("transcripts_total", 0) == 0
+            and stats.get("utterances_total", 0) == 0
         ):
             # Nothing has ever been heard, the room is dead and
             # no speech is in flight: stay silent instead of
@@ -1231,18 +1083,17 @@ class AudioModule(Module):
         self,
         heard: list[dict[str, Any]],
     ) -> list[str]:
+        """
+        Speech events without content: when something was heard,
+        who it belonged to, and what rode on the voice. The words
+        themselves are the voice module's territory.
+        """
         out: list[str] = []
 
         for item in reversed(heard):
-            preview = item["text"][: self.hear_preview_cap]
-
-            translation = item.get("translation")
-
             clock = datetime.fromtimestamp(item["ts"]).strftime(
                 "%H:%M",
             )
-
-            confidence = item.get("confidence", 0.0)
 
             tags = ""
 
@@ -1251,8 +1102,13 @@ class AudioModule(Module):
             if speaker:
                 tags += f" ({speaker})"
 
-            if confidence < 0.6:
-                tags += f" (conf {confidence})"
+            voiced_ms = item.get("voiced_ms", 0)
+
+            if voiced_ms >= 1000:
+                tags += f" {voiced_ms / 1000:.1f}s"
+
+            else:
+                tags += f" {voiced_ms}ms"
 
             utt_tag = item.get("utt_tag")
 
@@ -1264,17 +1120,7 @@ class AudioModule(Module):
             if emotion:
                 tags += f" [emo:{emotion}]"
 
-            hotword = item.get("hotword")
-
-            if hotword:
-                tags += f" [hot:{hotword}]"
-
-            line = f'- heard {clock}{tags} "{preview}"'
-
-            if translation:
-                line += f' -> "{translation[: self.hear_preview_cap]}"'
-
-            out.append(line)
+            out.append(f"- heard {clock}{tags}")
 
             if len(out) >= self.hear_render_limit:
                 break
@@ -1305,15 +1151,9 @@ class AudioModule(Module):
                 "utterances_total": self._stats[
                     "utterances_total"
                 ],
-                "transcripts_total": self._stats[
-                    "transcripts_total"
-                ],
                 "transients_total": self._stats[
                     "transients_total"
                 ],
-                "hotwords_total": self._stats.get(
-                    "hotwords_total", 0
-                ),
                 "noise_floor_seed": self.pipeline.tracker.noise_floor,
             }
 
@@ -1331,9 +1171,7 @@ class AudioModule(Module):
 
         total_keys = (
             "utterances_total",
-            "transcripts_total",
             "transients_total",
-            "hotwords_total",
         )
 
         for key in total_keys:
