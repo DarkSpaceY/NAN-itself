@@ -52,6 +52,16 @@ events:
 | `NAN_VISION_VLM` | Set `0` to disable the vision VLM backend. |
 | `NAN_VISION_VLM_DIR` | Override the VLM weights directory (`models/vision/vlm/...`). |
 | `NAN_SEARXNG_SETTINGS` | Point the built-in `search` tool at a different searxng-cli settings file (replaces `config/searxng.yml`). |
+| `NAN_VOICE_STT_MODEL` | Voice module whisper model size (default `base`). |
+| `NAN_VOICE_STT_LANGUAGE` | Voice module STT language hint (e.g. `zh`); unset = auto. |
+| `NAN_VOICE_STT_MODELS_DIR` | Override the whisper weights directory (default `models/whisper`, shared with audio). |
+| `NAN_VOICE_SLM_DIR` | Override the Qwen3-0.6B SLM weights directory (default `models/voice/slm/qwen3-0.6b`). |
+| `NAN_VOICE_SLM_REPO` | HuggingFace repo id for SLM auto-download (default `Qwen/Qwen3-0.6B`). |
+| `NAN_VOICE_COSYVOICE_DIR` | Override the CosyVoice upstream checkout (default `models/voice/cosyvoice`). |
+| `NAN_VOICE_TTS_DIR` | Override the CosyVoice2-0.5B weights directory (default `models/voice/tts/cosyvoice2-0.5b`). |
+| `NAN_VOICE_TTS_REFERENCE` | Override the TTS reference wav (voice identity; default `models/voice/tts/reference.wav`). |
+| `NAN_VOICE_TTS_SPEED` | TTS speaking rate multiplier (default `1.0`). |
+| `NAN_VOICE_FAST_PATH` | Set `0` to disable the SLM fast path (trivial turns answered without the main agent). |
 | `HF_ENDPOINT` | HuggingFace endpoint mirror, used by model auto-download. |
 
 `SEARXNG_CLI_SETTINGS` is injected automatically by the built-in search

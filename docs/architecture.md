@@ -136,7 +136,7 @@ Two parallel provider layouts, scanned with identical semantics —
 | Slot | Builtin | Workspace |
 |---|---|---|
 | Tools | `builtin/tools/` (`local/` Python, `mcps/` YAML) | `workspace/tools/` (same shape, starts empty) |
-| Modules | `builtin/modules/` (audio, vision, network, system, inbox) | `workspace/modules/` |
+| Modules | `builtin/modules/` (audio, voice, vision, network, system, inbox) | `workspace/modules/` |
 | Skills | `builtin/skills/` | `workspace/skills/` |
 
 `workspace/persona.md` holds the user-editable persona;

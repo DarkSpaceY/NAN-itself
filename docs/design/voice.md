@@ -1,11 +1,9 @@
 # Design: Full-Duplex Voice Module
 
-Status: **confirmed** (2026-09-21, all decisions locked with the user,
-not yet implemented). Voice is the first bidirectional (reactive)
-module: it
-perceives speech, decides, and acts — speaking — through the channel
-downlink. This doc fixes the v1 contract; details marked *open* are
-decided at implementation time.
+Status: **implemented** (2026-09-21, all decisions locked with the user).
+Voice is the first bidirectional (reactive) module: it perceives speech,
+decides, and acts — speaking — through the channel downlink. This doc
+fixes the v1 contract.
 
 ## Decisions locked
 

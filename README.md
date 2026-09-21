@@ -26,6 +26,11 @@ skills, and an HTTP gateway with a web UI.
 - **Ambient perception modules** — audio, vision (photometry → flow →
   faces → YOLO → OCR → VLM captioning), inbox, network and system modules
   run as background daemons and are queried by the agent.
+- **Voice: the first reactive module** — consumes the audio module's PCM
+  ring, runs VAD endpointing + STT, and speaks through a `say` channel:
+  the agent writes semantic tasks, a local 0.6B SLM composes the spoken
+  utterance, CosyVoice2 synthesizes it, and barge-in (0.5 s of speech)
+  stops playback and drains the queue.
 - **Module channels (reactive modules)** — modules can declare write-only
   downlink data slots the model writes to through
   `list_channels` / `show_channels` / `invoke_channels`, enabling
@@ -47,7 +52,7 @@ flowchart LR
     T --> MCP[MCP servers<br/>stdio subprocesses]
     T --> LP[Local Python tools<br/>in-process]
     C <--> SK[Skills<br/>hot-reload]
-    C <--> MD[Modules<br/>audio / vision / network / system]
+    C <--> MD[Modules<br/>audio / voice / vision / network / system]
     C -. "channels: list / show / invoke" .-> MD
     MD -. "query() projection + events" .-> C
 ```
@@ -150,7 +155,7 @@ and [CONTRIBUTING.md](CONTRIBUTING.md).
 ```
 NAN-itself/
 ├── builtin/              # Shipped sources (hot-reloadable)
-│   ├── modules/          # Ambient perception modules (audio, vision, ...)
+│   ├── modules/          # Ambient + reactive modules (audio, voice, vision, ...)
 │   ├── skills/           # Built-in skills
 │   └── tools/
 │       ├── mcps/         # MCP server configs (one YAML = one provider)

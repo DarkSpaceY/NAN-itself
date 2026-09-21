@@ -92,7 +92,8 @@ framework imports to hot-reload.
 ## Adding a builtin module
 
 Mirror the existing module shape in `builtin/modules/` (see
-`vision.py` / `audio.py`): background daemon threads for capture and
+`vision.py` / `audio.py`; `voice.py` adds the reactive channel
+downlink): background daemon threads for capture and
 inference, a pure `query()` projection as the agent-facing surface,
 and full-implement-let-it-crash semantics -- provisioning failures
 raise out of `start()`, so the Facade marks the module DOWN with the

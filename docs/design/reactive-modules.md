@@ -173,7 +173,7 @@ with a decision backend inside:
 
 | Scenario | Module | Channels (illustrative) |
 |---|---|---|
-| Full-duplex voice | audio | `tts-control`, `barge-in-policy` |
+| Full-duplex voice | **voice** (implemented, requires `audio`) | `say` — semantic task FIFO `{intent, key_points, tone, interruptible}`; barge-in drains it |
 | High-rate computer use | desktop (Touchpoint-backed) | `goal`, `interrupt` |
 | 3D character | avatar | `body`, `speech`, `gaze` — independent channels give "walk while talking" for free |
 | Game bot | minecraft | `locomotion`, `inventory` |
