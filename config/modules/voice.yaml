@@ -24,3 +24,14 @@ tts_checkout_dir: models/voice/cosyvoice
 tts_model_dir: models/voice/tts/cosyvoice2-0.5b
 
 tts_reference_wav: models/voice/tts/reference.wav
+
+# Speaker diarization (pyannote embedding + local person-N registry).
+# The pyannote models are gated: accept the terms at
+# huggingface.co/pyannote/embedding, then paste a read token below.
+# With weights already cached locally no token is needed.
+diarization_repo: pyannote/embedding
+diarization_token: ""        # HuggingFace read token
+diarization_threshold: 0.75  # cosine above this = same person
+diarization_models_dir: models/voice/diarization
+
+voices_registry: data/databases/audio/voice_speakers.json

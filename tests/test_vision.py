@@ -10,6 +10,8 @@ load whisper.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import sys
 import time
 from pathlib import Path
 
@@ -18,22 +20,68 @@ import numpy as np
 import pytest
 
 from nan_itself.modules.model import Turn
-from nan_itself.utils.vision import (
-    FaceMatcher,
-    Glance,
-    GlanceSegmenter,
-    MotionTracker,
-    VisionPipeline,
-    VlmCaptioner,
-    YoloOnnxDetector,
-    frame_stats,
-    motion_blob,
-    optical_flow_summary,
-    spectral_saliency,
-    to_small_gray,
-)
 
-from builtin.modules.vision import VisionModule
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _load_vision_module():
+    """
+    Load builtin/modules/vision.py the way the loader does
+    (Module/Turn injected into the file namespace). The vision
+    toolkit is inlined in the module file: the utils/ layer is
+    core-architecture only, so every name (module class and
+    toolkit) is referenced through this loaded module object.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "vision_module_test",
+        REPO / "builtin" / "modules" / "vision.py",
+    )
+
+    assert spec is not None and spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+
+    sys.modules[spec.name] = module
+
+    from nan_itself.modules.model import Module, Turn
+
+    module.Module = Module
+
+    module.Turn = Turn
+
+    spec.loader.exec_module(module)
+
+    return module
+
+
+_vision = _load_vision_module()
+
+VisionModule = _vision.VisionModule
+
+FaceMatcher = _vision.FaceMatcher
+
+Glance = _vision.Glance
+
+GlanceSegmenter = _vision.GlanceSegmenter
+
+MotionTracker = _vision.MotionTracker
+
+VisionPipeline = _vision.VisionPipeline
+
+VlmCaptioner = _vision.VlmCaptioner
+
+YoloOnnxDetector = _vision.YoloOnnxDetector
+
+frame_stats = _vision.frame_stats
+
+motion_blob = _vision.motion_blob
+
+optical_flow_summary = _vision.optical_flow_summary
+
+spectral_saliency = _vision.spectral_saliency
+
+to_small_gray = _vision.to_small_gray
 
 
 # ============================================================================

@@ -20,6 +20,13 @@ strict mode).
   (`repo_root()` / `data_dir()` / `models_dir()`). Never use
   cwd-relative defaults or private `parents[N]` lookups — the process
   must behave identically when started from any directory.
+- **Modules are self-contained.** `backend/nan_itself/utils/` holds only
+  core-architecture helpers (path anchoring, backoff). Module-related
+  code — DSP toolkits, model adapters, registries — lives inside the
+  module file itself (`builtin/modules/audio.py`, `voice.py`,
+  `vision.py`), even when that makes the file long. Modules never
+  import from each other; they share data only through facts (uplink)
+  and channels (downlink).
 - **One file = one provider.** Both backend kinds follow the same rule so
   every source file is a single hot-reloadable entity:
   - `builtin/tools/mcps/*.yaml` — one stdio MCP server per file

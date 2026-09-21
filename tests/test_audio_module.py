@@ -23,7 +23,6 @@ import numpy as np
 import pytest
 
 from nan_itself.modules.model import DataSpace
-from nan_itself.utils.audio import Utterance
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -56,6 +55,11 @@ def _load_audio_module():
     spec.loader.exec_module(module)
 
     return module
+
+
+# The audio module is self-contained (the old nan_itself.utils.audio
+# is gone): Utterance comes from the loaded builtin module.
+Utterance = _load_audio_module().Utterance
 
 
 def _fresh_instance():

@@ -38,6 +38,7 @@ dependencies = [
     "psutil>=7.0.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.15.0",
+    "pyannote.audio>=3.3.2",
     "python-dotenv>=1.2.3",
     "pywhispercpp>=1.5.0",
     # Pinned below 81: face_recognition_models still uses

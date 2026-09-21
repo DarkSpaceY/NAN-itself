@@ -9,17 +9,48 @@ Covers:
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
-from nan_itself.utils import dialogue
-from nan_itself.utils.tts import (
-    ALLOWED_INSTRUCTS,
-    NEUTRAL_INSTRUCT,
-    CosyVoiceTTS,
-    sanitize_instruct,
-)
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _load_voice_module():
+    """
+    Load builtin/modules/voice.py the way the loader does. The
+    TTS/SLM adapters live inside the voice module now, so the
+    adapter names are read off the loaded module object.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "voice_adapters_test",
+        REPO / "builtin" / "modules" / "voice.py",
+    )
+
+    assert spec is not None and spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+
+    sys.modules[spec.name] = module
+
+    spec.loader.exec_module(module)
+
+    return module
+
+
+voice = _load_voice_module()
+
+ALLOWED_INSTRUCTS = voice.ALLOWED_INSTRUCTS
+
+NEUTRAL_INSTRUCT = voice.NEUTRAL_INSTRUCT
+
+CosyVoiceTTS = voice.CosyVoiceTTS
+
+SmallDialogue = voice.SmallDialogue
+
+sanitize_instruct = voice.sanitize_instruct
 
 
 # ============================================================================
@@ -96,8 +127,8 @@ def test_tts_load_missing_reference_wav(tmp_path: Path):
 # ============================================================================
 
 
-def _slm(tmp_path: Path) -> dialogue.SmallDialogue:
-    return dialogue.SmallDialogue(model_path=tmp_path / "slm")
+def _slm(tmp_path: Path) -> SmallDialogue:
+    return SmallDialogue(model_path=tmp_path / "slm")
 
 
 def test_extract_json_takes_first_to_last_braces(tmp_path: Path):
@@ -113,7 +144,7 @@ def test_extract_json_takes_first_to_last_braces(tmp_path: Path):
 
 
 def test_strip_think_removes_leaked_block(tmp_path: Path):
-    strip = dialogue.SmallDialogue._strip_think
+    strip = SmallDialogue._strip_think
 
     assert strip("<think>\n思考\n</think>\n正文") == "正文"
 

@@ -126,10 +126,10 @@ loud failure that revives when weights land, never a silent limbo.
 
 ## Config and layout
 
-- `builtin/modules/voice.py` (module), `backend/nan_itself/utils/tts.py`
-  (CosyVoice adapter, lazy-loaded like `utils/vision.py`),
-  `backend/nan_itself/utils/dialogue.py` (SLM adapter) *open* — may
-  merge if thin.
+- `builtin/modules/voice.py` (module; the CosyVoice and SLM adapters
+  are inlined in the module file — every builtin module is
+  self-contained, `utils/` holds only core-architecture helpers such
+  as paths and backoff) *open* — may merge if thin.
 - Weights under `models/voice/` (`tts/cosyvoice2-0.5b`, `slm/...`,
   whisper reuses the audio module's copy); paths configured in
   `config/modules/voice.yaml`.
@@ -138,10 +138,38 @@ loud failure that revives when weights land, never a silent limbo.
   WeTextProcessing fallback). Packaging (decided): **upstream checkout**
   — FunAudioLLM/CosyVoice cloned to `models/voice/cosyvoice/`
   (path configured in the module yaml), injected into `sys.path` by the
-  `utils/tts.py` adapter; the repo itself stays free of third-party
+  inlined TTS adapter; the repo itself stays free of third-party
   code.
 - Persistence: `serialize_state()` keeps counters and the last
   transcript ring only; channel residue is not persisted.
+
+## Speaker diarization (multi-person awareness)
+
+Decided 2026-09-21 (implemented): every endpointed utterance gets a
+speaker identity before hitting the fast path.
+
+- **Model**: `pyannote/embedding` (whole-window speaker embedding,
+  ~25MB). The full pyannote diarization Pipeline targets long
+  offline multi-speaker audio and yields per-file relative labels
+  (`SPEAKER_00/01`) that are meaningless across utterances — the
+  embedding + registry route is the per-utterance equivalent and
+  keeps zero cross-file state.
+- **Registry**: `VoiceSpeakerRegistry`, JSON at
+  `data/databases/audio/voice_speakers.json`, cosine threshold
+  (default 0.75) — best match above threshold keeps its
+  `person-N`; otherwise auto-enrolls the next person-N (the vision
+  FaceMatcher stance). Survives hot reloads.
+- **Wiring**: `_handle_utterance` embeds the utterance PCM (temp
+  wav via soundfile), matches/enrolls, and attaches `speaker` to
+  the transcript entry; query() renders `- user said (person-1)
+  ...`. A broken embedder logs and continues unlabeled — the
+  transcript itself always stands.
+- **Provisioning**: gated HF model — accept the terms at
+  huggingface.co/pyannote/embedding and set `diarization_token` in
+  `config/modules/voice.yaml`; weights cache under
+  `models/voice/diarization/`. Missing weights without a token is
+  a loud provisioning failure (principle 7); once cached, no token
+  is needed.
 
 ## Open items
 

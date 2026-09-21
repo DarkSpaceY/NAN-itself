@@ -30,7 +30,6 @@ import numpy as np
 import pytest
 
 from nan_itself.modules.model import DataSpace
-from nan_itself.utils.audio import Utterance
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -71,8 +70,11 @@ def _fresh_instance():
     return instance
 
 
-def _utterance() -> Utterance:
-    return Utterance(
+def _utterance():
+    # Utterance now lives inside the voice module itself.
+    voice = _load_voice_module()
+
+    return voice.Utterance(
         pcm=b"\x00" * 960,
         voiced_ms=600,
         total_ms=900,
@@ -661,6 +663,7 @@ def test_serialize_restore_roundtrip():
         {
             "ts": instance._transcripts[0]["ts"],
             "text": "你好",
+            "speaker": "",
         }
     ]
 
@@ -686,3 +689,124 @@ def test_restore_state_validates_shape():
         instance.restore_state(
             {"last_transcripts": ["nope"]}
         )
+
+
+# ============================================================================
+# Speaker diarization
+# ============================================================================
+
+
+def test_speaker_registry_enrolls_and_matches(tmp_path: Path):
+    voice = _load_voice_module()
+
+    registry = voice.VoiceSpeakerRegistry(
+        path=tmp_path / "voice_speakers.json",
+        threshold=0.75,
+    )
+
+    alice = [1.0, 0.0, 0.0]
+
+    bob = [0.0, 1.0, 0.0]
+
+    assert registry.match_or_enroll(alice) == "person-1"
+
+    assert registry.match_or_enroll(bob) == "person-2"
+
+    # Same voices match their enrolled person again.
+    assert registry.match_or_enroll(alice) == "person-1"
+
+    assert registry.match_or_enroll(bob) == "person-2"
+
+    assert registry.matched_total == 2
+
+    # Persistence round-trip.
+    reloaded = voice.VoiceSpeakerRegistry(
+        path=tmp_path / "voice_speakers.json",
+        threshold=0.75,
+    )
+
+    reloaded.load()
+
+    assert reloaded.match_or_enroll(alice) == "person-1"
+
+
+def test_speaker_registry_rejects_bad_json(tmp_path: Path):
+    voice = _load_voice_module()
+
+    bad = tmp_path / "voice_speakers.json"
+
+    bad.write_text("- just\n- a\n- list\n", encoding="utf-8")
+
+    registry = voice.VoiceSpeakerRegistry(
+        path=bad,
+        threshold=0.75,
+    )
+
+    with pytest.raises(ValueError, match="Invalid speaker registry"):
+        registry.load()
+
+
+def test_embedder_without_token_or_weights_is_loud(tmp_path: Path):
+    voice = _load_voice_module()
+
+    embedder = voice.PyannoteEmbedder(
+        cache_dir=tmp_path / "diarization",
+        token="",
+    )
+
+    with pytest.raises(RuntimeError, match="diarization_token"):
+        embedder.load()
+
+
+def test_utterances_carry_speaker_labels(tmp_path: Path, monkeypatch: Any):
+    instance = _fresh_instance()
+
+    instance.transcriber = _FakeTranscriber("你好")
+
+    instance.slm = _FakeSLM(reply=None)
+
+    calls: list[Any] = []
+
+    class _FakeEmbedder:
+        def embed(self, pcm: bytes) -> list[float]:
+            calls.append(pcm)
+
+            return [0.9, 0.1, 0.0]
+
+    class _FakeRegistry:
+        def match_or_enroll(self, vector: list[float]) -> str:
+            return "person-1"
+
+    instance.embedder = _FakeEmbedder()
+
+    instance.registry = _FakeRegistry()
+
+    instance._handle_utterance(_utterance())
+
+    assert instance._transcripts[-1]["speaker"] == "person-1"
+
+    assert calls, "embedder must receive the utterance PCM"
+
+
+def test_diarization_failure_keeps_transcript(tmp_path: Path):
+    instance = _fresh_instance()
+
+    instance.transcriber = _FakeTranscriber("你好")
+
+    instance.slm = _FakeSLM(reply=None)
+
+    class _BrokenEmbedder:
+        def embed(self, pcm: bytes) -> list[float]:
+            raise RuntimeError("model exploded")
+
+    instance.embedder = _BrokenEmbedder()
+
+    instance._handle_utterance(_utterance())
+
+    entry = instance._transcripts[-1]
+
+    assert entry["text"] == "你好"
+
+    assert entry["speaker"] == ""
+
+    assert instance._stats["transcripts_total"] == 1

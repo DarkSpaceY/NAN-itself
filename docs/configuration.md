@@ -70,7 +70,7 @@ Shipped files:
 | File | Module | Fields |
 |---|---|---|
 | `config/modules/audio.yaml` | audio | mic `device`, speaker/tagger/emotion model paths, voices registry |
-| `config/modules/voice.yaml` | voice | STT model/language, SLM weights + repo, CosyVoice checkout/weights/reference wav, `tts_speed`, `fast_path_enabled` |
+| `config/modules/voice.yaml` | voice | STT model/language, SLM weights + repo, CosyVoice checkout/weights/reference wav, `tts_speed`, `fast_path_enabled`, diarization (pyannote repo/token/threshold, speaker registry) |
 | `config/modules/vision.yaml` | vision | camera `device`, faces/OCR/VLM toggles, registry + weights paths |
 
 Path convention: relative paths resolve against the repository
