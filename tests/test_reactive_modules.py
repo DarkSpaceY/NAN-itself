@@ -27,6 +27,7 @@ from nan_itself.modules.action import (
 )
 from nan_itself.modules.model import (
     Module,
+    ModuleState,
 )
 from nan_itself.modules.runtime import (
     Facade,
@@ -305,6 +306,58 @@ def test_facade_routing_failure_modes(tmp_path):
     assert "exposes no channels" in (
         facade.show_module_channel("plain")
     )
+
+
+# ============================================================================
+# Facade lifecycle: provisioning failure -> DOWN + retry_at
+# ============================================================================
+
+
+_CRASHING_SOURCE = """# @module
+class Crashing(Module):
+    id = "crashing"
+
+    async def start(self):
+        raise RuntimeError("no weights: drop model.onnx")
+
+    async def query(self, turn):
+        return None
+"""
+
+
+async def _provisioning_failure_down(tmp_path: Path) -> None:
+    facade = _facade(tmp_path)
+
+    source = tmp_path / "crashing.py"
+
+    source.write_text(_CRASHING_SOURCE, encoding="utf-8")
+
+    await facade._load_or_reload_file(
+        source,
+        facade._fingerprint(source),
+    )
+
+    record = facade._find_record_by_source(source)
+
+    await facade._try_start(record)
+
+    task = record.task
+
+    if task is not None:
+        await task
+
+    # The exception out of start() is not swallowed: the Facade
+    # records the module DOWN with the error and schedules a
+    # backoff retry instead of leaving an "unavailable" limbo.
+    assert record.state is ModuleState.DOWN
+
+    assert "no weights" in str(record.error)
+
+    assert record.retry_at > 0.0
+
+
+def test_facade_provisioning_failure_records_down(tmp_path):
+    run(_provisioning_failure_down(tmp_path))
 
 
 async def _full_chain(tmp_path):

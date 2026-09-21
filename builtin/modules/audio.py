@@ -15,9 +15,11 @@ Two daemon threads outside the event loop:
     transcript  utterance queue -> WhisperTranscriber -> ring
 
 query() is a pure projection of already-computed rings/stats;
-it never touches DSP or LLM work. Hardware failure degrades to
-available:false and retried every retry_interval seconds; the
-agent process never dies because a microphone is missing.
+it never touches DSP or LLM work. Missing weights or no input
+device raise out of start() -- the Facade marks the module DOWN
+and retries with backoff. A device lost mid-session keeps the
+capture loop projecting the real error as available:false while
+it reopens every retry_interval seconds.
 """
 
 from __future__ import annotations
@@ -184,8 +186,6 @@ class AudioModule(Module):
 
         self._embedder: Any = None
 
-        self._embedder_failed = False
-
         # Default: in-thread. The subprocess proxy exists for
         # hardened deployments, but macOS spawn re-imports the
         # unguarded __main__ console script (recursive agent!);
@@ -237,8 +237,6 @@ class AudioModule(Module):
 
         self._tagger: Any = None
 
-        self._tagger_failed = False
-
         emotion_model = os.getenv("NAN_AUDIO_EMOTION_MODEL")
 
         self.emotion_model_path = (
@@ -267,8 +265,6 @@ class AudioModule(Module):
         )
 
         self._emotion: Any = None
-
-        self._emotion_failed = False
 
         # Rolling raw-PCM window for periodic ambient tagging.
         self._pcm_ring: deque[bytes] = deque()
@@ -309,8 +305,6 @@ class AudioModule(Module):
                 os.getenv("NAN_AUDIO_TRANSLATE", "0") == "1"
             ),
         )
-
-        self._transcriber_failed = False
 
         self.mic_factory = lambda: SoundDeviceMicSource(
             sample_rate=self.sample_rate,
@@ -399,6 +393,11 @@ class AudioModule(Module):
 
         self._provision_backends()
 
+        # A missing input device is a provisioning failure too:
+        # open the mic here so absence crashes start() and the
+        # Facade retries with backoff until hardware shows up.
+        self._open_mic()
+
         for target, name in (
             (self._capture_loop, "audio-capture"),
             (self._transcribe_loop, "audio-transcribe"),
@@ -452,53 +451,33 @@ class AudioModule(Module):
         First-run weight downloads (whisper, tagging, speaker,
         emotion models) happen here, in the service lifetime
         phase -- never inside the tick loops. A failing backend
-        stays unavailable for the session instead of poisoning
-        the loops.
+        raises out of start(): the Facade marks the module DOWN
+        with the error and retries with backoff, so missing
+        weights come up loudly failed and revive once they land.
         """
-        for attr, failed, stats_key, factory, label in (
+        for attr, stats_key, factory, label in (
             (
                 "_embedder",
-                "_embedder_failed",
                 "speaker_backend",
                 self.embedder_factory,
                 "speaker embedding",
             ),
             (
                 "_tagger",
-                "_tagger_failed",
                 "tagger_backend",
                 self.tagger_factory,
                 "audio tagger",
             ),
             (
                 "_emotion",
-                "_emotion_failed",
                 "emotion_backend",
                 self.emotion_factory,
                 "emotion",
             ),
         ):
-            if getattr(self, failed):
-                continue
+            backend = factory()
 
-            try:
-                backend = factory()
-
-                backend.load()
-
-            except Exception as exc:
-                setattr(self, failed, True)
-
-                with self._state_lock:
-                    self._stats[stats_key] = (
-                        f"unavailable: {exc}"
-                    )
-
-                logger.warning(
-                    "{} backend unavailable: {}", label, exc
-                )
-
-                continue
+            backend.load()
 
             setattr(self, attr, backend)
 
@@ -509,22 +488,9 @@ class AudioModule(Module):
 
             logger.info("{} backend ready: {}", label, type(backend).__name__)
 
-        if not self._transcriber_failed:
-            try:
-                self.transcriber.load()
+        self.transcriber.load()
 
-                logger.info("whisper backend ready: {}", self.whisper_model)
-
-            except Exception as exc:
-                self._transcriber_failed = True
-
-                self._stats["transcribe_backend"] = (
-                    f"unavailable: {exc}"
-                )
-
-                logger.warning(
-                    "whisper backend unavailable: {}", exc
-                )
+        logger.info("whisper backend ready: {}", self.whisper_model)
 
     # ==================================================================
     # Threads
@@ -663,10 +629,6 @@ class AudioModule(Module):
 
                 continue
 
-            if self._transcriber_failed:
-
-                continue
-
             try:
                 result = self._transcribe(utt)
 
@@ -716,13 +678,10 @@ class AudioModule(Module):
 
     def _get_embedder(self) -> Any | None:
         """
-        Provisioned in start(); a failing backend disables
-        speaker attribution for the session instead of poisoning
-        every utterance (tagging runs on an independent tagger).
+        Provisioned in start(); a failure raises there, so any
+        running session has a loaded embedder (tagging runs on
+        an independent tagger).
         """
-        if self._embedder_failed:
-            return None
-
         return self._embedder
 
     def _load_registry(self) -> None:
@@ -881,9 +840,6 @@ class AudioModule(Module):
     # ------------------------------------------------------------------
 
     def _get_tagger(self) -> Any | None:
-        if self._tagger_failed:
-            return None
-
         return self._tagger
 
     def _tag_ambient(self) -> None:
@@ -973,9 +929,6 @@ class AudioModule(Module):
     # ------------------------------------------------------------------
 
     def _get_emotion(self) -> Any | None:
-        if self._emotion_failed:
-            return None
-
         return self._emotion
 
     def _recognize_emotion(self, utt: Utterance) -> None:

@@ -63,8 +63,8 @@ tool on every invocation; you normally never set it by hand.
   registry at `data/databases/vision/faces.json`.
 - `models/` (gitignored) holds model weights. The vision VLM weights
   (`SmolVLM2-500M-Video-Instruct`) are downloaded automatically on first
-  use; a failed download degrades that backend to `unavailable` without
-  affecting other layers.
+  use; a failed download crashes the module at startup and it retries
+  with backoff until the weights are present.
 
 All of these locations resolve through
 [`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py) and are

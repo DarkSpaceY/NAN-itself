@@ -50,8 +50,8 @@ class NotifierModule(ActionSurface):
         self._last_error: str | None = None
 
     async def start(self) -> None:
-        # All provisioning happens BEFORE the loop; a failure here must
-        # degrade the module to `unavailable`, never raise through.
+        # All provisioning happens BEFORE the loop; a failure here
+        # raises: the Facade marks the module DOWN and retries.
         logger.info("notifier ticking every {}s", self.tick_interval)
 
         while True:

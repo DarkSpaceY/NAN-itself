@@ -1308,8 +1308,9 @@ class YoloOnnxDetector:
     Activates only when a model has been dropped in at
     models/vision/object/model.onnx with a labels file next to it
     (labels.txt, one name per line, background not listed).
-    Missing model -> load() raises -> the module degrades the
-    backend to unavailable, exactly like the audio tagger.
+    Missing model -> load() raises -> the failure propagates out
+    of the module's start(), which the Facade answers with a DOWN
+    state and backoff retries until the weights land.
     """
 
     INPUT_SIZE = 640
@@ -1543,9 +1544,9 @@ class VlmCaptioner:
     builds. Weights live under models/vision/vlm/<snapshot>;
     a missing directory is downloaded from the Hub during module
     provisioning in start() (respects HF_ENDPOINT / proxy env
-    vars), never inside the tick loops, and a failing download
-    keeps the backend marked unavailable without touching any
-    other layer.
+    vars), never inside the tick loops; a failing download
+    raises out of start(), so the Facade marks the module DOWN
+    and retries with backoff until the weights land.
 
     Scope is honest: this class captions ONE keyframe. Change
     descriptions, VQA and cross-modal grounding are future

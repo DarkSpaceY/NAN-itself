@@ -64,9 +64,11 @@ class MyModule(Module):
    runs in its own task).
 2. **Publish facts, not conclusions.** Modules report observations; the
    agent interprets them.
-3. **Degrade, don't die.** Missing weights/hardware must leave the module
-   in an explicit `unavailable` state, not raise through `start()`.
-   Provision all models in `start()` **before** entering the loop.
+3. **Full implement, let it crash.** Provisioning failures (missing
+   weights/hardware) raise out of `start()`; the Facade marks the module
+   DOWN with the error and retries with backoff; never swallow errors
+   into an `unavailable` limbo state. Provision all models in `start()`
+   **before** entering the loop.
 4. **Persist via serialize_state()/restore_state().** Return JSON-only
    state; the Facade stores it under `data/modules/private/<id>.json`.
    Slot/channel residue is intentionally NOT persisted.
@@ -102,7 +104,7 @@ class SetGoal(ActionSurface):
 - [ ] unique `id`; `requires` lists only existing module ids
 - [ ] `start()` is long-running (or intentionally state-only)
 - [ ] `query()` cheap; returns str or None
-- [ ] weights provisioned in `start()`, degrade to `unavailable` on failure
+- [ ] weights provisioned in `start()`; failures raise (Facade retries with backoff)
 - [ ] no cwd-relative paths — anchor through `nan_itself.utils.paths`
 
 Validate the file before finishing:

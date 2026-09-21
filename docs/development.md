@@ -93,9 +93,10 @@ framework imports to hot-reload.
 
 Mirror the existing module shape in `builtin/modules/` (see
 `vision.py` / `audio.py`): background daemon threads for capture and
-inference, a pure `query()` projection as the agent-facing surface, and
-graceful degradation to `unavailable` when weights or hardware are
-missing.
+inference, a pure `query()` projection as the agent-facing surface,
+and full-implement-let-it-crash semantics -- provisioning failures
+raise out of `start()`, so the Facade marks the module DOWN with the
+error and retries with backoff until weights or hardware appear.
 
 ## Tests
 

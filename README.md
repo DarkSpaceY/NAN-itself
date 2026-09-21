@@ -126,9 +126,10 @@ uv run nan-itself
 
 The gateway listens on `http://127.0.0.1:8765` by default; the web UI is
 served from the same port. On first run the perception modules download
-their model weights (`models/`, gitignored) — a backend without weights
-degrades to an explicit `unavailable` state instead of failing the
-module, so the agent is up before the heavy models finish downloading.
+their model weights (`models/`, gitignored). A module whose weights are
+missing or fail to load crashes loudly at start, shows the error, and
+keeps retrying with backoff — it revives automatically once the weights
+land. Nothing runs silently at half capacity.
 
 ## Development
 
@@ -173,6 +174,7 @@ NAN-itself/
 
 | Document | Contents |
 |---|---|
+| [Core principles](docs/principles.md) | The load-bearing principles behind every design decision |
 | [Architecture](docs/architecture.md) | Repo-mirrored tour: agent core, tool runtime, modules, skills, security model |
 | [Configuration](docs/configuration.md) | `settings.yaml` reference and environment variables |
 | [Development](docs/development.md) | Setup, conventions, adding tools and modules |

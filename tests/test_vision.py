@@ -15,6 +15,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from nan_itself.modules.model import Turn
 from nan_itself.utils.vision import (
@@ -911,13 +912,13 @@ def test_vlm_missing_weights_do_not_fail_init():
 
     if module.vlm_dir.is_dir():
         # Weights were dropped in since this test was written;
-        # the degradation contract is covered by the fake tests.
+        # the crash contract is covered by the fake tests.
         return
 
     # Missing weights are no longer an init failure: the
-    # captioner auto-downloads on first use, so the backend
-    # only degrades if that download/load later throws
-    # (covered by test_vlm_caption_failure_marks_backend).
+    # captioner auto-downloads during provisioning in start(),
+    # so a failed download/load raises there (covered by
+    # test_vlm_caption_failure_raises_through_provisioning).
     assert module._vlm_failed is False
 
     assert "not loaded" in module._stats["vlm_backend"]
@@ -965,6 +966,11 @@ def test_vlm_captioner_auto_downloads_missing_weights(
 def test_vlm_caption_glance_via_fake_backend():
     module = VisionModule()
 
+    # Objects weights are absent here; these tests target VLM only.
+    module.objects_enabled = False
+
+    module._objects_failed = True
+
     module._vlm_failed = False
 
     module.vlm_factory = lambda: FakeCaptioner()
@@ -1007,8 +1013,13 @@ def test_vlm_caption_glance_via_fake_backend():
     assert "caption" not in gated_entry
 
 
-def test_vlm_caption_failure_marks_backend():
+def test_vlm_caption_failure_raises_through_provisioning():
     module = VisionModule()
+
+    # Objects weights are absent here; these tests target VLM only.
+    module.objects_enabled = False
+
+    module._objects_failed = True
 
     module._vlm_failed = False
 
@@ -1018,17 +1029,19 @@ def test_vlm_caption_failure_marks_backend():
 
     module.vlm_factory = lambda: Broken()
 
-    module._provision_backends()
+    # Provisioning failure propagates out of start(): the
+    # Facade records DOWN and retries with backoff.
+    with pytest.raises(RuntimeError, match="no weights"):
+        module._provision_backends()
 
+    # The backend never entered the session: captions are a no-op.
     entry: dict[str, Any] = {}
 
     module._caption_glance(_motion_glance(), entry)
 
     assert "caption" not in entry
 
-    assert module._vlm_failed is True
-
-    assert "no weights" in module._stats["vlm_backend"]
+    assert module._vlm is None
 
 
 def test_vlm_caption_renders_in_query():

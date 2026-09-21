@@ -104,8 +104,10 @@ can query. The machinery here (`runtime.py` = the Facade) owns:
 
 Module-side contracts: capture/inference work runs on daemon threads
 with interval gating; the agent-facing surface is a pure `query()`
-projection; missing model weights degrade a backend to an explicit
-`unavailable` state instead of failing the module (all weights are
+projection; provisioning failures (e.g. missing model weights) raise
+out of `start()` -- the Facade marks the module DOWN with the error
+and restarts it with backoff, so a module with missing weights comes
+up loudly failed and revives once the weights land (all weights are
 provisioned in `start()`, before any loop runs).
 
 ### skills/ — capability packages

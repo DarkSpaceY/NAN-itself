@@ -21,9 +21,11 @@ Two daemon threads outside the event loop:
     inference   glance queue -> face/QR/OCR/YOLO/caption -> ring
 
 query() is a pure projection of already-computed rings/stats; it
-never touches models or OpenCV. Hardware failure degrades to
-available:false and retried every retry_interval seconds; the
-agent process never dies because a camera is missing.
+never touches models or OpenCV. Missing weights or no camera
+raise out of start() -- the Facade marks the module DOWN and
+retries with backoff. A camera lost mid-session keeps the
+capture loop projecting the real error as available:false while
+it reopens every retry_interval seconds.
 """
 
 from __future__ import annotations
@@ -220,7 +222,7 @@ class VisionModule(Module):
 
         self._ocr_failed = self.ocr_enabled is False
 
-        yolo_model = (
+        self.objects_model_path = (
             _paths.repo_root()
             / "models"
             / "vision"
@@ -228,22 +230,18 @@ class VisionModule(Module):
             / "model.onnx"
         )
 
-        yolo_labels = (
-            yolo_model.parent / "labels.txt"
+        self.objects_labels_path = (
+            self.objects_model_path.parent / "labels.txt"
         )
 
         self.objects_factory = lambda: YoloOnnxDetector(
-            yolo_model,
-            yolo_labels,
+            self.objects_model_path,
+            self.objects_labels_path,
         )
 
         self._objects: Any = None
 
-        self._objects_failed = (
-            self.objects_enabled is False
-            or not yolo_model.is_file()
-            or not yolo_labels.is_file()
-        )
+        self._objects_failed = self.objects_enabled is False
 
         vlm_dir_env = os.getenv("NAN_VISION_VLM_DIR")
 
@@ -268,9 +266,8 @@ class VisionModule(Module):
 
         self._vlm: Any = None
 
-        # Missing weights are NOT a failure: the captioner
-        # auto-downloads the repo on first use; a failed
-        # download marks the backend unavailable then.
+        # Missing weights auto-download during provisioning; a
+        # failed download raises out of start() (Facade retry).
         self._vlm_failed = self.vlm_enabled is False
 
         self._last_vlm_at = 0.0
@@ -345,8 +342,7 @@ class VisionModule(Module):
             "ocr_total": 0,
             "last_ocr": None,
             "objects_backend": (
-                "unavailable: drop model.onnx + labels.txt "
-                "into models/vision/object/"
+                "disabled"
                 if self._objects_failed
                 else "not loaded"
             ),
@@ -384,6 +380,11 @@ class VisionModule(Module):
         self._load_registry()
 
         self._provision_backends()
+
+        # A missing camera is a provisioning failure too: open it
+        # here so absence crashes start() and the Facade retries
+        # with backoff until hardware shows up.
+        self._open_camera()
 
         for target, name in (
             (self._capture_loop, "vision-capture"),
@@ -438,10 +439,20 @@ class VisionModule(Module):
 
         First-run weight downloads (and model RAM residency)
         happen here, in the service lifetime phase -- never
-        inside the tick loops. A failing backend stays
-        unavailable for the session instead of poisoning the
-        loops.
+        inside the tick loops. A failing backend raises out of
+        start(): the Facade marks the module DOWN with the error
+        and retries with backoff, so missing weights come up
+        loudly failed and revive once they land.
         """
+        if self.objects_enabled and not (
+            self.objects_model_path.is_file()
+            and self.objects_labels_path.is_file()
+        ):
+            raise RuntimeError(
+                "objects backend: drop model.onnx + labels.txt "
+                "into models/vision/object/"
+            )
+
         for attr, failed, stats_key, factory, label in (
             (
                 "_faces",
@@ -475,24 +486,9 @@ class VisionModule(Module):
             if getattr(self, failed):
                 continue
 
-            try:
-                backend = factory()
+            backend = factory()
 
-                backend.load()
-
-            except Exception as exc:
-                setattr(self, failed, True)
-
-                with self._state_lock:
-                    self._stats[stats_key] = (
-                        f"unavailable: {exc}"
-                    )
-
-                logger.warning(
-                    "{} backend unavailable: {}", label, exc
-                )
-
-                continue
+            backend.load()
 
             setattr(self, attr, backend)
 
@@ -693,12 +689,9 @@ class VisionModule(Module):
 
     def _get_faces(self) -> Any | None:
         """
-        Provisioned in start(); a failing backend disables face
-        work for the session instead of poisoning every glance.
+        Provisioned in start(); a failure raises there, so any
+        running session has a loaded analyzer.
         """
-        if self._faces_failed:
-            return None
-
         return self._faces
 
     def _recognize_faces(
@@ -1030,8 +1023,8 @@ class VisionModule(Module):
     ) -> None:
         """
         L7 content: one-sentence VLM caption of the keyframe,
-        interval-gated exactly like OCR. Missing weights or a
-        failing load degrade the backend for the session only.
+        interval-gated exactly like OCR. Weights are provisioned
+        in start(); a failed download or load raises there.
         """
         if self._vlm_failed:
             return
