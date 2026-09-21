@@ -38,19 +38,16 @@ import time
 import asyncio
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import yaml
 from loguru import logger
 from pydantic import BaseModel
 
 from nan_itself.modules.model import Module, Turn
 
 from nan_itself.utils import paths as _paths
-
-from nan_itself.utils.module_config import (
-    load_module_config,
-    resolve_path,
-)
 
 from nan_itself.utils.vision import (
     CameraSource,
@@ -68,7 +65,7 @@ class VisionConfig(BaseModel):
     """
     Module-private config: config/modules/vision.yaml over these
     defaults. Path-valued fields are repo-relative strings
-    (resolve_path); `device` is the camera index/name.
+    (_resolve_path); `device` is the camera index/name.
     """
 
     device: int | str | None = None
@@ -86,6 +83,52 @@ class VisionConfig(BaseModel):
     vlm_dir: str = (
         "models/vision/vlm/SmolVLM2-500M-Video-Instruct"
     )
+
+
+def _resolve_path(value: str) -> Path:
+    """
+    Absolute (and ~/) passes through; relative resolves against
+    the repository root.
+    """
+    resolved = Path(value).expanduser()
+
+    return (
+        resolved
+        if resolved.is_absolute()
+        else _paths.repo_root() / resolved
+    )
+
+
+def _load_config() -> VisionConfig:
+    """
+    Module-private config: config/modules/vision.yaml over the
+    VisionConfig defaults. Missing or empty file = pure
+    defaults; anything unparsable is a loud construction
+    failure.
+    """
+    path = (
+        _paths.repo_root()
+        / "config"
+        / "modules"
+        / "vision.yaml"
+    )
+
+    if not path.is_file():
+        return VisionConfig()
+
+    data = yaml.safe_load(
+        path.read_text(encoding="utf-8")
+    )
+
+    if data is None:
+        return VisionConfig()
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid module config YAML: {path}"
+        )
+
+    return VisionConfig(**data)
 
 
 class VisionModule(Module):
@@ -162,7 +205,7 @@ class VisionModule(Module):
     vlm_interval_s: float = 30.0
 
     def __init__(self) -> None:
-        cfg = load_module_config("vision", VisionConfig)
+        cfg = _load_config()
 
         self.device: int | str | None = cfg.device
 
@@ -170,7 +213,7 @@ class VisionModule(Module):
 
         self.ocr_enabled = cfg.ocr_enabled
 
-        self.registry_path = resolve_path(cfg.faces_registry)
+        self.registry_path = _resolve_path(cfg.faces_registry)
 
         self.matcher = FaceMatcher(
             threshold=self.face_distance_threshold,
@@ -218,7 +261,7 @@ class VisionModule(Module):
 
         self.qr = QrScanner()
 
-        self.ocr_models_dir = resolve_path(cfg.ocr_models_dir)
+        self.ocr_models_dir = _resolve_path(cfg.ocr_models_dir)
 
         self.ocr_factory = lambda: OcrReader(
             self.ocr_models_dir,
@@ -249,7 +292,7 @@ class VisionModule(Module):
 
         self._objects_failed = self.objects_enabled is False
 
-        self.vlm_dir = resolve_path(cfg.vlm_dir)
+        self.vlm_dir = _resolve_path(cfg.vlm_dir)
 
         self.vlm_enabled = cfg.vlm_enabled
 

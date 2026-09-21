@@ -49,10 +49,12 @@ import time
 import asyncio
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any, ClassVar, Mapping
 
 import numpy as np
 import sounddevice as sd
+import yaml
 from loguru import logger
 from pydantic import BaseModel
 
@@ -60,10 +62,7 @@ from nan_itself.modules.action import (
     ActionSurface,
     ChannelSpec,
 )
-from nan_itself.utils.module_config import (
-    load_module_config,
-    resolve_path,
-)
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.audio import (
     AudioPipeline,
     VadGate,
@@ -77,7 +76,7 @@ class VoiceConfig(BaseModel):
     """
     Module-private config: config/modules/voice.yaml over these
     defaults. Path-valued fields are repo-relative strings
-    (resolve_path); whisper weights are shared with the audio
+    (_resolve_path); whisper weights are shared with the audio
     module.
     """
 
@@ -100,6 +99,51 @@ class VoiceConfig(BaseModel):
     tts_model_dir: str = "models/voice/tts/cosyvoice2-0.5b"
 
     tts_reference_wav: str = "models/voice/tts/reference.wav"
+
+
+def _resolve_path(value: str) -> Path:
+    """
+    Absolute (and ~/) passes through; relative resolves against
+    the repository root.
+    """
+    resolved = Path(value).expanduser()
+
+    return (
+        resolved
+        if resolved.is_absolute()
+        else _paths.repo_root() / resolved
+    )
+
+
+def _load_config() -> VoiceConfig:
+    """
+    Module-private config: config/modules/voice.yaml over the
+    VoiceConfig defaults. Missing or empty file = pure defaults;
+    anything unparsable is a loud construction failure.
+    """
+    path = (
+        _paths.repo_root()
+        / "config"
+        / "modules"
+        / "voice.yaml"
+    )
+
+    if not path.is_file():
+        return VoiceConfig()
+
+    data = yaml.safe_load(
+        path.read_text(encoding="utf-8")
+    )
+
+    if data is None:
+        return VoiceConfig()
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid module config YAML: {path}"
+        )
+
+    return VoiceConfig(**data)
 
 
 class TaskPayload(BaseModel):
@@ -178,7 +222,7 @@ class VoiceModule(ActionSurface):
         # first set_target/current_target call.
         super().__init__()
 
-        cfg = load_module_config("voice", VoiceConfig)
+        cfg = _load_config()
 
         self.stt_model = cfg.stt_model
 
@@ -189,21 +233,21 @@ class VoiceModule(ActionSurface):
         self.tts_speed = cfg.tts_speed
 
         # Reuse the audio module's whisper weights.
-        self.whisper_models_dir = resolve_path(
+        self.whisper_models_dir = _resolve_path(
             cfg.whisper_models_dir
         )
 
-        self.slm_path = resolve_path(cfg.slm_path)
+        self.slm_path = _resolve_path(cfg.slm_path)
 
         self.slm_repo_id = cfg.slm_repo_id
 
-        self.tts_checkout_dir = resolve_path(
+        self.tts_checkout_dir = _resolve_path(
             cfg.tts_checkout_dir
         )
 
-        self.tts_model_dir = resolve_path(cfg.tts_model_dir)
+        self.tts_model_dir = _resolve_path(cfg.tts_model_dir)
 
-        self.tts_reference_wav = resolve_path(
+        self.tts_reference_wav = _resolve_path(
             cfg.tts_reference_wav
         )
 

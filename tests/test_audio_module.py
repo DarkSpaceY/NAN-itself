@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from nan_itself.modules.model import DataSpace
 from nan_itself.utils.audio import Utterance
@@ -366,3 +367,30 @@ def test_serialize_state_drops_transcript_counters():
     )
 
     assert instance.pipeline.tracker.noise_floor == -55.0
+
+
+def test_malformed_config_yaml_is_loud(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """
+    Module-private config contract: a malformed
+    config/modules/audio.yaml is a loud construction failure,
+    never silent half defaults.
+    """
+    bad = tmp_path / "config" / "modules" / "audio.yaml"
+
+    bad.parent.mkdir(parents=True)
+
+    bad.write_text(
+        "- just\n- a\n- list\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "nan_itself.utils.paths.repo_root",
+        lambda: tmp_path,
+    )
+
+    with pytest.raises(ValueError, match="Invalid module config"):
+        _fresh_instance()

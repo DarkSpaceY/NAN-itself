@@ -7,7 +7,7 @@ directory: launching nan from any cwd still writes inside the
 repository. Locations are fixed derivatives of the repository
 root -- there are no overrides. Core configuration lives in
 config/settings.yaml; each Module owns config/modules/<id>.yaml
-(see utils/module_config.py).
+and loads it itself.
 
 Anchoring relies on the editable install: nan_itself.__file__
 resolves into <repo>/backend/nan_itself, so three levels up from

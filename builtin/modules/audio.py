@@ -38,15 +38,14 @@ import time
 import asyncio
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import yaml
 from loguru import logger
 from pydantic import BaseModel
 
-from nan_itself.utils.module_config import (
-    load_module_config,
-    resolve_path,
-)
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.audio import (
     AudioPipeline,
     estimate_bpm,
@@ -65,7 +64,7 @@ class AudioConfig(BaseModel):
     """
     Module-private config: config/modules/audio.yaml over these
     defaults. Path-valued fields are repo-relative strings
-    (resolve_path); `device` is the mic index/name.
+    (_resolve_path); `device` is the mic index/name.
     """
 
     device: int | str | None = None
@@ -87,6 +86,51 @@ class AudioConfig(BaseModel):
     )
 
     emotion_head: str = "models/emotion/emotion2vec_head.json"
+
+
+def _resolve_path(value: str) -> Path:
+    """
+    Absolute (and ~/) passes through; relative resolves against
+    the repository root.
+    """
+    resolved = Path(value).expanduser()
+
+    return (
+        resolved
+        if resolved.is_absolute()
+        else _paths.repo_root() / resolved
+    )
+
+
+def _load_config() -> AudioConfig:
+    """
+    Module-private config: config/modules/audio.yaml over the
+    AudioConfig defaults. Missing or empty file = pure defaults;
+    anything unparsable is a loud construction failure.
+    """
+    path = (
+        _paths.repo_root()
+        / "config"
+        / "modules"
+        / "audio.yaml"
+    )
+
+    if not path.is_file():
+        return AudioConfig()
+
+    data = yaml.safe_load(
+        path.read_text(encoding="utf-8")
+    )
+
+    if data is None:
+        return AudioConfig()
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid module config YAML: {path}"
+        )
+
+    return AudioConfig(**data)
 
 
 class AudioModule(Module):
@@ -151,15 +195,17 @@ class AudioModule(Module):
     def __init__(self) -> None:
         self.sample_rate = 16000
 
-        cfg = load_module_config("audio", AudioConfig)
+        cfg = _load_config()
 
         self.device: int | str | None = cfg.device
 
-        self.speaker_model_path = resolve_path(
+        self.speaker_model_path = _resolve_path(
             cfg.speaker_model
         )
 
-        self.registry_path = resolve_path(cfg.voices_registry)
+        self.registry_path = _resolve_path(
+            cfg.voices_registry
+        )
 
         self.matcher = SpeakerMatcher(
             threshold=self.speaker_threshold,
@@ -182,9 +228,11 @@ class AudioModule(Module):
 
         self._embedder: Any = None
 
-        self.tagger_model_path = resolve_path(cfg.tagger_model)
+        self.tagger_model_path = _resolve_path(
+            cfg.tagger_model
+        )
 
-        self.tagger_labels_path = resolve_path(
+        self.tagger_labels_path = _resolve_path(
             cfg.tagger_labels
         )
 
@@ -196,11 +244,11 @@ class AudioModule(Module):
 
         self._tagger: Any = None
 
-        self.emotion_model_path = resolve_path(
+        self.emotion_model_path = _resolve_path(
             cfg.emotion_model
         )
 
-        self.emotion_head_path = resolve_path(
+        self.emotion_head_path = _resolve_path(
             cfg.emotion_head
         )
 
