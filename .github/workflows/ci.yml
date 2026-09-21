@@ -28,7 +28,6 @@ jobs:
             --no-install-package face-recognition-models \
             --no-install-package faster-whisper \
             --no-install-package pywhispercpp \
-            --no-install-package realtimestt \
             --no-install-package sherpa-onnx \
             --no-install-package sounddevice \
             --no-install-package torch \
