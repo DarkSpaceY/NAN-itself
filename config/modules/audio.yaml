@@ -1,0 +1,19 @@
+# Audio module (builtin/modules/audio.py): mic owner + ambient
+# perception + rolling PCM ring publisher.
+#
+# Path convention: relative paths resolve against the repository
+# root; absolute paths pass through unchanged.
+
+device: null                # microphone index/name; null = system default
+
+speaker_model: models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx
+
+voices_registry: data/databases/audio/voices.json
+
+tagger_model: models/audio_tag/model.int8.onnx
+
+tagger_labels: models/audio_tag/class_labels_indices.csv
+
+emotion_model: models/emotion/emotion2vec_plus_base.onnx
+
+emotion_head: models/emotion/emotion2vec_head.json

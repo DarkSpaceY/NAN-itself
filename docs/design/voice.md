@@ -131,12 +131,13 @@ loud failure that revives when weights land, never a silent limbo.
   `backend/nan_itself/utils/dialogue.py` (SLM adapter) *open* — may
   merge if thin.
 - Weights under `models/voice/` (`tts/cosyvoice2-0.5b`, `slm/...`,
-  whisper reuses the audio module's copy); env overrides `NAN_VOICE_*`.
+  whisper reuses the audio module's copy); paths configured in
+  `config/modules/voice.yaml`.
 - New dependency: `cosyvoice` runtime (pynini via conda-forge has macOS
   arm64 wheels; `ttsfrd` is Linux-only — macOS/Windows use the
   WeTextProcessing fallback). Packaging (decided): **upstream checkout**
   — FunAudioLLM/CosyVoice cloned to `models/voice/cosyvoice/`
-  (path overridable via `NAN_VOICE_*`), injected into `sys.path` by the
+  (path configured in the module yaml), injected into `sys.path` by the
   `utils/tts.py` adapter; the repo itself stays free of third-party
   code.
 - Persistence: `serialize_state()` keeps counters and the last

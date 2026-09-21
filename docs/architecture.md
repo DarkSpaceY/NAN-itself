@@ -145,9 +145,12 @@ Two parallel provider layouts, scanned with identical semantics —
 
 ## config/
 
-`settings.yaml` is the single configuration file (loaded by
-`config.py`); `searxng.yml` configures the bundled SearxNG instance
-used by the search tool. See [configuration.md](configuration.md).
+Core configuration lives in `config/settings.yaml` (loaded by
+`config.py`); each Module owns `config/modules/<module_id>.yaml`,
+loaded and validated by the module itself (`utils/module_config.py`);
+`searxng.yml` configures the bundled SearxNG instance used by the
+search tool. There are no environment variables. See
+[configuration.md](configuration.md).
 
 ## tests/
 

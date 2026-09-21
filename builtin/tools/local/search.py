@@ -8,8 +8,7 @@ object per search. Every call runs a one-shot `uvx` subprocess —
 the package's own one-process-per-search model.
 
 Settings: `config/searxng.yml` (outgoing proxy, timeouts) is
-injected via SEARXNG_CLI_SETTINGS. Set NAN_SEARXNG_SETTINGS to
-point at a different settings file.
+injected via SEARXNG_CLI_SETTINGS into every subprocess.
 """
 
 from __future__ import annotations
@@ -32,13 +31,6 @@ DEFAULT_TIMEOUT_S = 30.0
 
 
 def _settings_file() -> str | None:
-    override = os.environ.get(
-        "NAN_SEARXNG_SETTINGS"
-    )
-
-    if override:
-        return override
-
     default = (
         _paths.repo_root()
         / "config"

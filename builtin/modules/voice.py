@@ -43,14 +43,12 @@ retrying failure.
 from __future__ import annotations
 
 import base64
-import os
 import queue
 import threading
 import time
 import asyncio
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any, ClassVar, Mapping
 
 import numpy as np
@@ -62,20 +60,46 @@ from nan_itself.modules.action import (
     ActionSurface,
     ChannelSpec,
 )
-from nan_itself.utils import paths as _paths
+from nan_itself.utils.module_config import (
+    load_module_config,
+    resolve_path,
+)
 from nan_itself.utils.audio import (
     AudioPipeline,
     VadGate,
     WhisperTranscriber,
 )
-from nan_itself.utils.dialogue import (
-    SmallDialogue,
-    default_slm_path,
-)
-from nan_itself.utils.tts import (
-    CosyVoiceTTS,
-    default_tts_paths,
-)
+from nan_itself.utils.dialogue import SmallDialogue
+from nan_itself.utils.tts import CosyVoiceTTS
+
+
+class VoiceConfig(BaseModel):
+    """
+    Module-private config: config/modules/voice.yaml over these
+    defaults. Path-valued fields are repo-relative strings
+    (resolve_path); whisper weights are shared with the audio
+    module.
+    """
+
+    stt_model: str = "base"
+
+    stt_language: str | None = None
+
+    fast_path_enabled: bool = True
+
+    tts_speed: float = 1.0
+
+    whisper_models_dir: str = "models/whisper"
+
+    slm_path: str = "models/voice/slm/qwen3-0.6b"
+
+    slm_repo_id: str | None = None
+
+    tts_checkout_dir: str = "models/voice/cosyvoice"
+
+    tts_model_dir: str = "models/voice/tts/cosyvoice2-0.5b"
+
+    tts_reference_wav: str = "models/voice/tts/reference.wav"
 
 
 class TaskPayload(BaseModel):
@@ -154,67 +178,33 @@ class VoiceModule(ActionSurface):
         # first set_target/current_target call.
         super().__init__()
 
-        self.stt_model = os.getenv(
-            "NAN_VOICE_STT_MODEL",
-            "base",
-        )
+        cfg = load_module_config("voice", VoiceConfig)
 
-        self.stt_language = (
-            os.getenv("NAN_VOICE_STT_LANGUAGE") or None
-        )
+        self.stt_model = cfg.stt_model
 
-        self.fast_path_enabled = (
-            os.getenv("NAN_VOICE_FAST_PATH", "1") == "1"
-        )
+        self.stt_language = cfg.stt_language
 
-        speed = os.getenv("NAN_VOICE_TTS_SPEED")
+        self.fast_path_enabled = cfg.fast_path_enabled
 
-        if speed:
-            self.tts_speed = float(speed)
+        self.tts_speed = cfg.tts_speed
 
         # Reuse the audio module's whisper weights.
-        models_dir = os.getenv("NAN_VOICE_STT_MODELS_DIR")
-
-        self.whisper_models_dir = (
-            Path(models_dir)
-            if models_dir
-            else _paths.repo_root() / "models" / "whisper"
+        self.whisper_models_dir = resolve_path(
+            cfg.whisper_models_dir
         )
 
-        slm_dir = os.getenv("NAN_VOICE_SLM_DIR")
+        self.slm_path = resolve_path(cfg.slm_path)
 
-        self.slm_path = (
-            Path(slm_dir)
-            if slm_dir
-            else default_slm_path()
+        self.slm_repo_id = cfg.slm_repo_id
+
+        self.tts_checkout_dir = resolve_path(
+            cfg.tts_checkout_dir
         )
 
-        self.slm_repo_id = (
-            os.getenv("NAN_VOICE_SLM_REPO") or None
-        )
+        self.tts_model_dir = resolve_path(cfg.tts_model_dir)
 
-        checkout, tts_dir, reference = default_tts_paths()
-
-        voice_checkout = os.getenv("NAN_VOICE_COSYVOICE_DIR")
-
-        self.tts_checkout_dir = (
-            Path(voice_checkout)
-            if voice_checkout
-            else checkout
-        )
-
-        voice_tts = os.getenv("NAN_VOICE_TTS_DIR")
-
-        self.tts_model_dir = (
-            Path(voice_tts) if voice_tts else tts_dir
-        )
-
-        voice_reference = os.getenv("NAN_VOICE_TTS_REFERENCE")
-
-        self.tts_reference_wav = (
-            Path(voice_reference)
-            if voice_reference
-            else reference
+        self.tts_reference_wav = resolve_path(
+            cfg.tts_reference_wav
         )
 
         # Backends (provisioned in start(), swappable in tests).

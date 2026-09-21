@@ -26,7 +26,6 @@ from typing import Any
 import torch
 from loguru import logger
 
-from nan_itself.utils import paths as _paths
 from nan_itself.utils.tts import (
     ALLOWED_INSTRUCTS,
     sanitize_instruct,
@@ -340,11 +339,3 @@ class SmallDialogue:
         answer = str(payload.get("answer") or "").strip()
 
         return answer or None
-
-
-def default_slm_path() -> Path:
-    """
-    Repo-conventional SLM weight path (env overridable at the
-    module layer).
-    """
-    return _paths.models_dir() / "voice" / "slm" / "qwen3-0.6b"

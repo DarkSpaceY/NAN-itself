@@ -1,9 +1,18 @@
 # Configuration
 
+Configuration lives in two layers, and there are no environment
+variables to set:
+
+- `config/settings.yaml` — core framework parameters only. Modules
+  never appear here.
+- `config/modules/<module_id>.yaml` — one file per module, loaded and
+  validated by the module itself.
+
 ## settings.yaml
 
-The main configuration file is `config/settings.yaml`. All fields have
-sensible defaults; only the `llm` block usually needs editing.
+Core settings only (LLM, gateway, agent, module/provider machinery,
+events). The file ships with every field written out; values may be
+edited in place, and code defaults back anything you delete.
 
 ```yaml
 llm:
@@ -20,10 +29,13 @@ gateway:
 
 agent:
   max_subagent_depth: 3
+  history_char_limit: 100000
+
+skills:
+  resource_char_limit: 100000
+  script_timeout: 300.0
 
 runtime:
-  inbox:
-    max_size: 256
   turn:
     grace: 5.0
   retry:
@@ -43,29 +55,26 @@ events:
   input_dedup_cache_size: 256
 ```
 
-## Environment variables
+## Module configuration
 
-| Variable | Purpose |
-|---|---|
-| `NAN_DATA_DIR` | Override the repo-anchored `data/` directory. |
-| `NAN_MODELS_DIR` | Override the repo-anchored `models/` directory. |
-| `NAN_VISION_VLM` | Set `0` to disable the vision VLM backend. |
-| `NAN_VISION_VLM_DIR` | Override the VLM weights directory (`models/vision/vlm/...`). |
-| `NAN_SEARXNG_SETTINGS` | Point the built-in `search` tool at a different searxng-cli settings file (replaces `config/searxng.yml`). |
-| `NAN_VOICE_STT_MODEL` | Voice module whisper model size (default `base`). |
-| `NAN_VOICE_STT_LANGUAGE` | Voice module STT language hint (e.g. `zh`); unset = auto. |
-| `NAN_VOICE_STT_MODELS_DIR` | Override the whisper weights directory (default `models/whisper`, shared with audio). |
-| `NAN_VOICE_SLM_DIR` | Override the Qwen3-0.6B SLM weights directory (default `models/voice/slm/qwen3-0.6b`). |
-| `NAN_VOICE_SLM_REPO` | HuggingFace repo id for SLM auto-download (default `Qwen/Qwen3-0.6B`). |
-| `NAN_VOICE_COSYVOICE_DIR` | Override the CosyVoice upstream checkout (default `models/voice/cosyvoice`). |
-| `NAN_VOICE_TTS_DIR` | Override the CosyVoice2-0.5B weights directory (default `models/voice/tts/cosyvoice2-0.5b`). |
-| `NAN_VOICE_TTS_REFERENCE` | Override the TTS reference wav (voice identity; default `models/voice/tts/reference.wav`). |
-| `NAN_VOICE_TTS_SPEED` | TTS speaking rate multiplier (default `1.0`). |
-| `NAN_VOICE_FAST_PATH` | Set `0` to disable the SLM fast path (trivial turns answered without the main agent). |
-| `HF_ENDPOINT` | HuggingFace endpoint mirror, used by model auto-download. |
+Each module owns exactly one YAML file:
+`config/modules/<module_id>.yaml`. The module declares a pydantic
+config model whose defaults are the shipped constants; the YAML
+(when present) overrides them and is validated at construction
+time — a malformed file is a loud startup failure, never a silent
+half default. Modules read their config in `__init__`, so a hot
+reload (instance rebuild) picks up edits automatically.
 
-`SEARXNG_CLI_SETTINGS` is injected automatically by the built-in search
-tool on every invocation; you normally never set it by hand.
+Shipped files:
+
+| File | Module | Fields |
+|---|---|---|
+| `config/modules/audio.yaml` | audio | mic `device`, speaker/tagger/emotion model paths, voices registry |
+| `config/modules/voice.yaml` | voice | STT model/language, SLM weights + repo, CosyVoice checkout/weights/reference wav, `tts_speed`, `fast_path_enabled` |
+| `config/modules/vision.yaml` | vision | camera `device`, faces/OCR/VLM toggles, registry + weights paths |
+
+Path convention: relative paths resolve against the repository
+root; absolute paths (and `~/...`) pass through unchanged.
 
 ## Data and models
 
@@ -76,12 +85,16 @@ tool on every invocation; you normally never set it by hand.
   use; a failed download crashes the module at startup and it retries
   with backoff until the weights are present.
 
-All of these locations resolve through
-[`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py) and are
-therefore independent of the process working directory.
+All of these locations are fixed derivatives of the repository root
+([`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py))
+and are therefore independent of the process working directory.
+`HF_ENDPOINT` is honoured by the `huggingface_hub` library itself for
+download mirrors; NAN sets no environment variables of its own.
 
 ## Tool-level settings
 
 Tool providers may carry their own config files under `config/`, e.g.
 `config/searxng.yml` for the built-in search tool (SearXNG outgoing
-proxy/timeouts, injected into every searxng-cli invocation).
+proxy/timeouts). The tool injects its settings file into every
+searxng-cli invocation via `SEARXNG_CLI_SETTINGS`; you never set that
+variable by hand.

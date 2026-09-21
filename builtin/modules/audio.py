@@ -38,12 +38,15 @@ import time
 import asyncio
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import BaseModel
 
-from nan_itself.utils import paths as _paths
+from nan_itself.utils.module_config import (
+    load_module_config,
+    resolve_path,
+)
 from nan_itself.utils.audio import (
     AudioPipeline,
     estimate_bpm,
@@ -56,6 +59,34 @@ from nan_itself.utils.audio import (
     SpeakerMatcher,
     Utterance,
 )
+
+
+class AudioConfig(BaseModel):
+    """
+    Module-private config: config/modules/audio.yaml over these
+    defaults. Path-valued fields are repo-relative strings
+    (resolve_path); `device` is the mic index/name.
+    """
+
+    device: int | str | None = None
+
+    speaker_model: str = (
+        "models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+    )
+
+    voices_registry: str = "data/databases/audio/voices.json"
+
+    tagger_model: str = "models/audio_tag/model.int8.onnx"
+
+    tagger_labels: str = (
+        "models/audio_tag/class_labels_indices.csv"
+    )
+
+    emotion_model: str = (
+        "models/emotion/emotion2vec_plus_base.onnx"
+    )
+
+    emotion_head: str = "models/emotion/emotion2vec_head.json"
 
 
 class AudioModule(Module):
@@ -120,28 +151,15 @@ class AudioModule(Module):
     def __init__(self) -> None:
         self.sample_rate = 16000
 
-        self.device: int | str | None = (
-            os.getenv("NAN_AUDIO_DEVICE") or None
+        cfg = load_module_config("audio", AudioConfig)
+
+        self.device: int | str | None = cfg.device
+
+        self.speaker_model_path = resolve_path(
+            cfg.speaker_model
         )
 
-        speaker_model = os.getenv("NAN_AUDIO_SPEAKER_MODEL")
-
-        self.speaker_model_path = (
-            Path(speaker_model)
-            if speaker_model
-            else _paths.repo_root()
-            / "models"
-            / "speaker"
-            / "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
-        )
-
-        registry = os.getenv("NAN_AUDIO_VOICES_REGISTRY")
-
-        self.registry_path = (
-            Path(registry)
-            if registry
-            else _paths.data_dir() / "databases" / "audio" / "voices.json"
-        )
+        self.registry_path = resolve_path(cfg.voices_registry)
 
         self.matcher = SpeakerMatcher(
             threshold=self.speaker_threshold,
@@ -164,26 +182,10 @@ class AudioModule(Module):
 
         self._embedder: Any = None
 
-        tagger_model = os.getenv("NAN_AUDIO_TAGGER_MODEL")
+        self.tagger_model_path = resolve_path(cfg.tagger_model)
 
-        self.tagger_model_path = (
-            Path(tagger_model)
-            if tagger_model
-            else _paths.repo_root()
-            / "models"
-            / "audio_tag"
-            / "model.int8.onnx"
-        )
-
-        tagger_labels = os.getenv("NAN_AUDIO_TAGGER_LABELS")
-
-        self.tagger_labels_path = (
-            Path(tagger_labels)
-            if tagger_labels
-            else _paths.repo_root()
-            / "models"
-            / "audio_tag"
-            / "class_labels_indices.csv"
+        self.tagger_labels_path = resolve_path(
+            cfg.tagger_labels
         )
 
         self.tagger_factory = lambda: SherpaAudioTagger(
@@ -194,26 +196,12 @@ class AudioModule(Module):
 
         self._tagger: Any = None
 
-        emotion_model = os.getenv("NAN_AUDIO_EMOTION_MODEL")
-
-        self.emotion_model_path = (
-            Path(emotion_model)
-            if emotion_model
-            else _paths.repo_root()
-            / "models"
-            / "emotion"
-            / "emotion2vec_plus_base.onnx"
+        self.emotion_model_path = resolve_path(
+            cfg.emotion_model
         )
 
-        emotion_head = os.getenv("NAN_AUDIO_EMOTION_HEAD")
-
-        self.emotion_head_path = (
-            Path(emotion_head)
-            if emotion_head
-            else _paths.repo_root()
-            / "models"
-            / "emotion"
-            / "emotion2vec_head.json"
+        self.emotion_head_path = resolve_path(
+            cfg.emotion_head
         )
 
         self.emotion_factory = lambda: OnnxEmotionRecognizer(

@@ -26,11 +26,6 @@ skills, and an HTTP gateway with a web UI.
 - **Ambient perception modules** — audio, vision (photometry → flow →
   faces → YOLO → OCR → VLM captioning), inbox, network and system modules
   run as background daemons and are queried by the agent.
-- **Voice: the first reactive module** — consumes the audio module's PCM
-  ring, runs VAD endpointing + STT, and speaks through a `say` channel:
-  the agent writes semantic tasks, a local 0.6B SLM composes the spoken
-  utterance, CosyVoice2 synthesizes it, and barge-in (0.5 s of speech)
-  stops playback and drains the queue.
 - **Module channels (reactive modules)** — modules can declare write-only
   downlink data slots the model writes to through
   `list_channels` / `show_channels` / `invoke_channels`, enabling
@@ -161,7 +156,7 @@ NAN-itself/
 │       ├── mcps/         # MCP server configs (one YAML = one provider)
 │       └── local/        # Local Python tool providers (one file = one provider)
 ├── workspace/            # User-editable overrides (same layout as builtin/)
-├── config/               # settings.yaml and tool settings (e.g. searxng.yml)
+├── config/               # settings.yaml, per-module configs, tool settings (e.g. searxng.yml)
 ├── backend/nan_itself/   # Framework source
 │   ├── agent/            # Core agent loop (turns, engine, verbs)
 │   ├── tools/            # Provider runtime (MCP + local backends, hot reload)
@@ -181,7 +176,7 @@ NAN-itself/
 |---|---|
 | [Core principles](docs/principles.md) | The load-bearing principles behind every design decision |
 | [Architecture](docs/architecture.md) | Repo-mirrored tour: agent core, tool runtime, modules, skills, security model |
-| [Configuration](docs/configuration.md) | `settings.yaml` reference and environment variables |
+| [Configuration](docs/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
 | [Development](docs/development.md) | Setup, conventions, adding tools and modules |
 | [Reactive modules design](docs/design/reactive-modules.md) | The channel downlink design |
 | [Tools](docs/tools.md) | Built-in tool reference *(placeholder)* |

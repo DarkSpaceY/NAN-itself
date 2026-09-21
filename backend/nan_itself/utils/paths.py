@@ -4,9 +4,10 @@ Canonical filesystem anchors.
 Every repo-relative location (data/, models/) resolves through
 this module so the process never depends on its working
 directory: launching nan from any cwd still writes inside the
-repository. Generic overrides stay env-driven (NAN_DATA_DIR,
-NAN_MODELS_DIR); feature-specific envs (NAN_AUDIO_SPEAKER_MODEL,
-NAN_VISION_VLM_DIR, ...) keep precedence at their call sites.
+repository. Locations are fixed derivatives of the repository
+root -- there are no overrides. Core configuration lives in
+config/settings.yaml; each Module owns config/modules/<id>.yaml
+(see utils/module_config.py).
 
 Anchoring relies on the editable install: nan_itself.__file__
 resolves into <repo>/backend/nan_itself, so three levels up from
@@ -15,7 +16,6 @@ this file is the repository root.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 
@@ -25,26 +25,10 @@ def repo_root() -> Path:
 
 
 def data_dir() -> Path:
-    """
-    Root for all persistent module data (env: NAN_DATA_DIR).
-    """
-    override = os.getenv("NAN_DATA_DIR")
-
-    return (
-        Path(override).expanduser().resolve()
-        if override
-        else repo_root() / "data"
-    )
+    """Root for all persistent module data."""
+    return repo_root() / "data"
 
 
 def models_dir() -> Path:
-    """
-    Root for all model weights (env: NAN_MODELS_DIR).
-    """
-    override = os.getenv("NAN_MODELS_DIR")
-
-    return (
-        Path(override).expanduser().resolve()
-        if override
-        else repo_root() / "models"
-    )
+    """Root for all model weights."""
+    return repo_root() / "models"

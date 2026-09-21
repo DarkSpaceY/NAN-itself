@@ -1,3 +1,6 @@
+# Core framework settings. Modules never live here: each module
+# owns its own config/modules/<module_id>.yaml.
+
 llm:
   provider: openai
   api_key: xxx
@@ -12,11 +15,13 @@ gateway:
 
 agent:
   max_subagent_depth: 3
+  history_char_limit: 100000
+
+skills:
+  resource_char_limit: 100000
+  script_timeout: 300.0
 
 runtime:
-  inbox:
-    max_size: 256
-
   turn:
     grace: 5.0
 

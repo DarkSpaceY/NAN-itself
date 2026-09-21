@@ -47,10 +47,6 @@ def test_data_and_models_dirs_anchor_to_repo(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    monkeypatch.delenv("NAN_DATA_DIR", raising=False)
-
-    monkeypatch.delenv("NAN_MODELS_DIR", raising=False)
-
     _chdir_out(monkeypatch, tmp_path)
 
     assert _paths.data_dir() == REPO / "data"
@@ -150,10 +146,6 @@ def test_builtin_modules_anchor_from_foreign_cwd(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    monkeypatch.delenv("NAN_VISION_FACES_REGISTRY", raising=False)
-
-    monkeypatch.delenv("NAN_AUDIO_VOICES_REGISTRY", raising=False)
-
     _chdir_out(monkeypatch, tmp_path)
 
     vision = _load_builtin_module("vision")

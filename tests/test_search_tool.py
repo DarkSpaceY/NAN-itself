@@ -168,7 +168,10 @@ async def test_web_search_parses_cli_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module, _ = _load_module()
+    # One load only: load_class_from_file re-execs the source
+    # each call, so the class's globals belong to the module
+    # object returned alongside it -- patch that one.
+    module, cls = _load_module()
 
     settings = tmp_path / "settings.yml"
 
@@ -177,9 +180,10 @@ async def test_web_search_parses_cli_json(
         encoding="utf-8",
     )
 
-    monkeypatch.setenv(
-        "NAN_SEARXNG_SETTINGS",
-        str(settings),
+    monkeypatch.setattr(
+        module,
+        "_settings_file",
+        lambda: str(settings),
     )
 
     _, capture = _install_fake_exec(
@@ -188,8 +192,6 @@ async def test_web_search_parses_cli_json(
             FAKE_PAYLOAD
         ).encode("utf-8"),
     )
-
-    cls = _load_module()[1]
 
     provider = _build_provider(cls)
 
@@ -296,15 +298,8 @@ async def test_web_search_invalid_json(
     )
 
 
-def test_settings_file_resolution(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_settings_file_resolution() -> None:
     module, _ = _load_module()
-
-    monkeypatch.delenv(
-        "NAN_SEARXNG_SETTINGS",
-        raising=False,
-    )
 
     resolved = module._settings_file()
 
@@ -312,14 +307,4 @@ def test_settings_file_resolution(
 
     assert resolved.endswith(
         "config/searxng.yml"
-    )
-
-    monkeypatch.setenv(
-        "NAN_SEARXNG_SETTINGS",
-        "/custom/settings.yml",
-    )
-
-    assert (
-        module._settings_file()
-        == "/custom/settings.yml"
     )

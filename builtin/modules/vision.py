@@ -38,14 +38,19 @@ import time
 import asyncio
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import BaseModel
 
 from nan_itself.modules.model import Module, Turn
 
 from nan_itself.utils import paths as _paths
+
+from nan_itself.utils.module_config import (
+    load_module_config,
+    resolve_path,
+)
 
 from nan_itself.utils.vision import (
     CameraSource,
@@ -57,6 +62,30 @@ from nan_itself.utils.vision import (
     VlmCaptioner,
     YoloOnnxDetector,
 )
+
+
+class VisionConfig(BaseModel):
+    """
+    Module-private config: config/modules/vision.yaml over these
+    defaults. Path-valued fields are repo-relative strings
+    (resolve_path); `device` is the camera index/name.
+    """
+
+    device: int | str | None = None
+
+    faces_enabled: bool = True
+
+    ocr_enabled: bool = True
+
+    vlm_enabled: bool = True
+
+    faces_registry: str = "data/databases/vision/faces.json"
+
+    ocr_models_dir: str = "models/easyocr"
+
+    vlm_dir: str = (
+        "models/vision/vlm/SmolVLM2-500M-Video-Instruct"
+    )
 
 
 class VisionModule(Module):
@@ -133,32 +162,15 @@ class VisionModule(Module):
     vlm_interval_s: float = 30.0
 
     def __init__(self) -> None:
-        device_env = os.getenv("NAN_VISION_DEVICE")
+        cfg = load_module_config("vision", VisionConfig)
 
-        self.device: int | str | None = (
-            device_env
-            if device_env
-            else None
-        )
+        self.device: int | str | None = cfg.device
 
-        self.faces_enabled = (
-            os.getenv("NAN_VISION_FACES", "1") == "1"
-        )
+        self.faces_enabled = cfg.faces_enabled
 
-        self.ocr_enabled = (
-            os.getenv("NAN_VISION_OCR", "1") == "1"
-        )
+        self.ocr_enabled = cfg.ocr_enabled
 
-        registry = os.getenv("NAN_VISION_FACES_REGISTRY")
-
-        self.registry_path = (
-            Path(registry)
-            if registry
-            else _paths.data_dir()
-            / "databases"
-            / "vision"
-            / "faces.json"
-        )
+        self.registry_path = resolve_path(cfg.faces_registry)
 
         self.matcher = FaceMatcher(
             threshold=self.face_distance_threshold,
@@ -206,13 +218,7 @@ class VisionModule(Module):
 
         self.qr = QrScanner()
 
-        ocr_models = os.getenv("NAN_VISION_OCR_MODELS_DIR")
-
-        self.ocr_models_dir = (
-            Path(ocr_models)
-            if ocr_models
-            else _paths.repo_root() / "models" / "easyocr"
-        )
+        self.ocr_models_dir = resolve_path(cfg.ocr_models_dir)
 
         self.ocr_factory = lambda: OcrReader(
             self.ocr_models_dir,
@@ -243,21 +249,9 @@ class VisionModule(Module):
 
         self._objects_failed = self.objects_enabled is False
 
-        vlm_dir_env = os.getenv("NAN_VISION_VLM_DIR")
+        self.vlm_dir = resolve_path(cfg.vlm_dir)
 
-        self.vlm_dir = (
-            Path(vlm_dir_env)
-            if vlm_dir_env
-            else _paths.repo_root()
-            / "models"
-            / "vision"
-            / "vlm"
-            / "SmolVLM2-500M-Video-Instruct"
-        )
-
-        self.vlm_enabled = (
-            os.getenv("NAN_VISION_VLM", "1") == "1"
-        )
+        self.vlm_enabled = cfg.vlm_enabled
 
         self.vlm_factory = lambda: VlmCaptioner(
             self.vlm_dir,

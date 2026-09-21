@@ -1,0 +1,19 @@
+# Vision module (builtin/modules/vision.py): camera owner +
+# photometry/motion/faces/QR/OCR/YOLO/VLM layers.
+#
+# Path convention: relative paths resolve against the repository
+# root; absolute paths pass through unchanged.
+
+device: null                # camera index/name; null = system default
+
+faces_enabled: true
+
+ocr_enabled: true
+
+vlm_enabled: true
+
+faces_registry: data/databases/vision/faces.json
+
+ocr_models_dir: models/easyocr
+
+vlm_dir: models/vision/vlm/SmolVLM2-500M-Video-Instruct

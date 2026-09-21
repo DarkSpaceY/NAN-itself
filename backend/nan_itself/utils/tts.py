@@ -30,8 +30,6 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
-from nan_itself.utils import paths as _paths
-
 
 # Directive used when the SLM emits no (or an illegal) instruct.
 NEUTRAL_INSTRUCT = "用自然的语气说"
@@ -219,18 +217,3 @@ class CosyVoiceTTS:
 
             if audio.size:
                 yield audio
-
-
-def default_tts_paths() -> tuple[Path, Path, Path]:
-    """
-    Repo-conventional paths (env overridable at the module
-    layer): upstream checkout, CosyVoice2-0.5B weights and the
-    reference wav for the instruct2 voice identity.
-    """
-    voice_root = _paths.models_dir() / "voice"
-
-    return (
-        voice_root / "cosyvoice",
-        voice_root / "tts" / "cosyvoice2-0.5b",
-        voice_root / "tts" / "reference.wav",
-    )
