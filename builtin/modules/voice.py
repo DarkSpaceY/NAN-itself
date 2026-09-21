@@ -69,7 +69,7 @@ from nan_itself.utils.audio import (
     WhisperTranscriber,
 )
 from nan_itself.utils.dialogue import SmallDialogue
-from nan_itself.utils.tts import CosyVoiceTTS
+from nan_itself.utils.tts import CosyVoiceTTS, sanitize_instruct
 
 
 class VoiceConfig(BaseModel):
@@ -739,6 +739,21 @@ class VoiceModule(ActionSurface):
             )
 
             return None
+
+        # Loud whitelist enforcement (no silent substitution):
+        # an illegal instruct becomes neutral speech, but the
+        # model is told exactly what the SLM hallucinated.
+        raw_instruct = composed.get("instruct", "")
+
+        instruct = sanitize_instruct(raw_instruct)
+
+        if raw_instruct and not instruct:
+            self.emit_event(
+                "voice: SLM instruct not on the TTS whitelist, "
+                f"falling back to neutral: {raw_instruct!r}"
+            )
+
+            composed["instruct"] = ""
 
         return composed
 

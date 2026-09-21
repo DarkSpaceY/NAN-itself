@@ -26,10 +26,7 @@ from typing import Any
 import torch
 from loguru import logger
 
-from nan_itself.utils.tts import (
-    ALLOWED_INSTRUCTS,
-    sanitize_instruct,
-)
+from nan_itself.utils.tts import ALLOWED_INSTRUCTS
 
 
 DEFAULT_REPO_ID = "Qwen/Qwen3-0.6B"
@@ -276,10 +273,10 @@ class SmallDialogue:
         """
         Task -> surface utterance {"instruct", "text"}.
 
-        The instruct is validated against the TTS whitelist here
-        (illegal choices become ""), so the module can pass the
-        result straight into CosyVoiceTTS.speak(). None means
-        the SLM failed to produce a usable utterance.
+        The SLM's instruct is returned verbatim (stripped) -- the
+        voice module validates it against the TTS whitelist and
+        reports illegal choices to the model. None means the SLM
+        failed to produce a usable utterance.
         """
         raw = self._generate(
             _COMPOSE_SYSTEM.format(
@@ -304,9 +301,7 @@ class SmallDialogue:
             return None
 
         return {
-            "instruct": sanitize_instruct(
-                str(payload.get("instruct") or "")
-            ),
+            "instruct": str(payload.get("instruct") or "").strip(),
             "text": text,
         }
 

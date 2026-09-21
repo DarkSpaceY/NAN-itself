@@ -429,6 +429,33 @@ def test_speak_once_empty_slot_returns_false():
     assert instance._speak_once() is False
 
 
+def test_illegal_instruct_is_loud_and_neutral():
+    instance = _fresh_instance()
+
+    instance.set_target("say", _say_task())
+
+    instance.slm = _FakeSLM(
+        composed={
+            "instruct": "用外星人的语气说",
+            "text": "哈喽",
+        }
+    )
+
+    instance.tts = _FakeTTS(chunks=1)
+
+    instance._open_stream = lambda: _FakeStream()
+
+    assert instance._speak_once() is True
+
+    # Neutral speech, never the hallucinated directive.
+    assert instance.tts.calls == [("哈喽", "")]
+
+    assert any(
+        "not on the TTS whitelist" in event
+        for event in instance._events
+    )
+
+
 def test_compose_failure_is_feedback_not_crash():
     instance = _fresh_instance()
 

@@ -134,7 +134,8 @@ def test_compose_parses_task_to_utterance(tmp_path: Path, monkeypatch):
     ) == {"instruct": "用开心的语气说", "text": "好嘞，马上来！"}
 
 
-def test_compose_drops_illegal_instruct(tmp_path: Path, monkeypatch):
+def test_compose_returns_instruct_verbatim(tmp_path: Path, monkeypatch):
+    """Whitelist enforcement lives in the voice module, not here."""
     slm = _slm(tmp_path)
 
     monkeypatch.setattr(
@@ -143,8 +144,8 @@ def test_compose_drops_illegal_instruct(tmp_path: Path, monkeypatch):
         lambda *a, **k: '{"instruct": "用悲伤到极致的语气说", "text": "内容"}',
     )
 
-    assert slm.compose({"intent": "narrate", "key_points": "内容"}) == {
-        "instruct": "",
+    assert slm.compose({"intent": "narrate", "key_points": "x"}) == {
+        "instruct": "用悲伤到极致的语气说",
         "text": "内容",
     }
 
