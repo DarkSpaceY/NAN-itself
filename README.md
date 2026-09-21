@@ -69,6 +69,8 @@ flowchart TB
     end
     D -->|"history + messages"| E["Turn N+1 snapshot"]
     E --> A2["..."]
+
+    style turn fill:#f6f8fa,stroke:#d0d7de,color:#24292f
 ```
 
 ### Modules and channels
@@ -87,6 +89,8 @@ flowchart LR
     V -->|"written / replaced / rejected"| S["Channel slot<br/>(depth 1: overwrite)<br/>(depth N: FIFO)"]
     S --> C2["Module tick loop<br/>consumes at its own pace"]
     C2 --> Q["DataSpace / query()<br/>progress flows back up"]
+
+    style agent fill:#f6f8fa,stroke:#d0d7de,color:#24292f
 ```
 
 ### Hot reload as a transaction
