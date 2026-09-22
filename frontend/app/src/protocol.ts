@@ -9,7 +9,6 @@ export type ServerEvent =
   | { t: 'hello'; seq: number; model: string; base_url: string; status: Status }
   | { t: 'status'; state: StatusState }
   | { t: 'user_input'; id: string; text: string; mid?: string }
-  | { t: 'divider'; label: string }
   | { t: 'record_started'; id: string; kind: 'tool' | 'skill' | 'spawn' | 'sleep' | 'finish' | 'module' | 'agent' | 'target' | 'error'; name: string; summary?: string }
   | { t: 'record_detail'; id: string; line: string }
   | { t: 'record_done'; id: string; summary?: string; note?: string }

@@ -28,6 +28,8 @@ export interface Snapshot {
   model: string;
   baseUrl: string;
   seq: number;
+  // 前端自行派生 divider 的依据:上一个事件所属的本地日期标签
+  lastDate: string | null;
 }
 
 export const initialSnapshot: Snapshot = {
@@ -36,12 +38,37 @@ export const initialSnapshot: Snapshot = {
   model: 'connecting…',
   baseUrl: '',
   seq: 0,
+  lastDate: null,
 };
 
 let counter = 0;
 export const nextId = () => `c${++counter}`;
 
+// 渲染/折叠边缘才把数值时间戳变成日期标签(协议契约:传输层一律 epoch,
+// 后端不产生 divider 事件,前端按事件 ts 自行插入)
+const dateLabel = (ts: number) =>
+  new Date(ts * 1000).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
 export function fold(s: Snapshot, e: ServerEvent): Snapshot {
+  // 日期分隔:任何带时间戳的事件跨天时先插一条 divider
+  const ts = (e as { ts?: number }).ts;
+
+  if (ts != null) {
+    const label = dateLabel(ts);
+
+    if (label !== s.lastDate) {
+      s = {
+        ...s,
+        lastDate: label,
+        items: [...s.items, { k: 'divider', id: label, key: nextId(), label }],
+      };
+    }
+  }
+
   switch (e.t) {
     case 'hello':
       return { ...s, seq: e.seq, model: e.model, baseUrl: e.base_url ?? s.baseUrl, status: e.status ?? s.status };
@@ -51,16 +78,6 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
 
     case 'user_input':
       return { ...s, items: [...s.items, { k: 'user', id: e.id, key: nextId(), text: e.text }] };
-
-    case 'divider': {
-      // 同一日期只出现一次(重连重发/重放都不再重复)
-      const dup = s.items.some(
-        (it) => it.k === 'divider' && it.label === e.label,
-      );
-      if (dup) return s;
-
-      return { ...s, items: [...s.items, { k: 'divider', id: e.label, key: nextId(), label: e.label }] };
-    }
 
     case 'record_started': {
       const item: Item = {

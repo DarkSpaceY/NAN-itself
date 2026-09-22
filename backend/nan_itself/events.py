@@ -69,19 +69,6 @@ class EventBus:
         return list(self._history)
 
 
-def local_date_label(ts: float | None = None) -> str:
-    """
-    Unix epoch seconds -> local date label (年/月/日).
-
-    Timestamps are numeric everywhere on the storage side
-    (EventBus.emit stamps every event); human-readable formats
-    only exist at render edges like this one.
-    """
-    t = time.localtime(ts)
-
-    return f"{t.tm_year}年{t.tm_mon}月{t.tm_mday}日"
-
-
 class StreamSink:
     """
     The StepEngine's view of the bus: only main-agent (depth 0)

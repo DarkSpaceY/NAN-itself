@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import uvicorn
 
-from .events import EventBus, local_date_label
+from .events import EventBus
 
 
 class Gateway:
@@ -156,9 +156,8 @@ class Gateway:
         logger.info(f"Client {client_id} connected")
 
         try:
-            # 发送 hello + divider + 历史
+            # 发送 hello + 历史（divider 由前端按事件时间戳自行渲染）
             await self._send(websocket, self._hello_payload())
-            await self._send(websocket, {"t": "divider", "label": local_date_label()})
             for event in self.bus.history():
                 await self._send(websocket, event)
 
@@ -205,7 +204,6 @@ class Gateway:
 
     async def _forward(self, websocket: WebSocket, queue: asyncio.Queue, client_id: str) -> None:
         """转发事件到客户端（带异常处理）"""
-        last_date = local_date_label()
         counter = 0
         logger.debug(f"Forwarder started for {client_id}")
 
@@ -222,12 +220,6 @@ class Gateway:
                     continue
 
                 counter += 1
-
-                # 处理日期分隔
-                event_date = local_date_label(event.get("ts"))
-                if event_date != last_date:
-                    last_date = event_date
-                    await self._send(websocket, {"t": "divider", "label": event_date})
 
                 # 发送事件
                 logger.info(f"[Debug] Send Event:{event}")

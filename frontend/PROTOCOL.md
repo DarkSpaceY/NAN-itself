@@ -44,7 +44,8 @@
 | `output_delta` | Message | `id, text` | 流式增量(直接拼接) |
 | `output_done` | Message | `id, ts, duration` | 停止打字;`ts` 为数值 epoch(与所有事件一致,由 bus 统一加盖),前端渲染为人类可读;尾部 Note `✓ ts · duration` |
 | `output_cancelled` | Message | `id` | 文本流中途出现 tool_call,撤回该段(非最终输出) |
-| `divider` | Divider | `label` | 日期分隔(网关在跨天时自动注入) |
+
+divider 不是协议事件:前端按每个事件的数值 `ts` 自行派生日期分隔(本地日期变化时插入)。
 
 ## 约定
 

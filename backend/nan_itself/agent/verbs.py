@@ -93,43 +93,6 @@ class ExecutionState:
         self.report: str | None = None
 
 
-def serialize_tool_result(
-    result: Any,
-) -> str:
-    if isinstance(
-        result,
-        mcp_types.CallToolResult,
-    ):
-        try:
-            dumped = result.model_dump(
-                mode="json"
-            )
-
-            return json.dumps(
-                dumped,
-                ensure_ascii=False,
-            )
-
-        except Exception:
-            return str(result)
-
-    if isinstance(
-        result,
-        str,
-    ):
-        return result
-
-    try:
-        return json.dumps(
-            result,
-            ensure_ascii=False,
-            default=str,
-        )
-
-    except Exception:
-        return str(result)
-
-
 class SleepVerb:
     name: ClassVar[str] = SLEEP_TOOL_NAME
 
@@ -561,9 +524,16 @@ class InvokeToolVerb:
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
 
-        return serialize_tool_result(
-            result
-        )
+        # MCP results must be dumped structurally; plain str passes
+        # through unquoted; anything else falls back to JSON with
+        # str() as the escape hatch for non-serializable values.
+        if isinstance(result, mcp_types.CallToolResult):
+            return result.model_dump_json()
+
+        if isinstance(result, str):
+            return result
+
+        return json.dumps(result, ensure_ascii=False, default=str)
 
 
 class ListSkillsVerb:
