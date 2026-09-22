@@ -47,6 +47,7 @@ import base64
 import json
 import math
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -1202,17 +1203,61 @@ class CosyVoiceTTS:
             if path.is_dir() and resolved not in sys.path:
                 sys.path.insert(0, resolved)
 
+    COSYVOICE_REPO = "https://github.com/FunAudioLLM/CosyVoice.git"
+
+    def _ensure_checkout(self) -> None:
+        """
+        The upstream runtime is source-only (not on PyPI), so
+        first-run provisioning shallow-clones the checkout into
+        models/voice/cosyvoice. A failing clone raises out of
+        load(): DOWN + backoff, never a silent limbo.
+        """
+        if self.checkout_dir.is_dir():
+            return
+
+        self.checkout_dir.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        logger.info(
+            "cloning CosyVoice checkout into {}",
+            self.checkout_dir,
+        )
+
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    self.COSYVOICE_REPO,
+                    str(self.checkout_dir),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "git is required to fetch the CosyVoice checkout; "
+                "install git or clone FunAudioLLM/CosyVoice to "
+                f"{self.checkout_dir} manually"
+            ) from exc
+
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"cloning {self.COSYVOICE_REPO} failed "
+                f"(exit {exc.returncode}): {exc.stderr.strip()}"
+            ) from exc
+
     def load(self) -> None:
         if self._model is not None:
             return
 
-        if not self.checkout_dir.is_dir():
-            raise RuntimeError(
-                "CosyVoice checkout missing at "
-                f"{self.checkout_dir}; clone FunAudioLLM/CosyVoice "
-                "there (git clone https://github.com/FunAudioLLM/"
-                "CosyVoice.git) and install its requirements"
-            )
+        self._ensure_checkout()
 
         if not (self.model_dir / "cosyvoice2.yaml").is_file():
             raise RuntimeError(

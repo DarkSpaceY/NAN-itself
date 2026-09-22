@@ -17,3 +17,7 @@ faces_registry: data/databases/vision/faces.json
 ocr_models_dir: models/easyocr
 
 vlm_dir: models/vision/vlm/SmolVLM2-500M-Video-Instruct
+
+# Objects (YOLO) weights are auto-downloaded on first start from:
+# objects_repo: kshitijjjjjjjjjjjjjjjj/yolov8n-coco-onnx
+# objects_filename: yolov8n.onnx

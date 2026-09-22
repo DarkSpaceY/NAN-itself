@@ -34,7 +34,7 @@
 | t | 对应原语 | 字段 | 语义 |
 |---|---|---|---|
 | `hello` | — | `seq, boot, model, base_url, status` | 握手;`boot` 为进程唯一 id,客户端检测到变化即清空本地流并重置 seq 基线 |
-| `status` | Pulse | `state:"idle"\|"working"\|"error"`, `tools?`, `subagents?`, `next_hop?` | 循环状态机变化 |
+| `status` | Pulse | `state:"idle"\|"working"\|"error"` | 循环状态机变化 |
 | `user_input` | Message | `id, text` | 用户输入回显(进了 Inbox 才发) |
 | `record_started` | Record | `id, kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"target"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
 | `record_detail` | Record | `id, line(html-free 纯文本)` | 详节逐行追加 |
@@ -42,7 +42,7 @@
 | `record_failed` | Record | `id, summary?` | ✗ 保持展开 |
 | `output_started` | Message | `id` | NAN 文本开始 |
 | `output_delta` | Message | `id, text` | 流式增量(直接拼接) |
-| `output_done` | Message | `id, ts, duration` | 停止打字;尾部 Note `✓ ts · duration` |
+| `output_done` | Message | `id, ts, duration` | 停止打字;`ts` 为数值 epoch(与所有事件一致,由 bus 统一加盖),前端渲染为人类可读;尾部 Note `✓ ts · duration` |
 | `output_cancelled` | Message | `id` | 文本流中途出现 tool_call,撤回该段(非最终输出) |
 | `divider` | Divider | `label` | 日期分隔(网关在跨天时自动注入) |
 

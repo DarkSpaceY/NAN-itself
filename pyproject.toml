@@ -30,6 +30,7 @@ dependencies = [
     "loguru>=0.7.3",
     "mcp<3",
     "mss>=10.2.0",
+    "num2words>=0.5.14",
     "numpy>=1.26.0",
     "onnxruntime>=1.20.0",
     "openai>=3.2.0",
@@ -75,3 +76,4 @@ module-root = "backend"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]

@@ -146,9 +146,7 @@ class AgentRuntime:
                 "max_subagent_depth must be >= 0"
             )
 
-        self.max_subagent_depth = (
-            max_subagent_depth
-        )
+        self.max_subagent_depth = max_subagent_depth
 
         # Agent identity / context registry.
         #

@@ -7,7 +7,7 @@ import type { ServerEvent, Status } from '../protocol';
 export type Item =
   | { k: 'divider'; id: string; key: string; label: string }
   | { k: 'user'; id: string; key: string; text: string; queued?: boolean }
-  | { k: 'nano'; id: string; key: string; text: string; ts?: string; duration?: string }
+  | { k: 'nano'; id: string; key: string; text: string; ts?: number; duration?: string }
   | {
       k: 'record';
       id: string;
@@ -47,7 +47,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
       return { ...s, seq: e.seq, model: e.model, baseUrl: e.base_url ?? s.baseUrl, status: e.status ?? s.status };
 
     case 'status':
-      return { ...s, status: { state: e.state, tools: e.tools, subagents: e.subagents, next_hop: e.next_hop } };
+      return { ...s, status: { state: e.state } };
 
     case 'user_input':
       return { ...s, items: [...s.items, { k: 'user', id: e.id, key: nextId(), text: e.text }] };

@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import sys
 import threading
 import time
@@ -1349,9 +1350,10 @@ class YoloOnnxDetector:
     Lazy ONNX object detector following the YOLOv8/v11 export
     contract (output [1, 4+classes, N]).
 
-    Activates only when a model has been dropped in at
-    models/vision/object/model.onnx with a labels file next to it
-    (labels.txt, one name per line, background not listed).
+    Activates with the auto-downloaded COCO YOLOv8n at
+    models/vision/object/model.onnx (labels.txt written alongside,
+    one name per line, background not listed). A custom export can
+    replace both files by hand.
     Missing model -> load() raises -> the failure propagates out
     of the module's start(), which the Facade answers with a DOWN
     state and backoff retries until the weights land.
@@ -2050,6 +2052,28 @@ def _load_config() -> VisionConfig:
     return VisionConfig(**data)
 
 
+# Standard COCO-80 class names for the auto-downloaded YOLOv8n
+# weights (order matches the model's class indices; background
+# not listed, per labels.txt convention).
+COCO80_LABELS: tuple[str, ...] = (
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus",
+    "train", "truck", "boat", "traffic light", "fire hydrant",
+    "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+    "horse", "sheep", "cow", "elephant", "bear", "zebra",
+    "giraffe", "backpack", "umbrella", "handbag", "tie",
+    "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+    "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+    "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog",
+    "pizza", "donut", "cake", "chair", "couch", "potted plant",
+    "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+    "remote", "keyboard", "cell phone", "microwave", "oven",
+    "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+)
+
+
 class VisionModule(Module):
     id = "vision"
 
@@ -2118,6 +2142,13 @@ class VisionModule(Module):
     objects_enabled: bool = True
 
     objects_interval_s: float = 10.0
+
+    # First-run weight source for the objects backend (standard
+    # COCO-80 pretrained YOLOv8n). Missing weights are downloaded
+    # into models/vision/object/ during provisioning.
+    objects_repo: str = "kshitijjjjjjjjjjjjjjjj/yolov8n-coco-onnx"
+
+    objects_filename: str = "yolov8n.onnx"
 
     vlm_max_tokens: int = 48
 
@@ -2388,6 +2419,59 @@ class VisionModule(Module):
     # Backend provisioning
     # ==================================================================
 
+    def _provision_objects(self) -> None:
+        """
+        Ensure the objects backend has weights before load().
+
+        Missing model.onnx is downloaded from self.objects_repo
+        during first-run provisioning; the matching COCO-80
+        labels.txt is written alongside it when absent. A
+        user-dropped labels.txt is never overwritten (it defines
+        the class semantics). A failing download raises out of
+        start(): DOWN + backoff, never a silent limbo.
+        """
+        if self.objects_model_path.is_file():
+            if self.objects_labels_path.is_file():
+                return
+
+            # Model without labels: the operator is mid-setup or
+            # swapped in a custom export; refuse to guess class
+            # names for an unknown model.
+            raise RuntimeError(
+                f"objects backend: model present but "
+                f"{self.objects_labels_path} is missing; add a "
+                f"labels.txt (one class name per line) or remove "
+                f"the model to re-download the COCO default"
+            )
+
+        import huggingface_hub
+
+        logger.info(
+            "objects backend: downloading {} from {}",
+            self.objects_filename,
+            self.objects_repo,
+        )
+
+        downloaded = Path(
+            huggingface_hub.hf_hub_download(
+                repo_id=self.objects_repo,
+                filename=self.objects_filename,
+            )
+        )
+
+        self.objects_model_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        shutil.copyfile(downloaded, self.objects_model_path)
+
+        if not self.objects_labels_path.is_file():
+            self.objects_labels_path.write_text(
+                "\n".join(COCO80_LABELS) + "\n",
+                encoding="utf-8",
+            )
+
     def _provision_backends(self) -> None:
         """
         Load every enabled model-backed backend before the loops
@@ -2400,14 +2484,8 @@ class VisionModule(Module):
         and retries with backoff, so missing weights come up
         loudly failed and revive once they land.
         """
-        if self.objects_enabled and not (
-            self.objects_model_path.is_file()
-            and self.objects_labels_path.is_file()
-        ):
-            raise RuntimeError(
-                "objects backend: drop model.onnx + labels.txt "
-                "into models/vision/object/"
-            )
+        if self.objects_enabled:
+            self._provision_objects()
 
         for attr, failed, stats_key, factory, label in (
             (

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import sys
 import time
 import uuid
 from typing import Any
@@ -25,130 +24,6 @@ from .utils.llm import LLMProvider
 settings = get_settings()
 
 
-def _llm_from_config(settings) -> LLMProvider:
-    return LLMProvider(
-        provider=settings.llm.provider,
-        api_key=settings.llm.api_key,
-        model=settings.llm.model,
-        base_url=settings.llm.base_url,
-        timeout=settings.llm.timeout,
-        max_retries=settings.llm.max_retries,
-    )
-
-
-async def _read_stdin(
-    ingest,
-) -> None:
-    """
-    Read stdin directly from the asyncio event loop.
-
-    Do NOT use run_in_executor()/to_thread() here.
-
-    A blocking sys.stdin.readline() in a worker thread can survive
-    cancellation and make asyncio.run() wait for the default executor
-    during shutdown. That is what causes Ctrl+C to require a final
-    Enter before the process exits.
-
-    On macOS/Unix, add_reader() lets asyncio monitor fd 0 directly.
-    """
-    loop = asyncio.get_running_loop()
-
-    try:
-        fd = sys.stdin.fileno()
-    except (OSError, ValueError):
-        logger.warning(
-            "stdin is not available; stdin reader disabled"
-        )
-        return
-
-    stopped = loop.create_future()
-
-    def finish() -> None:
-        try:
-            loop.remove_reader(fd)
-        except Exception:
-            pass
-
-        if not stopped.done():
-            stopped.set_result(None)
-
-    def on_stdin_readable() -> None:
-        try:
-            chunk = os.read(fd, 4096)
-
-        except BlockingIOError:
-            return
-
-        except OSError as exc:
-            logger.debug(
-                "stdin read failed: {}",
-                exc,
-            )
-            finish()
-            return
-
-        if not chunk:
-            # EOF.
-            finish()
-            return
-
-        # Keep partial UTF-8 / line data between reads.
-        state = getattr(
-            on_stdin_readable,
-            "_buffer",
-            None,
-        )
-
-        if state is None:
-            state = bytearray()
-            setattr(
-                on_stdin_readable,
-                "_buffer",
-                state,
-            )
-
-        state.extend(chunk)
-
-        while True:
-            newline = state.find(b"\n")
-
-            if newline < 0:
-                break
-
-            raw = bytes(
-                state[:newline]
-            )
-
-            del state[:newline + 1]
-
-            text = raw.rstrip(
-                b"\r"
-            ).decode(
-                "utf-8",
-                errors="replace",
-            ).strip()
-
-            if text:
-                ingest(
-                    text,
-                    None,
-                )
-
-    try:
-        loop.add_reader(
-            fd,
-            on_stdin_readable,
-        )
-
-        await stopped
-
-    finally:
-        try:
-            loop.remove_reader(fd)
-        except Exception:
-            pass
-
-
 async def run_agent_process() -> None:
     # NAN talks to local models on loopback interfaces; ambient
     # shell proxies must never intercept that traffic.
@@ -162,7 +37,14 @@ async def run_agent_process() -> None:
     ):
         os.environ.pop(key, None)
 
-    llm = _llm_from_config(settings)
+    llm = LLMProvider(
+        provider=settings.llm.provider,
+        api_key=settings.llm.api_key,
+        model=settings.llm.model,
+        base_url=settings.llm.base_url,
+        timeout=settings.llm.timeout,
+        max_retries=settings.llm.max_retries,
+    )
 
     providers = ProviderRuntime(
         scan_interval=settings.providers.scan_interval,
@@ -199,9 +81,7 @@ async def run_agent_process() -> None:
     # Runtime tasks / resources.
     # --------------------------------------------------------------
 
-    loop_task: asyncio.Task[None] | None = None
     gateway_task: asyncio.Task[None] | None = None
-    stdin_task: asyncio.Task[None] | None = None
 
     gateway: Gateway | None = None
 
@@ -351,15 +231,8 @@ async def run_agent_process() -> None:
         )
 
         # ----------------------------------------------------------
-        # stdin
-        #
-        # No executor / background thread.
+        # Wait for Ctrl+C / SIGTERM.
         # ----------------------------------------------------------
-
-        stdin_task = asyncio.create_task(
-            _read_stdin(ingest),
-            name="stdin-reader",
-        )
 
         stop_received = asyncio.Event()
 
@@ -383,8 +256,7 @@ async def run_agent_process() -> None:
             )
 
         logger.info(
-            "NAN is running. "
-            "Type a message and press Enter."
+            "NAN is running. Open the gateway frontend to talk."
         )
 
         # ----------------------------------------------------------
@@ -399,25 +271,6 @@ async def run_agent_process() -> None:
         # ==========================================================
 
         remove_signal_handlers()
-
-        # ----------------------------------------------------------
-        # Stop stdin reader first.
-        #
-        # Because stdin is directly attached to the event loop,
-        # cancellation is immediate and leaves no executor thread.
-        # ----------------------------------------------------------
-
-        if stdin_task is not None:
-            stdin_task.cancel()
-
-            try:
-                await stdin_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception(
-                    "stdin reader shutdown failed"
-                )
 
         # ----------------------------------------------------------
         # Stop accepting / processing agent work.

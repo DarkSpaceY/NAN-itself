@@ -3,14 +3,11 @@ export type StatusState = 'idle' | 'working' | 'error';
 
 export interface Status {
   state: StatusState;
-  tools?: number;
-  subagents?: number;
-  next_hop?: string;
 }
 
 export type ServerEvent =
   | { t: 'hello'; seq: number; model: string; base_url: string; status: Status }
-  | { t: 'status'; state: StatusState; tools?: number; subagents?: number; next_hop?: string }
+  | { t: 'status'; state: StatusState }
   | { t: 'user_input'; id: string; text: string; mid?: string }
   | { t: 'divider'; label: string }
   | { t: 'record_started'; id: string; kind: 'tool' | 'skill' | 'spawn' | 'sleep' | 'finish' | 'module' | 'agent' | 'target' | 'error'; name: string; summary?: string }
@@ -20,7 +17,7 @@ export type ServerEvent =
   | { t: 'record_void'; id: string }
   | { t: 'output_started'; id: string }
   | { t: 'output_delta'; id: string; text: string }
-  | { t: 'output_done'; id: string; ts: string; duration: string }
+  | { t: 'output_done'; id: string; ts: number; duration: string }
   | { t: 'output_cancelled'; id: string };
 
 // mid: 客户端消息 id,用于回执匹配与服务端去重(防断线重发导致重复投递)

@@ -90,11 +90,8 @@ def test_gateway_hello_snapshots_latest_status():
         {
             "t": "status",
             "state": "working",
-            "tools": 3,
-            "subagents": 1,
-            "next_hop": "22:42:13",
             "seq": 0,
-            "ts": "",
+            "ts": 0.0,
         }
     )
 
@@ -109,9 +106,6 @@ def test_gateway_hello_snapshots_latest_status():
 
     assert payload["status"] == {
         "state": "working",
-        "tools": 3,
-        "subagents": 1,
-        "next_hop": "22:42:13",
     }
 
     assert "seq" in payload

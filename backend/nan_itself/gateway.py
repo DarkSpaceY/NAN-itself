@@ -321,11 +321,7 @@ class Gateway:
         """bus 历史里最近一条 status 事件的快照；没有则 idle。"""
         for event in reversed(self.bus.history()):
             if event.get("t") == "status":
-                return {
-                    key: event[key]
-                    for key in ("state", "tools", "subagents", "next_hop")
-                    if key in event
-                }
+                return {"state": event.get("state", "idle")}
 
         return {"state": "idle"}
 

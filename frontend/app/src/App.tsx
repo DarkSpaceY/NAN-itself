@@ -49,7 +49,7 @@ export default function App() {
           ))}
         </div>
       </main>
-      <Composer onSend={send} seq={snap.seq} nextHop={snap.status?.next_hop} />
+      <Composer onSend={send} seq={snap.seq} />
     </>
   );
 }

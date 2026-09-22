@@ -36,13 +36,10 @@ export function Pulse({ state }: { state: Status['state'] }) {
 
 export function StatusText({ status }: { status: Status }) {
   if (status.state === 'working') {
-    const bits: string[] = [];
-    if (status.tools) bits.push(`工具 ${status.tools}`);
-    if (status.subagents) bits.push(`子代理 ${status.subagents}`);
-    return <span className="status"><span className="run">工作中</span>{bits.length ? ` · ${bits.join(' · ')}` : ''}</span>;
+    return <span className="status"><span className="run">工作中</span></span>;
   }
   if (status.state === 'error') {
     return <span className="status"><span className="bad">异常</span></span>;
   }
-  return <span className="status"><span className="idle">空闲</span>{status.next_hop ? ` · 下一跳 ${status.next_hop}` : ' · sleep 15s'}</span>;
+  return <span className="status"><span className="idle">空闲</span></span>;
 }

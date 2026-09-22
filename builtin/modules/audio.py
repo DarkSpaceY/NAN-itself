@@ -47,13 +47,21 @@ from typing import Any
 
 import numpy as np
 import onnxruntime as ort
-import sherpa_onnx
 import sounddevice as sd
 import webrtcvad
 import yaml
 from faster_whisper import WhisperModel
 from loguru import logger
 from pydantic import BaseModel
+
+# Guarded per project convention: sherpa_onnx's native library can
+# fail to load on some Linux runners (libonnxruntime.so). Speaker
+# embedding / audio tagging features report unavailable when it is
+# missing; pure DSP helpers keep working.
+try:
+    import sherpa_onnx
+except Exception:  # pragma: no cover - depends on runner native libs
+    sherpa_onnx = None
 
 from nan_itself.utils import paths as _paths
 
@@ -1412,6 +1420,12 @@ class SherpaSpeakerEmbedder:
         if self._extractor is not None:
             return
 
+        if sherpa_onnx is None:
+            raise RuntimeError(
+                "sherpa_onnx is not importable on this machine; "
+                "speaker embedding is unavailable"
+            )
+
         config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=self.model_path,
         )
@@ -1488,6 +1502,12 @@ class SherpaAudioTagger:
     def load(self) -> None:
         if self._tagger is not None:
             return
+
+        if sherpa_onnx is None:
+            raise RuntimeError(
+                "sherpa_onnx is not importable on this machine; "
+                "audio tagging is unavailable"
+            )
 
         config = sherpa_onnx.AudioTaggingConfig(
             model=sherpa_onnx.AudioTaggingModelConfig(

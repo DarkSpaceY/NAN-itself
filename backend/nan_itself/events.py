@@ -9,21 +9,19 @@ timestamp. A bounded history ring supports reconnect snapshots.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import time
 import uuid
 from collections import deque
 from typing import Any
 from loguru import logger
-import re
 
 HISTORY_LIMIT = 500
 
-_SUB_QUEUE_SIZE = 2000
+SUB_QUEUE_SIZE = 2000
 
 
 class EventBus:
-    def __init__(self, history_limit: int = HISTORY_LIMIT, subscriber_queue_size: int = _SUB_QUEUE_SIZE) -> None:
+    def __init__(self, history_limit: int = HISTORY_LIMIT, subscriber_queue_size: int = SUB_QUEUE_SIZE) -> None:
         self._subs: set[asyncio.Queue] = set()
         self._history: deque[dict] = deque(maxlen=history_limit)
         self._subscriber_queue_size = subscriber_queue_size
@@ -71,64 +69,16 @@ class EventBus:
         return list(self._history)
 
 
-def local_ts() -> str:
-    return time.strftime("%H:%M:%S")
-
-
-def local_date_label(ts: float | str | None = None) -> str:
+def local_date_label(ts: float | None = None) -> str:
     """
-    将时间转换为本地日期标签（年/月/日）。
-    支持：
-    - None: 当前时间
-    - int/float: Unix 时间戳
-    - str: 尝试自动解析：
-        - 纯数字字符串 → 转为 float 解析
-        - 完整日期时间 → 解析为 datetime
-        - 纯时间（如 "19:30:00"）→ 视为今天
-        - 其他格式 → 返回当前日期并记录警告
+    Unix epoch seconds -> local date label (年/月/日).
+
+    Timestamps are numeric everywhere on the storage side
+    (EventBus.emit stamps every event); human-readable formats
+    only exist at render edges like this one.
     """
-    t = None  # struct_time
-    
-    if ts is None:
-        t = time.localtime()
-    elif isinstance(ts, (int, float)):
-        t = time.localtime(ts)
-    elif isinstance(ts, str):
-        ts_str = ts.strip()
-        # 1. 尝试解析为纯数字（时间戳字符串）
-        if re.match(r'^[0-9]+(\.[0-9]+)?$', ts_str):
-            try:
-                t = time.localtime(float(ts_str))
-            except Exception:
-                pass
-        # 2. 尝试解析为日期时间（标准格式）
-        if t is None:
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                try:
-                    dt = datetime.strptime(ts_str, fmt)
-                    t = dt.timetuple()
-                    break
-                except ValueError:
-                    continue
-        # 3. 尝试解析为纯时间（如 "19:30:00"）→ 视为今天
-        if t is None:
-            for fmt in ("%H:%M:%S", "%H:%M"):
-                try:
-                    time_obj = datetime.strptime(ts_str, fmt).time()
-                    now = datetime.now()
-                    dt = datetime.combine(now.date(), time_obj)
-                    t = dt.timetuple()
-                    break
-                except ValueError:
-                    continue
-        # 4. 均失败，使用当前时间并记录警告
-        if t is None:
-            logger.warning(f"Unrecognized timestamp format: '{ts}', using current time")
-            t = time.localtime()
-    else:
-        logger.warning(f"Unsupported timestamp type: {type(ts)}, using current time")
-        t = time.localtime()
-    
+    t = time.localtime(ts)
+
     return f"{t.tm_year}年{t.tm_mon}月{t.tm_mday}日"
 
 
@@ -160,20 +110,11 @@ class StreamSink:
 
     # -- status -------------------------------------------------------
 
-    def status_working(
-        self,
-        tools: int = 0,
-        subagents: int = 0,
-    ) -> None:
-        self._emit(
-            "status",
-            state="working",
-            tools=tools,
-            subagents=subagents,
-        )
+    def status_working(self) -> None:
+        self._emit("status", state="working")
 
-    def status_idle(self, next_hop: str | None = None) -> None:
-        self._emit("status", state="idle", next_hop=next_hop)
+    def status_idle(self) -> None:
+        self._emit("status", state="idle")
 
     # -- user echo ----------------------------------------------------
 
@@ -197,10 +138,11 @@ class StreamSink:
         stream_id: str,
         duration: str = "",
     ) -> None:
+        # No custom ts: EventBus.emit stamps every event with a
+        # numeric epoch; the frontend renders it readably.
         self._emit(
             "output_done",
             id=stream_id,
-            ts=local_ts(),
             duration=duration,
         )
 

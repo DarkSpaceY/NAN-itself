@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -95,8 +96,42 @@ def _tts(tmp_path: Path) -> CosyVoiceTTS:
     )
 
 
-def test_tts_load_missing_checkout(tmp_path: Path):
-    with pytest.raises(RuntimeError, match="clone FunAudioLLM"):
+def test_tts_load_auto_clones_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    A missing checkout is fetched, not fatal: a successful clone
+    lets load() advance to the next provisioning check.
+    """
+
+    def fake_run(cmd, **_kwargs):
+        Path(cmd[-1]).mkdir(parents=True)
+
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="CosyVoice2-0.5B"):
+        _tts(tmp_path).load()
+
+    assert (_tts(tmp_path).checkout_dir).is_dir()
+
+
+def test_tts_load_clone_failure_is_loud(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def failing_run(cmd, **_kwargs):
+        raise subprocess.CalledProcessError(
+            128,
+            cmd,
+            stderr="network unreachable",
+        )
+
+    monkeypatch.setattr(subprocess, "run", failing_run)
+
+    with pytest.raises(RuntimeError, match="network unreachable"):
         _tts(tmp_path).load()
 
 

@@ -4,11 +4,9 @@ import { type KeyboardEvent, useRef } from 'react';
 export function Composer({
   onSend,
   seq,
-  nextHop,
 }: {
   onSend: (text: string) => void;
   seq: number;
-  nextHop?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
@@ -34,7 +32,7 @@ export function Composer({
         />
         <kbd>⏎</kbd>
         <span className="cp-status">
-          {seq > 0 ? `seq ${seq}${nextHop ? ` · 下一跳 ${nextHop}` : ''}` : ''}
+          {seq > 0 ? `seq ${seq}` : ''}
         </span>
       </div>
     </div>
