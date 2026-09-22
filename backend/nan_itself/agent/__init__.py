@@ -15,7 +15,7 @@ from .prompts import (
     build_system,
 )
 from .reports import (
-    REPORT_PREFIX,
+    REPORT_TAG,
 )
 from .runtime import (
     AgentContext,
@@ -31,7 +31,7 @@ from .verbs import (
 __all__ = [
     "DEFAULT_BACKOFF",
     "DEFAULT_TURN_GRACE",
-    "REPORT_PREFIX",
+    "REPORT_TAG",
     "AgentContext",
     "AgentResult",
     "AgentRuntime",

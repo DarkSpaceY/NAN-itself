@@ -8,9 +8,10 @@ the provider can cache the prefix.
 Everything per-turn and dynamic — Module ambient context (which
 includes the inbox, i.e. user messages) — is assembled into ONE
 user message, the observation. A subagent's task is appended the
-same way. Nothing dynamic ever enters the system message.
+same way, wrapped in its own <task> tag. Nothing dynamic ever
+enters the system message.
 
-Message-stream labels (like [Subagent Report]) are NOT owned
+Message-stream labels (like <subagent_report>) are NOT owned
 here — they live beside the code that emits those messages.
 """
 
@@ -66,8 +67,8 @@ def build_observation(
     """
     One user message per turn: ambient Module observations
     (including the inbox) first, then finished child reports
-    delivered to this agent, then a subagent's task. The reports
-    carry their own [Subagent Report] labels from reports.py.
+    delivered to this agent (wrapped in <subagent_report> by
+    reports.py), then a subagent's own <task>.
     """
     parts: list[str] = []
 
@@ -89,9 +90,14 @@ def build_observation(
         reports
     )
 
-    if task:
+    task_section = render_section(
+        "task",
+        task or "",
+    )
+
+    if task_section:
         parts.append(
-            task
+            task_section
         )
 
     return Message(

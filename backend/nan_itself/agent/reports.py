@@ -18,7 +18,7 @@ from .model import (
 )
 
 
-REPORT_PREFIX = "[Subagent Report]"
+REPORT_TAG = "subagent_report"
 
 
 def report_record_name(
@@ -57,8 +57,9 @@ async def format_child_report(
         )
 
     return (
-        f"{REPORT_PREFIX}\n"
+        f"<{REPORT_TAG}>\n"
         f"id: {child.id}\n"
         f"task: {child.task}\n"
         + body
+        + f"\n</{REPORT_TAG}>"
     )

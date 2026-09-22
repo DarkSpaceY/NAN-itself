@@ -954,14 +954,15 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
             # ------------------------------------------------------
             # Child execution.
             #
-            # The first user message of a child turn is exactly the
-            # task supplied to spawn().
+            # The first user message of a child turn is the task
+            # supplied to spawn(), wrapped in <task>.
             # ------------------------------------------------------
 
             if (
                 user_inputs
-                and user_inputs[0]
-                == "late child"
+                and "<task>" in user_inputs[0]
+                and "late child" in user_inputs[0]
+                and "<subagent_report>" not in user_inputs[0]
             ):
                 self.child_calls += 1
 
@@ -1002,9 +1003,9 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
 
             # A later CoreAgent turn contains the original new input
             # as the first user message. The parked report is another
-            # user message containing REPORT_PREFIX.
+            # user message containing REPORT_TAG.
             has_report = any(
-                "[Subagent Report]"
+                "<subagent_report>"
                 in (
                     message.content
                     or ""
@@ -1091,7 +1092,7 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
                 )
 
                 assert (
-                    "[Subagent Report]"
+                    "<subagent_report>"
                     in report_text
                 )
 
@@ -1214,7 +1215,7 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
 
         for request in llm.requests:
             has_report = any(
-                "[Subagent Report]"
+                "<subagent_report>"
                 in (
                     message.content
                     or ""

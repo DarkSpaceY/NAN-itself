@@ -470,8 +470,8 @@ def test_park_reports_routes_to_inbox_module():
 
     core._park_reports(
         [
-            "[Subagent Report]\nstatus: completed",
-            "[Subagent Report]\nstatus: failed",
+            "<subagent_report>\nstatus: completed",
+            "<subagent_report>\nstatus: failed",
         ]
     )
 
@@ -484,7 +484,7 @@ def test_park_reports_drops_without_inbox():
     # No inbox module running: must not raise.
     core._park_reports(
         [
-            "[Subagent Report]\nstatus: completed",
+            "<subagent_report>\nstatus: completed",
         ]
     )
 
@@ -609,7 +609,7 @@ class ScriptedLLM:
 
                 return self._finish("parent report")
 
-            if "[Subagent Report]" in observation:
+            if "<subagent_report>" in observation:
                 return self._finish("parent report")
 
             if self.parent_calls > 50:
@@ -702,7 +702,7 @@ def test_child_report_reaches_parent_observation():
     ]
 
     assert any(
-        "[Subagent Report]" in observation
+        "<subagent_report>" in observation
         and "grandchild report" in observation
         for observation in observations
     )
