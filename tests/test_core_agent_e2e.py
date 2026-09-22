@@ -630,7 +630,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
         assert any(
-            '"text": "42"'
+            '"text":"42"'
             in (
                 message.content
                 or ""
