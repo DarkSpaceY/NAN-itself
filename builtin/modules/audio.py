@@ -3104,9 +3104,9 @@ class AudioModule(Module):
     # Module contract
     # ==================================================================
 
-    async def tell(self, turn: Turn) -> None:
+    async def tell(self, record: Turn) -> None:
         with self._state_lock:
-            self._turn_marks.append(turn.started_at)
+            self._turn_marks.append(record.started_at)
 
     async def ask(self, turn: Turn) -> str | None:
         with self._state_lock:

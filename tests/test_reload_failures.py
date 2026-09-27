@@ -101,7 +101,7 @@ def test_module_long_running_candidate_can_commit_without_returning(
 
     old = facade._register_module_class(
         OldModule,
-        source_path=str(source),
+        source=str(source),
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -191,7 +191,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
 
     old = facade._register_module_class(
         OldModule,
-        source_path=str(source),
+        source=str(source),
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -217,7 +217,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
     assert old.instance.stop_calls == 0
 
     assert (
-        facade._module_load_errors.get(
+        facade._workspace_load_errors.get(
             source.resolve()
         )
         is not None
@@ -264,7 +264,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
 
     old = facade._register_module_class(
         OldModule,
-        source_path=str(source),
+        source=str(source),
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -293,7 +293,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
         assert old.instance.stop_calls == 0
 
         assert (
-            facade._module_load_errors.get(
+            facade._workspace_load_errors.get(
                 source.resolve()
             )
             is not None
@@ -345,7 +345,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
 
     old = facade._register_module_class(
         OldModule,
-        source_path=str(source),
+        source=str(source),
         source_fingerprint=(1, 1),
         imported_module_name="old-module",
     )
@@ -371,7 +371,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
     assert old.instance.stop_calls == 0
 
     assert (
-        facade._module_load_errors.get(
+        facade._workspace_load_errors.get(
             source.resolve()
         )
         is not None
@@ -433,14 +433,14 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
 
     old_a = facade._register_module_class(
         AOld,
-        source_path=str(a_source),
+        source=str(a_source),
         source_fingerprint=(1, 1),
         imported_module_name="old-a",
     )
 
     b_record = facade._register_module_class(
         B,
-        source_path=str(b_source),
+        source=str(b_source),
         source_fingerprint=(1, 1),
         imported_module_name="old-b",
     )

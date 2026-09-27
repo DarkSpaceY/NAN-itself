@@ -156,19 +156,19 @@ def test_acyclic_chain_stops_dependents_first(tmp_path):
 
     facade._register_module_class(
         C,
-        source_path=str(tmp_path / "c.py"),
+        source=str(tmp_path / "c.py"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         B,
-        source_path=str(tmp_path / "b.py"),
+        source=str(tmp_path / "b.py"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         A,
-        source_path=str(tmp_path / "a.py"),
+        source=str(tmp_path / "a.py"),
         source_fingerprint=(1, 1),
     )
 

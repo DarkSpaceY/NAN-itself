@@ -112,7 +112,7 @@ async def run_agent_process() -> None:
         # module and is echoed to the UI at once, so a user
         # message never seems to vanish during a long turn.
         # (mid dedup is the gateway's business.)
-        inbox = modules.running_instance("inbox")
+        inbox = modules.get("inbox")
 
         if inbox is None:
             logger.warning(

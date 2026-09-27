@@ -91,7 +91,7 @@ Aligned with the existing interface-face verb triple (`list_tools` /
 interface face: **list enumerates, show inspects, invoke acts.**
 
 - `list_channels` — enumerate every RUNNING module's channels as
-  `module/channel` (bare names only; schemas come from `show_channels`);
+  `module/channel` with its schema;
 - `show_channels` — channel details: description and schema. Channels
   are **write-only**: the payload is never rendered back to the model —
   once fed it belongs to the module;

@@ -60,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -71,26 +72,20 @@ from .model import (
 )
 
 
-def _reject_reload(
+def _reject(
     facade,
-    old: ModuleRecord,
-    imported_name: str,
-    reason: BaseException,
+    old,
+    reason,
 ) -> None:
     """
-    Abort one reload: record why it was rejected and drop the
-    candidate import.
+    Cache a rejection so the sticky-error book reflects it.
 
-    A rejected reload keeps its updated fingerprint, so the
-    rejection must be cached in the table the scanner consults --
-    otherwise the unchanged file would be skipped silently
-    forever.
+    Without this, a rejected reload is skipped silently forever
+    because the fingerprint has already been updated.
     """
-    facade._module_load_errors[
-        old.source_path
+    facade._workspace_load_errors[
+        Path(old.source).resolve()
     ] = reason
-
-    _evict_import(imported_name)
 
 
 def _evict_import(
@@ -110,16 +105,29 @@ def _reload_lock(
     """
     Return the per-Facade, per-Module reload lock.
 
-    The table lives on the Facade, so independent Facade
-    instances never share a lock.
+    The lock is intentionally stored on the Facade so independent
+    Facade instances do not interfere with one another.
+
+    We initialize lazily to avoid requiring another lifecycle field
+    in Facade.__init__.
     """
-    lock = facade._reload_locks.get(
+    locks = getattr(
+        facade,
+        "_reload_locks",
+        None,
+    )
+
+    if locks is None:
+        locks = {}
+        facade._reload_locks = locks
+
+    lock = locks.get(
         module_id
     )
 
     if lock is None:
         lock = asyncio.Lock()
-        facade._reload_locks[module_id] = lock
+        locks[module_id] = lock
 
     return lock
 
@@ -238,11 +246,14 @@ async def _hot_reload_locked(
             old.id,
         )
 
-        _reject_reload(
+        _reject(
             facade,
             old,
-            imported_name,
             exc,
+        )
+
+        _evict_import(
+            imported_name
         )
 
         return
@@ -261,11 +272,14 @@ async def _hot_reload_locked(
             old.id,
         )
 
-        _reject_reload(
+        _reject(
             facade,
             old,
-            imported_name,
             exc,
+        )
+
+        _evict_import(
+            imported_name
         )
 
         return
@@ -279,7 +293,7 @@ async def _hot_reload_locked(
         cls=cls,
         instance=candidate_instance,
         data=old.data,
-        source_path=old.source_path,
+        source=old.source,
         generation=(
             old.generation + 1
         ),
@@ -305,11 +319,14 @@ async def _hot_reload_locked(
             old.id,
         )
 
-        _reject_reload(
+        _reject(
             facade,
             old,
-            imported_name,
             exc,
+        )
+
+        _evict_import(
+            imported_name
         )
 
         return
@@ -332,11 +349,14 @@ async def _hot_reload_locked(
             old.id,
         )
 
-        _reject_reload(
+        _reject(
             facade,
             old,
-            imported_name,
             exc,
+        )
+
+        _evict_import(
+            imported_name
         )
 
         return
@@ -386,15 +406,18 @@ async def _hot_reload_locked(
             old.id,
         )
 
+        _reject(
+            facade,
+            old,
+            reason,
+        )
+
         await _stop_candidate(
             candidate
         )
 
-        _reject_reload(
-            facade,
-            old,
-            imported_name,
-            reason,
+        _evict_import(
+            imported_name
         )
 
         return
@@ -419,15 +442,18 @@ async def _hot_reload_locked(
             candidate.state,
         )
 
+        _reject(
+            facade,
+            old,
+            reason,
+        )
+
         await _stop_candidate(
             candidate
         )
 
-        _reject_reload(
-            facade,
-            old,
-            imported_name,
-            reason,
+        _evict_import(
+            imported_name
         )
 
         return
@@ -443,10 +469,12 @@ async def _hot_reload_locked(
         old.id
     ] = candidate
 
-    facade._rebuild_dependency_graph()
+    facade._rebuild_dependency_graph(
+        bind=False
+    )
 
     try:
-        facade._check_dependency_graph_acyclic()
+        facade._validate_dependency_graph()
 
     except Exception as exc:
         # Roll back pointer and graph metadata.
@@ -454,10 +482,16 @@ async def _hot_reload_locked(
             old.id
         ] = old
 
-        facade._rebuild_dependency_graph()
+        facade._rebuild_dependency_graph(
+            bind=False
+        )
 
         await _stop_candidate(
             candidate
+        )
+
+        _evict_import(
+            imported_name
         )
 
         logger.exception(
@@ -466,10 +500,9 @@ async def _hot_reload_locked(
             old.id,
         )
 
-        _reject_reload(
+        _reject(
             facade,
             old,
-            imported_name,
             exc,
         )
 
@@ -523,12 +556,16 @@ async def _hot_reload_locked(
             None,
         )
 
-    facade._module_fingerprints[
-        old.source_path
+    facade._workspace_fingerprints[
+        Path(
+            old.source
+        ).resolve()
     ] = fingerprint
 
-    facade._module_load_errors.pop(
-        old.source_path,
+    facade._workspace_load_errors.pop(
+        Path(
+            old.source
+        ).resolve(),
         None,
     )
 

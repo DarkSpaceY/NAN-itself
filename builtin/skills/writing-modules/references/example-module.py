@@ -100,7 +100,7 @@ class NotifierModule(Module):
             }
         )
 
-    async def tell(self, turn: Turn) -> None:
+    async def tell(self, record: Turn) -> None:
         # Runs in its own task after each completed agent execution.
         # Long *awaited* work is fine (thread results, async APIs), but
         # a synchronous CPU-heavy or blocking call would stall the one

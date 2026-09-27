@@ -61,7 +61,7 @@ class InboxModule(Module):
 
     async def tell(
         self,
-        turn,
+        record,
     ) -> None:
         pass
 
