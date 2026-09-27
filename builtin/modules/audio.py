@@ -2143,7 +2143,10 @@ class WhisperWorkerProxy:
 
             except Exception:
 
-                pass
+                logger.exception(
+                    "Whisper worker failed to "
+                    "terminate; process may linger"
+                )
 
         self._process = None
 

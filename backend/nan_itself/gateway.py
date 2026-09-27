@@ -140,7 +140,10 @@ class Gateway:
             try:
                 await ws.close()
             except Exception:
-                pass
+                logger.exception(
+                    "WebSocket close failed "
+                    "during gateway shutdown"
+                )
 
         logger.info("Gateway closed")
 

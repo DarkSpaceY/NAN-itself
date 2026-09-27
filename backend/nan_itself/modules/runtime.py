@@ -1418,7 +1418,10 @@ class Facade:
                 pass
 
             except Exception:
-                pass
+                logger.exception(
+                    f"Module task crashed "
+                    f"during stop: {record.id}"
+                )
 
         record.task = None
 

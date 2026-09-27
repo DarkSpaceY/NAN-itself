@@ -152,7 +152,10 @@ async def _stop_candidate(
             pass
 
         except Exception:
-            pass
+            logger.exception(
+                f"Module task crashed during "
+                f"hot-reload stop: {candidate.id}"
+            )
 
 
 async def _candidate_failed_early(
@@ -538,7 +541,10 @@ async def _hot_reload_locked(
             pass
 
         except Exception:
-            pass
+            logger.exception(
+                f"Old module generation crashed "
+                f"during hot-reload swap: {old.id}"
+            )
 
     if (
         old.imported_module_name

@@ -972,7 +972,9 @@ class Agent:
             pass
 
         except Exception:
-            pass
+            logger.exception(
+                "Task crashed while being reaped"
+            )
 
     @staticmethod
     def _history_chars(
