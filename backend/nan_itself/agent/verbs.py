@@ -754,7 +754,7 @@ class ShowChannelsVerb:
             )
 
         try:
-            return agent.modules.show_module_channel(
+            return agent.modules.show_module_channels(
                 module_id,
                 channel,
             )

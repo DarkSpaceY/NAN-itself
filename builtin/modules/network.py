@@ -769,7 +769,7 @@ class NetworkModule(Module):
 
             await asyncio.sleep(self.poll_interval)
 
-    async def tell(self, record) -> None:
+    async def tell(self, turn) -> None:
         pass
 
     # ------------------------------------------------------------------

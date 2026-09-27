@@ -71,11 +71,9 @@ class Facade:
     # Turn delivery
     # ------------------------------------------------------------------
 
-    _DELIVERY_TASKS: set = set()
-
     def deliver_turn(
         self,
-        record,
+        turn: Turn,
     ) -> None:
         """
         Broadcast one completed Turn to every Module.
@@ -90,17 +88,28 @@ class Facade:
         for module_record in list(
             self.modules.values()
         ):
+            # Only a RUNNING module receives turns: ask() filters
+            # the same way, and a module that has not finished
+            # starting (or is being replaced / torn down) must not
+            # crash from a delivery aimed at a service that was
+            # never fully up.
+            if (
+                module_record.state
+                is not ModuleState.RUNNING
+            ):
+                continue
+
             task = asyncio.create_task(
                 self._tell_module(
                     module_record,
-                    record,
+                    turn,
                 )
             )
 
-            self._DELIVERY_TASKS.add(task)
+            self._delivery_tasks.add(task)
 
             task.add_done_callback(
-                self._DELIVERY_TASKS.discard
+                self._delivery_tasks.discard
             )
 
     async def _tell_module(
@@ -208,16 +217,33 @@ class Facade:
             set[str],
         ] = {}
 
-        # workspace file -> latest fingerprint
-        self._workspace_fingerprints: dict[
+        # module file -> latest fingerprint
+        self._module_fingerprints: dict[
             Path,
             tuple[int, int],
         ] = {}
 
-        # workspace file -> last load error for fingerprint
-        self._workspace_load_errors: dict[
+        # module file -> last load error for fingerprint
+        self._module_load_errors: dict[
             Path,
             BaseException,
+        ] = {}
+
+        # (module_id, missing dependency_id) pairs already warned
+        # about, so an unresolved `requires` is reported once per
+        # change instead of once per scan.
+        self._missing_dependencies: frozenset[
+            tuple[str, str]
+        ] = frozenset()
+
+        # In-flight tell() tasks, kept referenced until they finish.
+        self._delivery_tasks: set[
+            asyncio.Task[None]
+        ] = set()
+
+        self._reload_locks: dict[
+            str,
+            asyncio.Lock,
         ] = {}
 
         self._supervisor_task: (
@@ -244,13 +270,9 @@ class Facade:
         # hot-reload discovery path.
         await self._scan_modules()
 
-        # Graph construction is pure bookkeeping.
-        # It must not re-bind already existing instances.
-        self._rebuild_dependency_graph(
-            bind=False
-        )
+        self._rebuild_dependency_graph()
 
-        self._validate_dependency_graph()
+        self._check_dependency_graph_acyclic()
 
         self._supervisor_task = (
             asyncio.create_task(
@@ -302,7 +324,7 @@ class Facade:
     # Agent / turn snapshots
     # ==================================================================
 
-    def get(
+    def running_instance(
         self,
         module_id: str,
     ):
@@ -461,13 +483,14 @@ class Facade:
 
         return "\n".join(lines)
 
-    def show_module_channel(
+    def show_module_channels(
         self,
         module_id: str,
         channel: str | None = None,
     ) -> str:
         """
-        Show channel details: description and schema.
+        Show channel details: description and schema, for one
+        channel or -- when channel is None -- all of them.
         """
         record = self.modules.get(module_id)
 
@@ -612,60 +635,6 @@ class Facade:
             self.dataspace_dir,
         )
 
-    def _private_state_path(
-        self,
-        module_id: str,
-    ) -> Path:
-        return _persistence.private_state_path(
-            self.private_dir,
-            module_id,
-        )
-
-    def _dataspace_path(
-        self,
-        module_id: str,
-    ) -> Path:
-        return _persistence.dataspace_path(
-            self.dataspace_dir,
-            module_id,
-        )
-
-    def _read_json_file(
-        self,
-        path: Path,
-    ) -> Any:
-        return _persistence.read_json_file(
-            path
-        )
-
-    def _atomic_write_json(
-        self,
-        path: Path,
-        value: Any,
-    ) -> None:
-        _persistence.atomic_write_json(
-            path,
-            value,
-        )
-
-    def _load_dataspace_state(
-        self,
-        record: ModuleRecord,
-    ) -> bool:
-        return _persistence.load_dataspace_state(
-            record,
-            self.dataspace_dir,
-        )
-
-    def _load_private_state(
-        self,
-        record: ModuleRecord,
-    ) -> bool:
-        return _persistence.load_private_state(
-            record,
-            self.private_dir,
-        )
-
     def _restore_record_state(
         self,
         record: ModuleRecord,
@@ -741,11 +710,9 @@ class Facade:
         }
 
         known_files = {
-            Path(record.source).resolve()
+            record.source_path
             for record in self.modules.values()
-            if Path(
-                record.source
-            ).resolve().is_relative_to(
+            if record.source_path.is_relative_to(
                 root
             )
         }
@@ -761,12 +728,8 @@ class Facade:
                 (
                     item
                     for item in self.modules.values()
-                    if (
-                        Path(
-                            item.source
-                        ).resolve()
-                        == removed
-                    )
+                    if item.source_path
+                    == removed
                 ),
                 None,
             )
@@ -793,13 +756,13 @@ class Facade:
             )
 
             previous = (
-                self._workspace_fingerprints.get(
+                self._module_fingerprints.get(
                     path
                 )
             )
 
             previous_error = (
-                self._workspace_load_errors.get(
+                self._module_load_errors.get(
                     path
                 )
             )
@@ -823,11 +786,11 @@ class Facade:
             ):
                 continue
 
-            self._workspace_fingerprints[
+            self._module_fingerprints[
                 path
             ] = fingerprint
 
-            self._workspace_load_errors.pop(
+            self._module_load_errors.pop(
                 path,
                 None,
             )
@@ -839,7 +802,7 @@ class Facade:
                 )
 
             except Exception as exc:
-                self._workspace_load_errors[
+                self._module_load_errors[
                     path
                 ] = exc
 
@@ -879,18 +842,15 @@ class Facade:
             cls,
             imported_name,
             _,
-        ) = self._import_module_file(
+        ) = _loading.import_module_class(
             path
         )
 
-        self._validate_module_class(
-            cls
-        )
-
         if old is None:
+            # Registers, validates and binds the new instance.
             self._register_module_class(
                 cls,
-                source=str(path),
+                source_path=path,
                 source_fingerprint=(
                     fingerprint
                 ),
@@ -899,19 +859,18 @@ class Facade:
                 ),
             )
 
-            # The new instance was already bound by
-            # _register_module_class().
-            #
-            # Only rebuild pure graph bookkeeping here.
-            self._rebuild_dependency_graph(
-                bind=False
-            )
+            self._rebuild_dependency_graph()
 
-            self._validate_dependency_graph()
+            self._check_dependency_graph_acyclic()
 
             self._wake.set()
 
             return
+
+        # A reload replaces a class that is already in service, so
+        # it is validated here; _register_module_class() does not
+        # run on this path.
+        _loading.validate_module_class(cls)
 
         if old.id != cls.id:
             raise RuntimeError(
@@ -928,41 +887,11 @@ class Facade:
             fingerprint=fingerprint,
         )
 
-    def _import_module_file(
-        self,
-        path: Path,
-    ) -> tuple[
-        type[Module],
-        str,
-        Any,
-    ]:
-        (
-            cls,
-            imported_name,
-            module,
-        ) = _loading.import_module_class(
-            path
-        )
-
-        return (
-            cls,
-            imported_name,
-            module,
-        )
-
-    def _validate_module_class(
-        self,
-        cls: type[Module],
-    ) -> None:
-        _loading.validate_module_class(
-            cls
-        )
-
     def _register_module_class(
         self,
         cls: type[Module],
         *,
-        source: str,
+        source_path: Path,
         source_fingerprint: (
             tuple[int, int]
             | None
@@ -972,9 +901,7 @@ class Facade:
             | None
         ) = None,
     ) -> ModuleRecord:
-        self._validate_module_class(
-            cls
-        )
+        _loading.validate_module_class(cls)
 
         module_id = cls.id
 
@@ -986,8 +913,8 @@ class Facade:
             raise DuplicateModuleError(
                 f"duplicate Module id "
                 f"{module_id!r}: "
-                f"{existing.source} "
-                f"and {source}"
+                f"{existing.source_path} "
+                f"and {source_path}"
             )
 
         data = self.dataspaces.get(
@@ -1012,7 +939,7 @@ class Facade:
             cls=cls,
             instance=instance,
             data=data,
-            source=source,
+            source_path=source_path,
             generation=0,
             source_fingerprint=(
                 source_fingerprint
@@ -1022,7 +949,7 @@ class Facade:
             ),
         )
 
-        # Only the new instance is bound.
+        # Binding is per-record: never re-bind the other Modules.
         self._bind_instance(
             record
         )
@@ -1036,10 +963,8 @@ class Facade:
         )
 
         if source_fingerprint is not None:
-            self._workspace_fingerprints[
-                Path(
-                    source
-                ).resolve()
+            self._module_fingerprints[
+                record.source_path
             ] = source_fingerprint
 
         return record
@@ -1060,12 +985,7 @@ class Facade:
         path = path.resolve()
 
         for record in self.modules.values():
-            if (
-                Path(
-                    record.source
-                ).resolve()
-                == path
-            ):
+            if record.source_path == path:
                 return record
 
         return None
@@ -1076,17 +996,13 @@ class Facade:
 
     def _rebuild_dependency_graph(
         self,
-        *,
-        bind: bool = False,
     ) -> None:
         """
-        Rebuild dependency metadata.
+        Rebuild dependency metadata and report unresolved requires.
 
-        By default this is PURE graph bookkeeping.
-
-        `bind=True` exists only for explicit bulk-rebinding callers.
-        Normal reconciliation, validation, removal and hot reload must
-        leave existing Module instance bindings untouched.
+        This is PURE graph bookkeeping: it never re-binds Module
+        instances. A Module is bound when its instance is created
+        (first generation or hot-reload replacement).
         """
         (
             self.dependencies,
@@ -1095,15 +1011,49 @@ class Facade:
             self.modules
         )
 
-        if bind:
-            for record in self.modules.values():
-                self._bind_instance(
-                    record
-                )
+        self._report_missing_dependencies()
 
-    def _validate_dependency_graph(
+    def _report_missing_dependencies(
         self,
     ) -> None:
+        """
+        Warn once per changed set of unresolved `requires` ids.
+
+        A missing dependency is a configuration error, but this
+        runs on every scan: only a change is worth a log line.
+        """
+        missing = frozenset(
+            (
+                module_id,
+                dependency_id,
+            )
+            for module_id, required_ids
+            in self.dependencies.items()
+            for dependency_id in required_ids
+            if dependency_id
+            not in self.modules
+        )
+
+        if missing == self._missing_dependencies:
+            return
+
+        self._missing_dependencies = missing
+
+        for (
+            module_id,
+            dependency_id,
+        ) in sorted(missing):
+            logger.warning(
+                f"Module {module_id} requires "
+                f"missing Module {dependency_id}"
+            )
+
+    def _check_dependency_graph_acyclic(
+        self,
+    ) -> None:
+        """
+        Raise RuntimeError when the graph contains a cycle.
+        """
         self._topological_order()
 
     def _topological_order(
@@ -1131,12 +1081,9 @@ class Facade:
                 try:
                     await self._scan_modules()
 
-                    # Pure graph reconstruction.
-                    self._rebuild_dependency_graph(
-                        bind=False
-                    )
+                    self._rebuild_dependency_graph()
 
-                    self._validate_dependency_graph()
+                    self._check_dependency_graph_acyclic()
 
                     await self._reconcile()
 
@@ -1194,10 +1141,9 @@ class Facade:
             if record is None:
                 continue
 
-            if record.state in {
-                ModuleState.STARTING,
-                ModuleState.RUNNING,
-                ModuleState.STOPPING,
+            if record.state not in {
+                ModuleState.NEW,
+                ModuleState.DOWN,
             }:
                 continue
 
@@ -1247,7 +1193,51 @@ class Facade:
             ),
         )
 
+        # A task cancelled before its first step never runs its
+        # body, so _run_module could not set the event itself;
+        # this callback guarantees the wait below terminates
+        # whatever happened to the task (done callbacks always
+        # run). Double-set on the success path is harmless.
+        record.task.add_done_callback(
+            lambda _task: started.set()
+        )
+
         await started.wait()
+
+    def _mark_down(
+        self,
+        record: ModuleRecord,
+        error: BaseException | None,
+    ) -> None:
+        """
+        Move one record to DOWN with the standard retry backoff,
+        then wake the supervisor.
+
+        Callers log afterwards: the call sites differ in severity
+        and message.
+        """
+        record.error = error
+
+        record.state = (
+            ModuleState.DOWN
+        )
+
+        record.retry_at = (
+            time.monotonic()
+            + self.retry_interval
+        )
+
+        self._wake.set()
+
+    @staticmethod
+    def _log_crash(
+        record: ModuleRecord,
+    ) -> None:
+        logger.exception(
+            f"Module crashed: "
+            f"{record.id}"
+            f"[generation={record.generation}]"
+        )
 
     def _crash_module(
         self,
@@ -1263,25 +1253,12 @@ class Facade:
         cancelled; the supervisor restarts it after backoff.
         The failure never propagates to the caller.
 
-        Fields are set BEFORE the task is cancelled, so the
-        task's own cleanup cannot overwrite them.
+        The record is marked DOWN BEFORE the task is cancelled,
+        so the task's own cleanup cannot overwrite it.
         """
-        record.error = exc
+        self._mark_down(record, exc)
 
-        record.state = (
-            ModuleState.DOWN
-        )
-
-        record.retry_at = (
-            time.monotonic()
-            + self.retry_interval
-        )
-
-        logger.exception(
-            f"Module crashed: "
-            f"{record.id}"
-            f"[generation={record.generation}]"
-        )
+        self._log_crash(record)
 
         task = record.task
 
@@ -1291,19 +1268,16 @@ class Facade:
         ):
             task.cancel()
 
-        self._wake.set()
-
     async def _run_module(
         self,
         record: ModuleRecord,
-        started: asyncio.Event | None = None,
+        started: asyncio.Event,
     ) -> None:
         record.state = (
             ModuleState.RUNNING
         )
 
-        if started is not None:
-            started.set()
+        started.set()
 
         try:
             await record.instance.start()
@@ -1311,69 +1285,31 @@ class Facade:
         except asyncio.CancelledError:
             if not self._stopping:
                 # A crash already recorded by _crash_module()
-                # must survive this cleanup: only a plain
-                # unexpected cancel (no recorded error) writes
-                # the default fields.
+                # must survive this cleanup: only an unexpected
+                # cancel with no recorded error is reported here.
                 if record.error is None:
-                    record.state = (
-                        ModuleState.DOWN
-                    )
-
-                    record.error = None
-
-                    record.retry_at = (
-                        time.monotonic()
-                        + self.retry_interval
-                    )
+                    self._mark_down(record, None)
 
                     logger.warning(
                         f"Module cancelled unexpectedly: "
                         f"{record.id}"
                     )
 
-                    self._wake.set()
-
             raise
 
         except Exception as exc:
-            record.state = (
-                ModuleState.DOWN
-            )
+            self._mark_down(record, exc)
 
-            record.error = exc
-
-            record.retry_at = (
-                time.monotonic()
-                + self.retry_interval
-            )
-
-            logger.exception(
-                f"Module crashed: "
-                f"{record.id}"
-                f"[generation={record.generation}]"
-            )
-
-            self._wake.set()
+            self._log_crash(record)
 
         else:
-            record.state = (
-                ModuleState.DOWN
-            )
-
-            record.error = None
-
-            record.retry_at = (
-                time.monotonic()
-                + self.retry_interval
-            )
+            self._mark_down(record, None)
 
             logger.info(
                 f"Module exited normally: "
                 f"{record.id}"
                 f"[generation={record.generation}]"
             )
-
-            self._wake.set()
 
         finally:
             current_task = (
@@ -1468,27 +1404,19 @@ class Facade:
                 None,
             )
 
-        source_path = Path(
-            record.source
-        ).resolve()
-
-        self._workspace_fingerprints.pop(
-            source_path,
+        self._module_fingerprints.pop(
+            record.source_path,
             None,
         )
 
-        self._workspace_load_errors.pop(
-            source_path,
+        self._module_load_errors.pop(
+            record.source_path,
             None,
         )
 
         # DataSpace intentionally survives
         # Module removal.
 
-        # Pure dependency graph update.
-        # Do NOT re-bind remaining Modules.
-        self._rebuild_dependency_graph(
-            bind=False
-        )
+        self._rebuild_dependency_graph()
 
         self._wake.set()

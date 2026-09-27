@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
 
@@ -329,7 +330,7 @@ class Module:
 
     async def tell(
         self,
-        record: Turn,
+        turn: Turn,
     ) -> None:
         """
         The engine tells the module a turn completed.
@@ -404,12 +405,20 @@ class ModuleState(Enum):
 
 @dataclass
 class ModuleRecord:
+    """
+    Facade bookkeeping for one loaded Module.
+
+    source_path is the resolved file the Module was loaded from;
+    discovery and hot reload key their fingerprint/error tables on
+    it.
+    """
+
     id: str
     cls: type[Module]
     instance: Module
     data: DataSpace
 
-    source: str
+    source_path: Path
 
     generation: int = 0
 
@@ -424,6 +433,12 @@ class ModuleRecord:
     source_fingerprint: tuple[int, int] | None = None
 
     imported_module_name: str | None = None
+
+    def __post_init__(self) -> None:
+        # Discovery identifies a Module file by its resolved path.
+        self.source_path = Path(
+            self.source_path
+        ).resolve()
 
 
 class DuplicateModuleError(RuntimeError):

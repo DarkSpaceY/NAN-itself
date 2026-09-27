@@ -50,7 +50,7 @@ def _install_module(
 
     record = facade._register_module_class(
         module_cls,
-        source=str(source),
+        source_path=str(source),
         source_fingerprint=(
             1,
             1,
@@ -149,9 +149,7 @@ def test_concurrent_reload_of_independent_modules_isolated(
         b_source,
     )
 
-    facade._rebuild_dependency_graph(
-        bind=False
-    )
+    facade._rebuild_dependency_graph()
 
     bind_calls = []
 

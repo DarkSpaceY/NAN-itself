@@ -7,18 +7,17 @@ DataSpaceReader handles. Pure functions over plain maps.
 
 from __future__ import annotations
 
-from loguru import logger
-
-from typing import Any, Mapping
+from typing import Mapping
 
 from .model import (
+    DataSpace,
     DataSpaceReader,
+    ModuleRecord,
 )
 
 
-
 def build_dependency_maps(
-    modules: Mapping[str, Any],
+    modules: Mapping[str, ModuleRecord],
 ) -> tuple[
     dict[str, set[str]],
     dict[str, set[str]],
@@ -55,8 +54,8 @@ def build_dependency_maps(
 
 
 def bind_instance(
-    record,
-    dataspaces: Mapping[str, "DataSpace"],
+    record: ModuleRecord,
+    dataspaces: Mapping[str, DataSpace],
 ) -> None:
     record.instance.data = record.data
 
@@ -87,7 +86,7 @@ def bind_instance(
 
 
 def topological_order(
-    modules: Mapping[str, Any],
+    modules: Mapping[str, ModuleRecord],
     dependencies: Mapping[str, set[str]],
     dependents: Mapping[str, set[str]],
 ) -> list[str]:
@@ -96,6 +95,8 @@ def topological_order(
         for module_id in modules
     }
 
+    # An unresolved dependency id contributes no edge: a missing
+    # Module cannot be ordered, and Facade reports it separately.
     for (
         module_id,
         required_ids,
@@ -108,8 +109,6 @@ def topological_order(
                 indegree[
                     module_id
                 ] += 1
-            else:
-                logger.warning(f'''Module {module_id} requires missing Module {dependency_id}''')
 
     queue = sorted(
         module_id

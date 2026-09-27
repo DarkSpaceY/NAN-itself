@@ -246,7 +246,7 @@ async def _tell_crash_deliver_turn(tmp_path: Path) -> None:
 
     facade.deliver_turn(_turn())
 
-    pending = set(Facade._DELIVERY_TASKS)
+    pending = set(facade._delivery_tasks)
 
     await asyncio.gather(*pending)
 

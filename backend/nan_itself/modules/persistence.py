@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import json
 import os
-from loguru import logger
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
+
+from .model import ModuleRecord
 
 
 
@@ -107,7 +110,7 @@ def atomic_write_json(
 
 
 def load_dataspace_state(
-    record,
+    record: ModuleRecord,
     dataspace_dir: Path,
 ) -> bool:
     path = dataspace_path(
@@ -129,18 +132,25 @@ def load_dataspace_state(
 
         record.data.publish(value)
 
-        logger.info(f'''Restored DataSpace: {record.id} revision={record.data.revision}''')
+        logger.info(
+            f"Restored DataSpace: "
+            f"{record.id} "
+            f"revision={record.data.revision}"
+        )
 
         return True
 
     except Exception:
-        logger.exception(f'''Failed to restore DataSpace for Module {record.id}''')
+        logger.exception(
+            f"Failed to restore DataSpace for "
+            f"Module {record.id}"
+        )
 
         return False
 
 
 def load_private_state(
-    record,
+    record: ModuleRecord,
     private_dir: Path,
 ) -> bool:
     path = private_state_path(
@@ -156,18 +166,24 @@ def load_private_state(
 
         record.instance.restore_state(state)
 
-        logger.info(f'''Restored private state: {record.id}''')
+        logger.info(
+            f"Restored private state: "
+            f"{record.id}"
+        )
 
         return True
 
     except Exception:
-        logger.exception(f'''Failed to restore private state for Module {record.id}''')
+        logger.exception(
+            f"Failed to restore private state for "
+            f"Module {record.id}"
+        )
 
         return False
 
 
 def restore_record_state(
-    record,
+    record: ModuleRecord,
     *,
     private_dir: Path,
     dataspace_dir: Path,
@@ -178,7 +194,7 @@ def restore_record_state(
 
 
 def save_record_state(
-    record,
+    record: ModuleRecord,
     *,
     private_dir: Path,
     dataspace_dir: Path,

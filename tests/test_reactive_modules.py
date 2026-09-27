@@ -183,7 +183,7 @@ def test_facade_routing_failure_modes(tmp_path):
     )
 
     assert "Unknown module" in (
-        facade.show_module_channel("ghost")
+        facade.show_module_channels("ghost")
     )
 
     # A channel-free Module exposes no channels.
@@ -200,7 +200,7 @@ def test_facade_routing_failure_modes(tmp_path):
         cls=Module,
         instance=plain,
         data=DataSpace("plain"),
-        source="memory",
+        source_path="memory",
     )
 
     record.state = ModuleState.RUNNING
@@ -214,7 +214,7 @@ def test_facade_routing_failure_modes(tmp_path):
     )
 
     assert "exposes no channels" in (
-        facade.show_module_channel("plain")
+        facade.show_module_channels("plain")
     )
 
 
@@ -285,7 +285,7 @@ async def _full_chain(tmp_path):
     assert "depth" not in listing
 
     # show: description + schema only.
-    detail = facade.show_module_channel(
+    detail = facade.show_module_channels(
         "probe", "goal"
     )
 

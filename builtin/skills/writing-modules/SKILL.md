@@ -49,7 +49,7 @@ class MyModule(Module):
             self.data.publish({...})            # uplink state
             await asyncio.sleep(self.poll_interval)
 
-    async def tell(self, record: Turn) -> None:      # completed turn hook
+    async def tell(self, turn: Turn) -> None:          # completed turn hook
         ...
 
     async def ask(self, turn: Turn) -> str | None:   # cheap projection

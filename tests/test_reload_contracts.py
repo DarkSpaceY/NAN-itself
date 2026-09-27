@@ -713,7 +713,7 @@ def test_module_reload_does_not_rebind_unrelated_module(
     old_a = (
         facade._register_module_class(
             AOld,
-            source=str(a_source),
+            source_path=str(a_source),
             source_fingerprint=(
                 1,
                 1,
@@ -725,7 +725,7 @@ def test_module_reload_does_not_rebind_unrelated_module(
     b_record = (
         facade._register_module_class(
             B,
-            source=str(b_source),
+            source_path=str(b_source),
             source_fingerprint=(
                 1,
                 1,
@@ -871,7 +871,7 @@ def test_module_reload_does_not_rebind_unrelated_module(
     # Strongest isolation assertion.
     #
     # hot_reload() must bind ONLY the candidate:
-    # _rebuild_dependency_graph(bind=False) must not re-bind other
+    # _rebuild_dependency_graph() must not re-bind other
     # modules, so "b" never appears in bind_calls.
     # ------------------------------------------------------------------
 

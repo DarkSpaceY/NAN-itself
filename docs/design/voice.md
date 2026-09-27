@@ -18,7 +18,7 @@ fixes the v1 contract.
 - **STT: faster-whisper** (already in the stack).
 - **Mic ownership: audio module publishes, voice consumes.** The audio
   module keeps the microphone, publishes a rolling PCM ring as facts;
-  voice is a downstream consumer (`requires = ["audio"]`). STT is
+  voice is a downstream consumer (`requires = ("audio",)`). STT is
   removed from the audio module.
 - **v1 scope (all module-internal, zero framework changes):**
   task → SLM → sentence-streamed TTS playback, barge-in, and the SLM
@@ -33,7 +33,7 @@ audio module (owns mic)
   capture loop ── publishes ──▶ PCM ring snapshot (facts, DataSpace)
                                + ambient features (existing behavior)
 
-voice module (requires = ["audio"])            [down: channel slot]
+voice module (requires = ("audio",))            [down: channel slot]
   dialogue loop                                ┌──────────────────┐
     PCM ring ─▶ VAD gate ─▶ endpointing ─▶ STT │ say (depth N)    │
                   │                (0.5s)  ─▶  └──────────────────┘
