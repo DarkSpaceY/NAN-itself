@@ -73,12 +73,6 @@ class DataSpace:
         """
         return deepcopy(self._value)
 
-    def dump(self) -> dict[str, Any]:
-        """
-        Alias used by Facade persistence.
-        """
-        return self.snapshot()
-
 
 class DataSpaceReader:
     """
@@ -276,9 +270,20 @@ class Module:
 
         1. ask() must only read state that was already computed
            earlier; it must not run heavy work or call the LLM.
-        2. Heavy work belongs in start()'s background loop and in
-           tell(); each of those runs in its own task.
-        3. A slow ask() delays every agent's execution start.
+           A slow ask() delays every agent's execution start.
+        2. tell() runs in its own task, so it may *await* long
+           operations (thread results, async APIs). A synchronous
+           CPU-heavy or blocking call still stalls the one shared
+           event loop and freezes every module and agent; such
+           work belongs on threads (start()'s daemon threads, or
+           asyncio.to_thread for short known-blocking calls).
+        3. DataSpace carries small JSON facts only: publish() and
+           snapshot() deepcopy the full state on the event loop
+           every round, so frame data or large documents must
+           never go through it.
+        4. Provisioning-length work (model weight loading, device
+           probing) must not run synchronously inside a coroutine;
+           do it on start()'s background threads before the loop.
     """
 
     id: ClassVar[str]
@@ -330,8 +335,14 @@ class Module:
         The engine tells the module a turn completed.
 
         Runs in its own task, isolated from other Modules and
-        from the agents themselves; heavy work is allowed. Keep
-        ask() a cheap projection of the results.
+        from the agents themselves: long *awaited* work is fine
+        (thread results, async APIs), but a synchronous CPU-heavy
+        or blocking call would stall the one shared event loop
+        and freeze every module and agent -- offload such work
+        to a thread (asyncio.to_thread or start()'s daemon
+        threads). Any failure crashes the module: DOWN +
+        supervised restart; it never propagates to the agents.
+        Keep ask() a cheap projection of the results.
         """
 
     async def ask(
@@ -341,7 +352,9 @@ class Module:
         """
         The engine asks for this turn's ambient context.
 
-        Cheap projection only; failure is logged, not fatal.
+        Cheap projection only. Any failure crashes the module:
+        DOWN + supervised restart. The asking agent is never
+        affected -- it just sees no contribution this turn.
         """
         return None
 
@@ -356,7 +369,9 @@ class Module:
         Returns 'written' or 'rejected'; sync by design. The
         runtime validates the channel and its schema before this
         call, so the default accepts the handed-down payload;
-        override feed only to store or act on it.
+        override feed only to store or act on it. An exception
+        out of feed() crashes the module: DOWN + supervised
+        restart; the model only sees a failure string.
         """
         return "written"
 

@@ -83,13 +83,16 @@ class Facade:
         Each handler runs in its own task: a slow or failing
         module can never delay its peers, and never delays the
         agents either (this call returns immediately).
+
+        A failing tell() crashes its module (DOWN + supervised
+        restart); the failure never propagates to the agents.
         """
         for module_record in list(
             self.modules.values()
         ):
             task = asyncio.create_task(
-                self._safe_tell(
-                    module_record.instance,
+                self._tell_module(
+                    module_record,
                     record,
                 )
             )
@@ -100,23 +103,23 @@ class Facade:
                 self._DELIVERY_TASKS.discard
             )
 
-    @staticmethod
-    async def _safe_tell(
-        instance,
-        record,
+    async def _tell_module(
+        self,
+        module_record,
+        turn,
     ) -> None:
         try:
-            await instance.tell(
-                record
+            await module_record.instance.tell(
+                turn
             )
 
         except asyncio.CancelledError:
             raise
 
-        except Exception:
-            logger.exception(
-                f"Module tell failed: "
-                f"{getattr(instance, 'id', '?')}"
+        except Exception as exc:
+            self._crash_module(
+                module_record,
+                exc,
             )
 
     def __init__(
@@ -281,7 +284,7 @@ class Facade:
         records = self.modules.copy()
 
         for module_id in reversed(
-            self._safe_topological_order()
+            self._topological_order()
         ):
             record = records.get(
                 module_id
@@ -386,11 +389,13 @@ class Facade:
             except asyncio.CancelledError:
                 raise
 
-            except Exception:
-                logger.exception(
-                    f"Module ask failed: "
-                    f"{record.id}"
-                    f"[generation={record.generation}]",
+            except Exception as exc:
+                # Let-it-crash: the module goes DOWN and is
+                # restarted by the supervisor; this turn just
+                # sees no ambient contribution from it.
+                self._crash_module(
+                    record,
+                    exc,
                 )
 
                 result, failed = (
@@ -529,7 +534,9 @@ class Facade:
 
         Returns 'written' / 'rejected' or an error string.
         Validation failures are rejected at the boundary; the
-        module only ever receives well-formed payloads.
+        module only ever receives well-formed payloads. An
+        exception out of feed() crashes the module (DOWN +
+        supervised restart) and comes back as a failure string.
         """
         record = self.modules.get(module_id)
 
@@ -573,10 +580,25 @@ class Facade:
                 f"{error}"
             )
 
-        return record.instance.feed(
-            channel,
-            deepcopy(validated),
-        )
+        try:
+            return record.instance.feed(
+                channel,
+                deepcopy(validated),
+            )
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception as exc:
+            # Let-it-crash: the module is restarted by the
+            # supervisor; the model only sees a failure string.
+            self._crash_module(record, exc)
+
+            return (
+                f"Module '{module_id}' crashed "
+                "while accepting the write; "
+                "it will be restarted."
+            )
 
     # ==================================================================
     # Persistence
@@ -1093,15 +1115,6 @@ class Facade:
             self.dependents,
         )
 
-    def _safe_topological_order(
-        self,
-    ) -> list[str]:
-        return _deps.safe_topological_order(
-            self.modules,
-            self.dependencies,
-            self.dependents,
-        )
-
     # ==================================================================
     # Supervisor
     # ==================================================================
@@ -1236,6 +1249,50 @@ class Facade:
 
         await started.wait()
 
+    def _crash_module(
+        self,
+        record: ModuleRecord,
+        exc: BaseException,
+    ) -> None:
+        """
+        Let-it-crash: treat one ask/tell/feed failure exactly
+        like a start() crash.
+
+        The module goes DOWN with the recorded error and its
+        live start task (any realtime service it runs) is
+        cancelled; the supervisor restarts it after backoff.
+        The failure never propagates to the caller.
+
+        Fields are set BEFORE the task is cancelled, so the
+        task's own cleanup cannot overwrite them.
+        """
+        record.error = exc
+
+        record.state = (
+            ModuleState.DOWN
+        )
+
+        record.retry_at = (
+            time.monotonic()
+            + self.retry_interval
+        )
+
+        logger.exception(
+            f"Module crashed: "
+            f"{record.id}"
+            f"[generation={record.generation}]"
+        )
+
+        task = record.task
+
+        if (
+            task is not None
+            and not task.done()
+        ):
+            task.cancel()
+
+        self._wake.set()
+
     async def _run_module(
         self,
         record: ModuleRecord,
@@ -1253,23 +1310,28 @@ class Facade:
 
         except asyncio.CancelledError:
             if not self._stopping:
-                record.state = (
-                    ModuleState.DOWN
-                )
+                # A crash already recorded by _crash_module()
+                # must survive this cleanup: only a plain
+                # unexpected cancel (no recorded error) writes
+                # the default fields.
+                if record.error is None:
+                    record.state = (
+                        ModuleState.DOWN
+                    )
 
-                record.error = None
+                    record.error = None
 
-                record.retry_at = (
-                    time.monotonic()
-                    + self.retry_interval
-                )
+                    record.retry_at = (
+                        time.monotonic()
+                        + self.retry_interval
+                    )
 
-                logger.warning(
-                    f"Module cancelled unexpectedly: "
-                    f"{record.id}"
-                )
+                    logger.warning(
+                        f"Module cancelled unexpectedly: "
+                        f"{record.id}"
+                    )
 
-                self._wake.set()
+                    self._wake.set()
 
             raise
 

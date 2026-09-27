@@ -136,8 +136,23 @@ side.
   cannot judge surfaces it through the uplink (failure /
   needs-guidance event); the agent decides what to send next. The LLM has
   no place inside the tick loop.
-- **Performance rule unchanged**: `ask()` stays a cheap projection; the
-  tick loop belongs to the long-running coroutine in `start()`.
+- **Performance rule (the module's one hard obligation)**: `ask()` stays
+  a cheap, read-only projection of already-computed state -- a slow
+  `ask()` delays every agent's execution start -- and the tick loop
+  belongs to the long-running coroutine in `start()`. The rest of the
+  discipline:
+  - `tell()` runs in its own task and may *await* long operations
+    (thread results, async APIs); a synchronous CPU-heavy or blocking
+    call still stalls the one shared event loop and freezes every
+    module and agent -- such work belongs on threads (`start()`'s
+    daemon threads; `asyncio.to_thread` for short known-blocking
+    calls).
+  - `DataSpace` carries small JSON facts only: `publish()` and
+    `snapshot()` deepcopy the full state on the event loop every
+    round, so frame data or large documents never go through it.
+  - Provisioning-length work (model weight loading, device probing)
+    runs on `start()`'s background threads, never synchronously
+    inside a coroutine.
 
 ## Prior attempt & lessons
 

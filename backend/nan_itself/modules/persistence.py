@@ -194,5 +194,5 @@ def save_record_state(
 
     atomic_write_json(
         dataspace_path(dataspace_dir, record.id),
-        record.data.dump(),
+        record.data.snapshot(),
     )

@@ -165,21 +165,3 @@ def topological_order(
         )
 
     return result
-
-
-def safe_topological_order(
-    modules: Mapping[str, Any],
-    dependencies: Mapping[str, set[str]],
-    dependents: Mapping[str, set[str]],
-) -> list[str]:
-    try:
-        return topological_order(
-            modules,
-            dependencies,
-            dependents,
-        )
-
-    except Exception:
-        return list(
-            modules
-        )

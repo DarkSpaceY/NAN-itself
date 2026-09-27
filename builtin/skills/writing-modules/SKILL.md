@@ -60,19 +60,27 @@ class MyModule(Module):
 
 1. **ask() must be cheap.** It runs on the agent's critical path every
    turn: only read state computed earlier, never do heavy work, never call
-   the LLM. Heavy work belongs in `start()`'s loop and `tell()` (each
-   runs in its own task).
-2. **Publish facts, not conclusions.** Modules report observations; the
+   the LLM. A slow ask() delays every agent.
+2. **One shared event loop -- never block it.** `tell()` runs in its own
+   task and may *await* long operations (thread results, async APIs), but
+   a synchronous CPU-heavy or blocking call stalls the loop and freezes
+   every module and agent -- run such work on threads (`start()`'s
+   daemon threads; `asyncio.to_thread` for short known-blocking calls).
+3. **DataSpace carries small JSON facts only.** `publish()` and
+   `snapshot()` deepcopy the full state on the event loop every round;
+   never push frame data or large documents through it.
+4. **Publish facts, not conclusions.** Modules report observations; the
    agent interprets them.
-3. **Full implement, let it crash.** Provisioning failures (missing
+5. **Full implement, let it crash.** Provisioning failures (missing
    weights/hardware) raise out of `start()`; the Facade marks the module
    DOWN with the error and retries with backoff; never swallow errors
    into an `unavailable` limbo state. Provision all models in `start()`
-   **before** entering the loop.
-4. **Persist via serialize_state()/restore_state().** Return JSON-only
+   **before** entering the loop -- do the loading on a background
+   thread, never synchronously inside the coroutine.
+6. **Persist via serialize_state()/restore_state().** Return JSON-only
    state; the Facade stores it under `data/modules/private/<id>.json`.
    Downlink residue is intentionally NOT persisted.
-5. Uplink is `self.data.publish(mapping)` (only the owner writes; readers
+7. Uplink is `self.data.publish(mapping)` (only the owner writes; readers
    get detached snapshots via `self.dependencies[<id>].snapshot()`).
 
 ## Channels (downlink, optional)
@@ -105,7 +113,10 @@ class SetGoal(Module):
 - [ ] unique `id`; `requires` lists only existing module ids
 - [ ] `start()` is long-running (or intentionally state-only)
 - [ ] `ask()` cheap; returns str or None
-- [ ] weights provisioned in `start()`; failures raise (Facade retries with backoff)
+- [ ] no synchronous CPU-heavy/blocking calls in coroutines (offload to
+      threads); publishes stay small JSON facts
+- [ ] weights provisioned in `start()` (loading on a background thread);
+      failures raise (Facade retries with backoff)
 - [ ] no cwd-relative paths — anchor through `nan_itself.utils.paths`
 
 Validate the file before finishing:

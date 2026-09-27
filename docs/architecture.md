@@ -115,7 +115,12 @@ projection; provisioning failures (e.g. missing model weights) raise
 out of `start()` -- the Facade marks the module DOWN with the error
 and restarts it with backoff, so a module with missing weights comes
 up loudly failed and revives once the weights land (all weights are
-provisioned in `start()`, before any loop runs).
+provisioned in `start()`, before any loop runs). One event loop runs
+every coroutine: `tell()` may await long operations, but synchronous
+CPU-heavy or blocking calls go to a thread, `DataSpace` publishes stay
+small JSON facts (publish/snapshot deepcopy the full state on the loop
+every round), and provisioning-length work (weight loading, device
+probing) happens on `start()`'s background threads.
 
 ### skills/ — capability packages
 

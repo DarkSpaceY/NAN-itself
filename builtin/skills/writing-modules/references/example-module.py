@@ -102,7 +102,9 @@ class NotifierModule(Module):
 
     async def tell(self, record: Turn) -> None:
         # Runs in its own task after each completed agent execution.
-        # Heavy per-turn processing is allowed here; keep ask() cheap.
+        # Long *awaited* work is fine (thread results, async APIs), but
+        # a synchronous CPU-heavy or blocking call would stall the one
+        # shared event loop -- offload it to a thread. Keep ask() cheap.
         return None
 
     async def ask(self, turn: Turn) -> str | None:
