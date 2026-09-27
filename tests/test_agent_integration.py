@@ -9,7 +9,8 @@ import pytest
 
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
-from nan_itself.agent.reports import format_child_report
+from nan_itself.agent.model import Report
+from nan_itself.agent.prompts import render_turn
 from nan_itself.agent.verbs import SpawnVerb
 from nan_itself.events import EventBus, sink
 from nan_itself.modules.loading import import_module_class
@@ -24,21 +25,6 @@ from nan_itself.utils.llm import Message, ToolCall
 
 def run(coro):
     return asyncio.run(coro)
-
-
-def reply_text(turn):
-    """
-    The turn's reply: the text of its last assistant message. A
-    turn may end on a tool result, so scan backwards.
-    """
-    for message in reversed(turn.messages):
-        if (
-            getattr(message, "role", None)
-            == "assistant"
-        ):
-            return message.content or ""
-
-    return ""
 
 
 @pytest.fixture(autouse=True)
@@ -184,8 +170,9 @@ class CapturingEngine:
     This allows us to verify exactly what the Agent constructs and
     passes into the engine. The fake mirrors the engine's contract:
     each turn's Turn record carries the history snapshot as of its
-    start and this turn's messages, and the Agent chains turns
-    through it (no persistent history anywhere).
+    start and the assistant's outcome is written back structurally
+    (reply); the Agent chains turns through it (no persistent
+    history anywhere).
     """
 
     def __init__(self):
@@ -220,18 +207,14 @@ class CapturingEngine:
 
         return replace(
             turn,
-            messages=(
-                turn.messages
-                + (
-                    Message(
-                        role="assistant",
-                        content=(
-                            "assistant-done"
-                        ),
-                    ),
-                )
-            ),
+            reply="assistant-done",
         )
+
+    def render_turn(
+        self,
+        turn,
+    ):
+        return render_turn(turn)
 
 
 def make_agent(
@@ -294,7 +277,7 @@ def test_run_assembles_turn_boundaries(
 
     result = run(agent.run())
 
-    assert reply_text(result) == "assistant-done"
+    assert result.reply == "assistant-done"
 
     # One execution captured, one turn chained.
     assert len(engine.executions) == 1
@@ -307,12 +290,14 @@ def test_run_assembles_turn_boundaries(
     assert captured.history == ()
 
     # The completed Turn rides out on run() and becomes the
-    # single last_turn reference; nothing else is retained.
+    # single last_turn reference; nothing else is retained. Its
+    # message run renders as the (empty) observation plus the
+    # assistant reply.
     assert agent.last_turn is not None
 
     assert [
         m.content
-        for m in agent.last_turn.messages
+        for m in render_turn(agent.last_turn)
     ] == ["", "assistant-done"]
 
     # Per-turn boundaries: refresh + snapshot exactly once.
@@ -408,11 +393,6 @@ def test_step_sees_history_plus_the_turn_messages():
         Message(role="assistant", content="last"),
     )
 
-    observation = Message(
-        role="user",
-        content="observation",
-    )
-
     turn = Turn(
         agent_hash="hash123",
         parent_hash=None,
@@ -421,7 +401,9 @@ def test_step_sees_history_plus_the_turn_messages():
         world={"state": {"value": 1}},
         persona="p",
         history=history,
-        messages=(observation,),
+        # A bare-string report passes through unframed, which
+        # keeps the observation text exactly "observation".
+        reports=("observation",),
     )
 
     result = run(
@@ -429,7 +411,7 @@ def test_step_sees_history_plus_the_turn_messages():
     )
 
     # The turn's history snapshot became the model-visible
-    # prefix: system + history + this turn's messages.
+    # prefix: system + history + this turn's rendering.
     request = llm.requests[0]
 
     assert len(request.messages) == 4
@@ -439,15 +421,15 @@ def test_step_sees_history_plus_the_turn_messages():
         for m in request.messages[:3]
     ] == ["p", "old", "last"]
 
-    # The completed Turn carries the same snapshot plus this
-    # turn's messages (observation + assistant reply) -- the
-    # full model input is history + messages.
+    # The completed Turn carries the same snapshot plus its
+    # structured flow (reply) -- the full model input is
+    # exactly build_messages(result).
     assert [
         m.content for m in result.history
     ] == ["old", "last"]
 
     assert [
-        m.content for m in result.messages
+        m.content for m in render_turn(result)
     ] == ["observation", "reply"]
 
 
@@ -458,8 +440,8 @@ def test_step_sees_history_plus_the_turn_messages():
 
 def _child_report(
     task: str,
-) -> str:
-    return format_child_report(
+) -> Report:
+    return Report(
         agent_id="abc12345",
         task=task,
         status="completed",
@@ -523,7 +505,14 @@ def test_harvest_children_collects_and_mirrors_finished_reports():
         if event["t"] == "record_detail"
     ]
 
-    assert lines == report.splitlines()
+    # The UI mirror reads the structured fields: no prompt
+    # frame, just the report's identity and its body.
+    assert lines == [
+        "id: abc12345",
+        "task: child task",
+        "status: completed",
+        "child task result",
+    ]
 
     done = [
         event
@@ -748,12 +737,9 @@ def test_child_report_reaches_parent_observation():
     # harvested into its observation.
     assert parent.done
 
-    assert (
-        "status: completed"
-        in parent.report
-    )
+    assert parent.report.status == "completed"
 
-    assert "parent report" in parent.report
+    assert "parent report" in parent.report.body
 
     # Some parent turn's observation carried the <subagent_report>
     # block from the grandchild.
@@ -787,11 +773,11 @@ def test_early_finish_drops_running_children_reports():
     # late report is dropped, not folded into the finish report.
     assert parent.done
 
-    assert "parent report" in parent.report
+    assert "parent report" in parent.report.body
 
     assert (
         "grandchild report"
-        not in parent.report
+        not in parent.report.body
     )
 
 

@@ -8,8 +8,8 @@ import pytest
 
 from nan_itself.agent.core import Agent
 from nan_itself.agent.model import SubagentLimitError
+from nan_itself.agent.prompts import render_turn
 from nan_itself.modules.model import DataSpace
-from nan_itself.utils.llm import Message
 
 
 # ============================================================================
@@ -129,8 +129,8 @@ class CapturingEngine:
 
     This lets tests inspect the exact Turn created at each turn
     boundary without invoking an LLM. It mirrors the real engine's
-    contract: the completed Turn carries this turn's messages, and
-    the Agent chains turns through it.
+    contract: the assistant's outcome is written back structurally
+    (reply), and the Agent chains turns through it.
     """
 
     def __init__(self):
@@ -158,16 +158,14 @@ class CapturingEngine:
 
         return replace(
             turn,
-            messages=(
-                turn.messages
-                + (
-                    Message(
-                        role="assistant",
-                        content="assistant-done",
-                    ),
-                )
-            ),
+            reply="assistant-done",
         )
+
+    def render_turn(
+        self,
+        turn,
+    ):
+        return render_turn(turn)
 
 
 def make_agent(
@@ -704,20 +702,18 @@ class BlockingEngine:
 
             return replace(
                 turn,
-                messages=(
-                    turn.messages
-                    + (
-                        Message(
-                            role="assistant",
-                            content="ok",
-                        ),
-                    )
-                ),
+                reply="ok",
             )
 
         self.child_started.set()
 
         await asyncio.Event().wait()
+
+    def render_turn(
+        self,
+        turn,
+    ):
+        return render_turn(turn)
 
 
 async def cascade_stop():
@@ -784,19 +780,16 @@ def test_cancelled_child_reports_failure():
 
         assert child.report is not None
 
+        assert child.report.status == "failed"
+
         assert (
-            "status: failed"
-            in child.report
+            child.report.body
+            == "error: cancelled"
         )
 
         assert (
-            "error: cancelled"
-            in child.report
-        )
-
-        assert (
-            "task: child task"
-            in child.report
+            child.report.task
+            == "child task"
         )
 
     run(

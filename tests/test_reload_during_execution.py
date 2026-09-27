@@ -94,17 +94,10 @@ def reply_text(
     turn,
 ):
     """
-    The turn's reply: the text of its last assistant message. A
-    turn may end on a tool result, so scan backwards.
+    The turn's reply text (empty when the turn never produced
+    one).
     """
-    for message in reversed(turn.messages):
-        if (
-            getattr(message, "role", None)
-            == "assistant"
-        ):
-            return message.content or ""
-
-    return ""
+    return turn.reply or ""
 
 
 # ============================================================================

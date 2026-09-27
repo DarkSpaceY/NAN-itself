@@ -8,6 +8,7 @@ import pytest
 
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
+from nan_itself.agent.prompts import render_turn
 from nan_itself.tools.results import text_result
 from nan_itself.utils.llm import ToolCall
 
@@ -61,25 +62,28 @@ def make_response(
 
 def reply_text(turn):
     """
-    The turn's reply: the text of its last assistant message. A
-    turn may end on a tool result, so scan backwards.
+    The turn's reply text (empty when the turn never produced
+    one).
     """
-    for message in reversed(turn.messages):
-        if (
-            getattr(message, "role", None)
-            == "assistant"
-        ):
-            return message.content or ""
+    return turn.reply or ""
 
-    return ""
+
+def turn_messages(turn):
+    """
+    The turn's message run, rendered by the prompt assembly.
+    """
+    return list(render_turn(turn))
 
 
 def tool_messages(turn):
+    """
+    The turn's tool-result messages, rendered by the prompt
+    assembly.
+    """
     return [
         message
-        for message in turn.messages
-        if getattr(message, "role", None)
-        == "tool"
+        for message in render_turn(turn)
+        if getattr(message, "role", None) == "tool"
     ]
 
 
@@ -165,7 +169,7 @@ class FakeModules:
         ambient = []
 
         # Real inbox module: the observation carries whatever
-        # is queued (user input, parked reports).
+        # is queued (user input).
         if self.inbox is not None:
             body = await self.inbox.query(
                 turn
@@ -482,12 +486,14 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
 
     try:
         # Single-step turn 1: it runs the invoke_tool call and
-        # ends on the appended tool result.
+        # its result is written back onto the turn.
         first = await agent.run()
 
-        assert first.messages[-1].role == "tool"
+        first_rendered = turn_messages(first)
 
-        assert first.messages[-1].content
+        assert first_rendered[-1].role == "tool"
+
+        assert first_rendered[-1].content
 
         # Turn 2: the observation is rebuilt and the model
         # finalizes with the tool result in history.
@@ -677,25 +683,17 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
             == 2
         )
 
-        # The second turn delivered the final reply. Turn has
-        # no reply field: the reply is the last assistant
-        # message in the message flow.
+        # The second turn delivered the final reply, recorded
+        # structurally on the turn's reply field.
         record = (
             modules.delivered_turns[
                 -1
             ]
         )
 
-        assert any(
-            getattr(
-                message,
-                "role",
-                None,
-            )
-            == "assistant"
-            and (message.content or "")
+        assert (
+            record.reply
             == "42"
-            for message in record.messages
         )
 
         assert (
@@ -1026,7 +1024,8 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
                 )
 
             # A later root turn carries the harvested child report as
-            # a user message; the report is recognized by REPORT_TAG.
+            # a user message; the report is recognized by the
+            # <subagent_report> frame.
             has_report = any(
                 "<subagent_report>"
                 in (
@@ -1090,8 +1089,9 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             # ------------------------------------------------------
             # Next parent turn.
             #
-            # The report has now been parked and supplied to the
-            # StepEngine through seed_reports.
+            # The report has now been harvested onto the
+            # parent's turn and reaches the StepEngine rendered
+            # into the observation.
             # ------------------------------------------------------
 
             if has_report:
@@ -1163,13 +1163,15 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         first = await agent.run()
 
-        # Single-step turn: it runs the spawn call and ends on the
-        # appended tool result.
-        assert first.messages[-1].role == "tool"
+        # Single-step turn: it runs the spawn call and its
+        # result is written back onto the turn.
+        first_rendered = turn_messages(first)
+
+        assert first_rendered[-1].role == "tool"
 
         assert (
             "Subagent spawned"
-            in first.messages[-1].content
+            in first_rendered[-1].content
         )
 
         await asyncio.wait_for(
@@ -1178,7 +1180,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
         )
 
         # At this point the child is still running and still
-        # listed; nothing has been parked anywhere.
+        # listed; no report exists yet.
         assert len(agent.children) == 1
 
         assert not modules.inbox._items
@@ -1213,10 +1215,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         assert child.report is not None
 
-        assert (
-            "status: completed"
-            in child.report
-        )
+        assert child.report.status == "completed"
 
         # The report never travelled through the inbox.
         assert not modules.inbox._items
@@ -1323,11 +1322,11 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_returns_the_turn_whose_last_assistant_text_is_the_reply(tmp_path):
+async def test_run_returns_the_turn_whose_reply_is_the_model_text(tmp_path):
     """
-    Agent.run() hands back the completed Turn: the model's reply is
-    its last assistant message, and that same Turn is what reaches
-    the Modules.
+    Agent.run() hands back the completed Turn: the model's reply
+    is recorded on the turn's reply field, and that same Turn is
+    what reaches the Modules.
     """
     modules = FakeModules()
 
@@ -1362,10 +1361,12 @@ async def test_run_returns_the_turn_whose_last_assistant_text_is_the_reply(tmp_p
 
         assert reply_text(turn) == "the answer"
 
-        assert turn.messages[-1].role == "assistant"
+        rendered = turn_messages(turn)
+
+        assert rendered[-1].role == "assistant"
 
         assert (
-            turn.messages[-1].content
+            rendered[-1].content
             == "the answer"
         )
 
@@ -1380,11 +1381,12 @@ async def test_run_returns_the_turn_whose_last_assistant_text_is_the_reply(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_tool_messages_are_appended_to_the_same_turn(tmp_path):
+async def test_tool_results_are_written_back_to_the_same_turn(tmp_path):
     """
-    A turn that ends with tool calls runs its verbs and appends each
-    result as a tool message to THAT SAME Turn, right after the
-    assistant message carrying the calls.
+    A turn that ends with tool calls runs its verbs and writes
+    each result back positionally onto THAT SAME Turn, paired
+    with the assistant's calls; rendering turns them into tool
+    messages right after the assistant message.
     """
     modules = FakeModules()
 
@@ -1427,26 +1429,28 @@ async def test_tool_messages_are_appended_to_the_same_turn(tmp_path):
     try:
         turn = await agent.run()
 
-        # observation + assistant(tool_calls) + tool
-        assert len(turn.messages) == 3
+        # observation + assistant(tool_calls) + tool, rendered
+        rendered = turn_messages(turn)
 
-        assert turn.messages[1].role == "assistant"
+        assert len(rendered) == 3
+
+        assert rendered[1].role == "assistant"
 
         assert [
             call.name
-            for call in turn.messages[1].tool_calls
+            for call in rendered[1].tool_calls
         ] == ["invoke_tool"]
 
-        assert turn.messages[2].role == "tool"
+        assert rendered[2].role == "tool"
 
         assert (
-            turn.messages[2].tool_call_id
+            rendered[2].tool_call_id
             == "add-1"
         )
 
         assert (
             '"text":"5"'
-            in turn.messages[2].content
+            in rendered[2].content
         )
 
         # The provider tool really ran.
@@ -1461,12 +1465,12 @@ async def test_tool_messages_are_appended_to_the_same_turn(tmp_path):
             )
         ]
 
-        # The delivered Turn carries the tool messages too.
+        # The delivered Turn carries the results too.
         assert (
             tool_messages(
                 modules.delivered_turns[-1]
             )
-            == [turn.messages[2]]
+            == [rendered[2]]
         )
 
     finally:

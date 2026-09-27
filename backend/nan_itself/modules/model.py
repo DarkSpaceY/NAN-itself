@@ -118,25 +118,31 @@ class Turn:
     One agent turn as seen by Modules, and the ONLY record of it.
 
     A turn is self-contained: everything needed to reconstruct
-    what the agent saw and did lives on the Turn itself.
+    what the agent saw and did lives on the Turn itself -- as
+    STRUCTURE. The message rendering lives exclusively in the
+    engine's prompt assembly; no message is ever carried here.
 
         identity   agent_hash / parent_hash / depth
-        inputs     task / world (structured sources; the
-                   observation message is their rendering)
+        inputs     task / world / ambient (Module context) /
+                   reports (harvested child reports) -- the
+                   structured sources of the observation
         snapshots  persona / history (as of this turn's start)
                    -- there is no persistent history anywhere:
-                   the next turn's history snapshot is derived
-                   from the last turn's history + messages
-        messages   this turn's message flow (observation +
-                   assistant + tool results), i.e. what the
-                   model produced; full model input for the
-                   turn is history + the first message
-        response   usage / finish_reason / model (duck-typed;
-                   tool calls live on the assistant message)
+                   the next turn's history snapshot is the last
+                   turn's history plus its rendered messages
+                   (rendered by the engine, frozen on append)
+        flow       this turn's model exchange: reply (the
+                   assistant's text, possibly empty) and calls
+                   (tool calls) with results (one per call,
+                   positional); all empty while in flight
+        response   usage / finish_reason / model (duck-typed)
         outcome    error / started_at / ended_at
 
     query() receives the in-flight turn: identity and world are
-    already fixed, the snapshot and result fields are still None.
+    already fixed, the observation inputs are already on it
+    (task, reports) except the ambient context, which the
+    Modules' own query fills in; the flow and result fields are
+    still empty.
 
     on_turn() receives the same turn completed, filled via
     dataclasses.replace().
@@ -158,7 +164,15 @@ class Turn:
 
     history: tuple[Any, ...] = ()
 
-    messages: tuple[Any, ...] = ()
+    ambient: tuple[str, ...] = ()
+
+    reports: tuple[Any, ...] = ()
+
+    reply: str | None = None
+
+    calls: tuple[Any, ...] = ()
+
+    results: tuple[str, ...] = ()
 
     usage: Any | None = None
 

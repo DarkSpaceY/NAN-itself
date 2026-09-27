@@ -29,12 +29,12 @@ import pytest
 
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
+from nan_itself.agent.prompts import render_turn
 from nan_itself.events import (
     EventBus,
     sink,
 )
 from nan_itself.modules.model import Turn
-from nan_itself.utils.llm import Message
 
 
 # ============================================================================
@@ -430,21 +430,18 @@ def test_engine_step_without_bus_uses_complete_generation():
             task=None,
             world={},
             persona="p",
-            messages=(
-                Message(
-                    role="user",
-                    content="observation",
-                ),
-            ),
+            # A bare-string report passes through unframed.
+            reports=("observation",),
         )
 
         result = await engine.step(turn)
 
-        # The step only appends the assistant reply; the observation
-        # message the caller assembled stays first.
+        # The step records the assistant's outcome structurally
+        # (reply); rendering yields the observation first, then
+        # the assistant reply.
         assert [
             message.content
-            for message in result.messages
+            for message in render_turn(result)
         ] == ["observation", "hi"]
 
         assert not llm.streamed

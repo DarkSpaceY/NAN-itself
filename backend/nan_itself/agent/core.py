@@ -7,18 +7,20 @@ A turn is ONE observation -> model call -> result cycle:
     - persona is re-read from its file at every turn boundary
     - exactly one world snapshot is captured per agent per turn,
       never shared across agents
-    - a subagent's task rides in its observation; finished
-      children's reports are harvested at the next turn boundary
-      and folded into the observation the same way for root and
-      subagents alike (no inbox parking)
-    - a turn that ends with tool calls runs the verbs, appends
-      their results as tool messages and returns; the loop
-      immediately starts the next turn, whose observation is
-      rebuilt fresh
+    - a subagent's task, the ambient Module context and finished
+      children's reports ride on the turn as STRUCTURED inputs,
+      harvested/collected at the turn boundary the same way for
+      root and subagents alike (no inbox parking); rendering
+      them into model messages is the engine's business
+    - a turn that ends with tool calls runs the verbs and
+      writes their results back positionally; the loop
+      immediately starts the next turn, whose observation
+      inputs are collected fresh
     - there is no persistent history: each Turn carries the
       history snapshot as of its start, and the next turn
-      derives its snapshot from the last Turn (clear-all over
-      the agent's history_char_limit)
+      derives its snapshot from the last Turn's history plus
+      its rendered messages (clear-all over the agent's
+      history_char_limit)
 
 One agent is ONE asyncio Task. The root is started by app.py, a
 subagent by its parent's spawn(); either way the task runs loop()
@@ -30,7 +32,7 @@ read at the next turn boundary), and successful turns may be
 paced by autonomous_interval. Mid-turn abort is always the
 whole task's cancellation, never an in-flight turn's. Exit
 cleanup is a single path: descendants are stopped/cancelled and
-a subagent's final report is formatted as <subagent_report>.
+a subagent's final report is recorded as a structured Report.
 """
 
 from __future__ import annotations
@@ -45,14 +47,8 @@ from typing import Any
 from loguru import logger
 
 from .model import (
+    Report,
     SubagentLimitError,
-)
-from .prompts import (
-    build_observation,
-)
-from .reports import (
-    format_child_report,
-    report_record_name,
 )
 from .verbs import (
     FINISH_TOOL_NAME,
@@ -73,7 +69,6 @@ from ..events import sink
 from ..modules.model import Turn
 from ..utils import paths
 from ..utils.backoff import next_backoff
-from ..utils.llm import Message
 
 
 DEFAULT_BACKOFF = (
@@ -155,8 +150,8 @@ class Agent:
         # Set on exit; after that the report is final.
         self.done: bool = False
 
-        # The formatted <subagent_report> (subagents only).
-        self.report: str | None = None
+        # The structured report (subagents only).
+        self.report: Report | None = None
 
         # This agent's last completed Turn; the next turn
         # derives its history snapshot from it.
@@ -213,8 +208,10 @@ class Agent:
         pending_reports = self._harvest_children()
 
         # ----------------------------------------------------------
-        # History snapshot: derived from the last turn; clear-all
-        # over the limit. No persistent history exists anywhere.
+        # History snapshot: the last turn's history plus its
+        # rendered messages (rendering is the engine's business);
+        # clear-all over the limit. No persistent history exists
+        # anywhere.
         # ----------------------------------------------------------
 
         prior: tuple = ()
@@ -222,7 +219,9 @@ class Agent:
         if self.last_turn is not None:
             prior = (
                 self.last_turn.history
-                + self.last_turn.messages
+                + self.engine.render_turn(
+                    self.last_turn
+                )
             )
 
             if (
@@ -238,27 +237,31 @@ class Agent:
                 prior = ()
 
         # ----------------------------------------------------------
-        # Skeleton turn: identity, world, persona and the derived
-        # history snapshot. Its messages are still empty, so the
-        # Modules' query() sees the in-flight turn with nothing
-        # rendered yet.
+        # Skeleton turn: identity, world, persona, the derived
+        # history snapshot, and the already-harvested child
+        # reports. A subagent's task is shown to the model (the
+        # root has none: user input reaches it through the inbox
+        # Module). The flow is still empty, so the Modules'
+        # query() sees the in-flight turn.
         # ----------------------------------------------------------
 
         turn = Turn(
             agent_hash=self.agent_hash,
             parent_hash=self.parent_hash,
             depth=self.depth,
-            task=self.task,
+            task=(
+                self.task
+                if self.depth > 0
+                else None
+            ),
             world=world,
             persona=persona,
             history=prior,
+            reports=tuple(pending_reports),
             started_at=time.time(),
         )
 
-        turn = await self._observe(
-            turn,
-            pending_reports,
-        )
+        turn = await self._observe(turn)
 
         completed = turn
 
@@ -301,16 +304,16 @@ class Agent:
     async def _observe(
         self,
         turn: Turn,
-        reports: list[str],
     ) -> Turn:
         """
-        Assemble this turn's observation message.
+        Query the ambient Module context for this turn.
 
-        One ambient context per turn: every running Module is
-        queried against the in-flight turn (identity/world already
-        fixed), each query mirrored as a module record on the main
-        stream. This agent's task and its harvested child reports
-        are folded in the same way for root and subagents alike.
+        Every running Module is queried against the in-flight
+        turn (identity/world already fixed), each query mirrored
+        as a module record on the main stream. The turn's other
+        observation inputs (task, harvested child reports) are
+        already on the Turn; rendering any of it into model
+        messages is the engine's business (prompts).
         """
         pending_query_records: dict[str, str] = {}
 
@@ -406,29 +409,20 @@ class Agent:
 
         return replace(
             turn,
-            messages=(
-                build_observation(
-                    ambient_context=ambient_context,
-                    task=(
-                        self.task
-                        if self.depth > 0
-                        else None
-                    ),
-                    reports=reports,
-                ),
-            ),
+            ambient=tuple(ambient_context),
         )
 
     def _harvest_children(
         self,
-    ) -> list[str]:
+    ) -> list[Report]:
         """
-        Collect the formatted reports of finished children.
+        Collect the structured reports of finished children.
 
         Every harvested report is mirrored as an agent record on
-        the main stream. Children still running stay listed.
+        the main stream, straight from its fields. Children still
+        running stay listed.
         """
-        reports: list[str] = []
+        reports: list[Report] = []
 
         remaining: list[Agent] = []
 
@@ -452,8 +446,10 @@ class Agent:
                     "record_started",
                     content={
                         "kind": "agent",
-                        "name": report_record_name(
-                            child.report,
+                        "name": (
+                            f"report · {child.report.task}"
+                            if child.report.task
+                            else "report"
                         ),
                         "summary": "",
                         "agent_hash": self.agent_hash,
@@ -464,7 +460,12 @@ class Agent:
             )
 
             if record_id:
-                for line in child.report.splitlines():
+                for line in (
+                    f"id: {child.report.agent_id}",
+                    f"task: {child.report.task}",
+                    f"status: {child.report.status}",
+                    *child.report.body.splitlines(),
+                ):
                     sink.emit(
                         "record_detail",
                         id=record_id,
@@ -501,25 +502,17 @@ class Agent:
         turn: Turn,
     ) -> Turn:
         """
-        Run the tool calls of the turn's last message, appending
-        each result as a tool message. A turn whose last message
-        carries no tool calls is returned unchanged.
+        Run the turn's tool calls, writing each result back
+        positionally onto the turn. A turn with no calls is
+        returned unchanged; a call that raises leaves the
+        results unwritten (the turn carries the error).
         """
-        messages = list(turn.messages)
-
-        if not messages:
+        if not turn.calls:
             return turn
 
-        calls = getattr(
-            messages[-1],
-            "tool_calls",
-            None,
-        )
+        results: list[str] = []
 
-        if not calls:
-            return turn
-
-        for call in calls:
+        for call in turn.calls:
             logger.info(
                 "[turn:{}] tool {} {}",
                 turn.agent_hash[:8],
@@ -529,20 +522,13 @@ class Agent:
                 ),
             )
 
-            result_text = (
+            results.append(
                 await self._run_call(call)
-            )
-
-            messages.append(
-                _tool_message(
-                    call.id,
-                    result_text,
-                )
             )
 
         return replace(
             turn,
-            messages=tuple(messages),
+            results=tuple(results),
         )
 
     async def _run_call(
@@ -722,12 +708,13 @@ class Agent:
         """
         Submit the final report (FinishVerb).
 
-        The formatted <subagent_report> is produced HERE, before
-        `done` is flipped: a parent that harvests on `child.done`
-        therefore always finds a final report -- there is no
-        window between "finished" and "report ready".
+        The structured Report is produced HERE, before `done` is
+        flipped: a parent that harvests on `child.done` therefore
+        always finds a final report -- there is no window between
+        "finished" and "report ready". Rendering it into prompt
+        text (<subagent_report>) is the engine's business.
         """
-        self.report = format_child_report(
+        self.report = Report(
             agent_id=self.agent_hash[:8],
             task=self.task,
             status="completed",
@@ -819,7 +806,7 @@ class Agent:
         # Only a subagent cancelled before it could finish owes a
         # report here, and never over an already-final one.
         if self.report is None and cancelled:
-            self.report = format_child_report(
+            self.report = Report(
                 agent_id=self.agent_hash[:8],
                 task=self.task,
                 status="failed",
@@ -1001,21 +988,10 @@ class Agent:
         turn: Turn,
     ) -> str:
         """
-        The turn's reply: the text of its last assistant message.
-        The turn may end on a tool result, so scan backwards.
+        The turn's reply text (empty when the turn never
+        produced one -- in flight, failed or cancelled).
         """
-        for message in reversed(turn.messages):
-            if (
-                getattr(
-                    message,
-                    "role",
-                    None,
-                )
-                == "assistant"
-            ):
-                return message.content or ""
-
-        return ""
+        return turn.reply or ""
 
 
 # ----------------------------------------------------------------------
@@ -1040,17 +1016,6 @@ _RECORD_KINDS = {
     SLEEP_TOOL_NAME: "sleep",
     FINISH_TOOL_NAME: "finish",
 }
-
-
-def _tool_message(
-    tool_call_id: str,
-    content: str,
-) -> Message:
-    return Message(
-        role="tool",
-        tool_call_id=tool_call_id,
-        content=content,
-    )
 
 
 def _pretty_args(
