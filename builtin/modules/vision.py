@@ -3116,11 +3116,11 @@ class VisionModule(Module):
     # Module contract
     # ==================================================================
 
-    async def on_turn(self, record: Turn) -> None:
+    async def tell(self, record: Turn) -> None:
         with self._state_lock:
             self._turn_marks.append(record.started_at)
 
-    async def query(self, turn: Turn) -> str | None:
+    async def ask(self, turn: Turn) -> str | None:
         with self._state_lock:
             stats = dict(self._stats)
 

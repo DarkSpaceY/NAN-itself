@@ -2,8 +2,8 @@
 name: writing-modules
 description: >-
   How to write a NAN-itself Module file (ambient perception daemon with
-  channels). Covers file placement, the # @module header, the Module /
-  ActionSurface contract, lifecycle, the query() performance rule, graceful
+  channels). Covers file placement, the # @module header, the Module
+  contract, lifecycle, the ask() performance rule, graceful
   degradation, persistence, and hot reload. Use when the user asks to create,
   fix, or extend a module in builtin/modules/ or workspace/modules/.
 ---
@@ -21,7 +21,7 @@ background daemon; the agent reads its output as ambient context each turn.
 - Exactly one concrete `Module` subclass per file.
 - `Module` and `Turn` are **injected** into the file namespace — do not
   import them. For channels, import explicitly:
-  `from nan_itself.modules.action import ActionSurface, ChannelSpec`.
+  `from nan_itself.modules import ChannelSpec`.
 - ClassVar `id` must be unique across builtin + workspace modules;
   a duplicate id fails discovery.
 
@@ -49,18 +49,18 @@ class MyModule(Module):
             self.data.publish({...})            # uplink state
             await asyncio.sleep(self.poll_interval)
 
-    async def on_turn(self, record: Turn) -> None:   # completed turn hook
+    async def tell(self, record: Turn) -> None:      # completed turn hook
         ...
 
-    async def query(self, turn: Turn) -> str | None: # cheap projection
+    async def ask(self, turn: Turn) -> str | None:   # cheap projection
         return "[MyModule] ..." or None
 ```
 
 ## Hard rules
 
-1. **query() must be cheap.** It runs on the agent's critical path every
+1. **ask() must be cheap.** It runs on the agent's critical path every
    turn: only read state computed earlier, never do heavy work, never call
-   the LLM. Heavy work belongs in `start()`'s loop and `on_turn()` (each
+   the LLM. Heavy work belongs in `start()`'s loop and `tell()` (each
    runs in its own task).
 2. **Publish facts, not conclusions.** Modules report observations; the
    agent interprets them.
@@ -71,39 +71,40 @@ class MyModule(Module):
    **before** entering the loop.
 4. **Persist via serialize_state()/restore_state().** Return JSON-only
    state; the Facade stores it under `data/modules/private/<id>.json`.
-   Slot/channel residue is intentionally NOT persisted.
+   Downlink residue is intentionally NOT persisted.
 5. Uplink is `self.data.publish(mapping)` (only the owner writes; readers
    get detached snapshots via `self.dependencies[<id>].snapshot()`).
 
 ## Channels (downlink, optional)
 
-Subclass `ActionSurface` instead of `Module` and declare:
+Declare a ClassVar `channels` mapping on your `Module` subclass:
 
 ```python
-class SetGoal(ActionSurface):
+class SetGoal(Module):
 
     id = "goal-setter"
 
     channels: ClassVar[Mapping[str, ChannelSpec]] = {
-        "goal": ChannelSpec(GoalPayload, description="current goal", depth=1),
+        "goal": ChannelSpec(GoalPayload, description="current goal"),
     }
 ```
 
-- `depth=1` overwrite slot; `depth=N` FIFO with drop-oldest.
-- Model writes via `invoke_channels` (`module:<id>/<channel>` composite
-  name); your tick loop consumes with `current_target()` /
-  `clear_target()`.
-- Optional veto hook `on_target(channel, payload) -> bool`; report tick
-  outcomes with `emit_event(text)`.
-- Include `render_action_section(turn)` in your `query()` output so the
-  model sees channel occupancy and one-shot feedback.
+- The model feeds a payload via `invoke_channels` (`module:<id>/<channel>`
+  composite name). The runtime validates the channel and its schema, then
+  calls `feed(channel, payload)` on your instance; return `"written"` or
+  `"rejected"` (the base-class default accepts and returns `"written"`).
+- Consumption policy is module-private: store fed payloads in your own
+  queue/state and consume them from your `start()` loop at your own
+  rhythm.
+- Report tick outcomes as one-shot feedback lines in your `ask()` output
+  so the model learns what its feeds did.
 
 ## Checklist
 
 - [ ] `# @module` in the first 20 lines; exactly one subclass
 - [ ] unique `id`; `requires` lists only existing module ids
 - [ ] `start()` is long-running (or intentionally state-only)
-- [ ] `query()` cheap; returns str or None
+- [ ] `ask()` cheap; returns str or None
 - [ ] weights provisioned in `start()`; failures raise (Facade retries with backoff)
 - [ ] no cwd-relative paths — anchor through `nan_itself.utils.paths`
 
@@ -115,4 +116,4 @@ uv run python builtin/skills/writing-modules/scripts/check_module.py <module.py>
 
 Details: [references/example-module.py](references/example-module.py)
 (complete annotated example), [references/channels.md](references/channels.md)
-(ChannelSpec + ActionSurface deep dive).
+(ChannelSpec deep dive).

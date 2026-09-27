@@ -4,7 +4,8 @@ Voice module unit tests (no hardware, no model weights).
 Covers:
     - ring consumer arithmetic (_consume_ring): fresh skip-history,
       sequential delivery, overtake resync, malformed seq
-    - say channel: TaskPayload schema, depth-8 FIFO, on_target wake
+    - say channel: TaskPayload schema, bounded FIFO, feed wakes the
+      speak thread
     - fast path: transcribe -> fast_reply -> speak; suppressed when
       a say task is pending, when the transcript is empty, or when
       the fast path is disabled
@@ -15,7 +16,7 @@ Covers:
       down; fast-path chatter is preempted by a pending say task
     - provisioning: loud failure without the audio dependency,
       without a published ring, or with a bad sample rate
-    - query() projection and serialize/restore validation
+    - ask() projection and serialize/restore validation
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def _load_voice_module():
     """
     Load builtin/modules/voice.py the way the loader does.
     voice.py imports Module symbols explicitly from
-    nan_itself.modules.action, so no namespace injection is
+    nan_itself.modules, so no namespace injection is
     needed beyond registering the spec.
     """
     spec = importlib.util.spec_from_file_location(
@@ -249,14 +250,12 @@ def test_consume_ring_malformed_seq():
 # ============================================================================
 
 
-def test_say_channel_schema_and_depth():
+def test_say_channel_schema():
     voice = _load_voice_module()
 
     spec = voice.VoiceModule.channels["say"]
 
     assert spec.model is voice.TaskPayload
-
-    assert spec.depth == 8
 
     payload, error = spec.validate(
         {"intent": "greet", "key_points": "hi"}
@@ -276,18 +275,18 @@ def test_say_channel_schema_and_depth():
     assert error is not None
 
 
-def test_on_target_wakes_speak_thread():
+def test_feed_wakes_speak_thread():
     instance = _fresh_instance()
 
     assert not instance._say_event.is_set()
 
-    result = instance.set_target("say", _say_task())
+    result = instance.feed("say", _say_task())
 
     assert result == "written"
 
     assert instance._say_event.is_set()
 
-    assert instance.current_target("say") is not None
+    assert instance._pending_say() is not None
 
 
 # ============================================================================
@@ -331,7 +330,7 @@ def test_fast_path_answers_trivial_turn():
 def test_fast_path_skipped_when_say_task_pending():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task())
+    instance.feed("say", _say_task())
 
     instance.transcriber = _FakeTranscriber("你好")
 
@@ -391,7 +390,7 @@ def test_fast_path_disabled():
 def test_speak_once_composes_and_plays():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task())
+    instance.feed("say", _say_task())
 
     instance.slm = _FakeSLM(
         composed={
@@ -410,7 +409,7 @@ def test_speak_once_composes_and_plays():
 
     # The task was consumed up front (barge-in drains what is
     # left behind it).
-    assert instance.current_target("say") is None
+    assert instance._pending_say() is None
 
     assert instance.slm.compose_calls == [_say_task()]
 
@@ -425,7 +424,7 @@ def test_speak_once_composes_and_plays():
     assert instance._current_state() == "listening"
 
 
-def test_speak_once_empty_slot_returns_false():
+def test_speak_once_empty_queue_returns_false():
     instance = _fresh_instance()
 
     assert instance._speak_once() is False
@@ -434,7 +433,7 @@ def test_speak_once_empty_slot_returns_false():
 def test_illegal_instruct_is_loud_and_neutral():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task())
+    instance.feed("say", _say_task())
 
     instance.slm = _FakeSLM(
         composed={
@@ -461,7 +460,7 @@ def test_illegal_instruct_is_loud_and_neutral():
 def test_compose_failure_is_feedback_not_crash():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task())
+    instance.feed("say", _say_task())
 
     instance.slm = _FakeSLM(composed=None)
 
@@ -487,7 +486,7 @@ def test_compose_failure_is_feedback_not_crash():
 def test_barge_in_stops_playback_and_drains_fifo():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task())
+    instance.feed("say", _say_task())
 
     instance.slm = _FakeSLM(
         composed={"instruct": "用开心的语气说", "text": "哈喽"}
@@ -498,7 +497,7 @@ def test_barge_in_stops_playback_and_drains_fifo():
     def on_write(writes: int) -> None:
         instance._barge_event.set()
 
-        instance.set_target("say", _say_task(intent="followup"))
+        instance.feed("say", _say_task(intent="followup"))
 
     instance.tts = _FakeTTS(chunks=5)
 
@@ -511,7 +510,7 @@ def test_barge_in_stops_playback_and_drains_fifo():
 
     # The whole FIFO was drained (say tasks behind the current
     # one die with the barge-in).
-    assert instance.current_target("say") is None
+    assert instance._pending_say() is None
 
     assert instance._stats["bargeins_total"] == 1
 
@@ -521,7 +520,7 @@ def test_barge_in_stops_playback_and_drains_fifo():
 def test_non_interruptible_task_plays_through():
     instance = _fresh_instance()
 
-    instance.set_target("say", _say_task(interruptible=False))
+    instance.feed("say", _say_task(interruptible=False))
 
     instance.slm = _FakeSLM(
         composed={"instruct": "用认真的语气说", "text": "听我说"}
@@ -555,7 +554,7 @@ def test_fast_path_chatter_preempted_by_say_task():
     # The agent fires a say task after the first chunk of
     # fast-path chatter: the chatter stops immediately.
     def on_write(writes: int) -> None:
-        instance.set_target("say", _say_task())
+        instance.feed("say", _say_task())
 
     instance.tts = _FakeTTS(chunks=5)
 
@@ -570,7 +569,7 @@ def test_fast_path_chatter_preempted_by_say_task():
 
     # Chatter stopped, the preempting task survives (it is not
     # barge-in, so the FIFO is not drained).
-    assert instance.current_target("say") is not None
+    assert instance._pending_say() is not None
 
     assert instance._stats["bargeins_total"] == 0
 
@@ -612,11 +611,11 @@ def test_provision_rejects_incompatible_rate():
 
 
 # ============================================================================
-# query() projection + persistence
+# ask() projection + persistence
 # ============================================================================
 
 
-def test_query_projects_state_transcripts_and_channel():
+def test_ask_projects_state_and_events():
     instance = _fresh_instance()
 
     instance._transcripts.append(
@@ -627,7 +626,7 @@ def test_query_projects_state_transcripts_and_channel():
         {"ts": 1758400000.0, "text": "你好呀"}
     )
 
-    rendered = asyncio.run(instance.query(None))
+    rendered = asyncio.run(instance.ask(None))
 
     assert rendered is not None
 
@@ -641,9 +640,15 @@ def test_query_projects_state_transcripts_and_channel():
 
     assert '"你好呀"' in rendered
 
-    # The say channel registry is always surfaced so the model
-    # does not re-send targets it already sent.
-    assert "[channel] voice/say" in rendered
+    # One-shot feedback lines surface in the projection.
+    instance._emit_event("tick: goal accepted")
+
+    rendered = asyncio.run(instance.ask(None))
+
+    assert "[event] tick: goal accepted" in rendered
+
+    # Drained: the event is gone on the next ask.
+    assert "tick:" not in asyncio.run(instance.ask(None))
 
 
 def test_serialize_restore_roundtrip():

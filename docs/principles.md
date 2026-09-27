@@ -70,6 +70,6 @@ up failed and revives the moment the weights land.
 
 Modules publish facts, never conclusions — interpretation belongs to
 the agent. The agent's intent reaches back down through write-only
-channel slots. `query()` is a cheap projection (it runs on the agent's
+module channels. `ask()` is a cheap projection (it runs on the agent's
 critical path every turn); heavy work lives in module loops. Neither
 side blocks the other.

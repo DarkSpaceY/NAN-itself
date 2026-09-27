@@ -936,12 +936,12 @@ def test_inbox_query_drains_messages():
     inbox.put("hello")
     inbox.put("second")
 
-    body = run(inbox.query(_turn()))
+    body = run(inbox.ask(_turn()))
 
     assert body == "[Inbox]\nhello\n\nsecond"
 
     # Drained: the next query sees nothing.
-    assert run(inbox.query(_turn())) is None
+    assert run(inbox.ask(_turn())) is None
 
 
 def test_inbox_hidden_for_subagents():
@@ -949,10 +949,10 @@ def test_inbox_hidden_for_subagents():
 
     inbox.put("secret")
 
-    assert run(inbox.query(_turn(depth=2))) is None
+    assert run(inbox.ask(_turn(depth=2))) is None
 
     # Still queued for the main agent.
-    assert "secret" in run(inbox.query(_turn()))
+    assert "secret" in run(inbox.ask(_turn()))
 
 
 def test_inbox_overflow_drops_oldest():
@@ -962,7 +962,7 @@ def test_inbox_overflow_drops_oldest():
     inbox.put("two")
     inbox.put("three")
 
-    body = run(inbox.query(_turn()))
+    body = run(inbox.ask(_turn()))
 
     assert "one" not in body
     assert "two" in body
@@ -974,4 +974,4 @@ def test_inbox_ignores_empty_put():
 
     inbox.put("")
 
-    assert run(inbox.query(_turn())) is None
+    assert run(inbox.ask(_turn())) is None

@@ -29,7 +29,6 @@ from .model import (
 
 __all__ = [
     "ChannelSpec",
-    "ActionSurface",
     "DataSpace",
     "DataSpaceReader",
     "MODULE_HEADER",
@@ -45,16 +44,11 @@ __all__ = [
 def __getattr__(name: str):
     # Lazy re-export of the runtime machinery: keeps the agent
     # layer's `import nan_itself.modules.model` free of runtime
-    # side effects. Do NOT hoist these two imports.
+    # side effects. Do NOT hoist this import.
     if name == "Facade":
         from .runtime import Facade
 
         return Facade
-
-    if name == "ActionSurface":
-        from .action import ActionSurface
-
-        return ActionSurface
 
     raise AttributeError(
         f"module {__name__!r} has no attribute {name!r}"

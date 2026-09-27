@@ -6,9 +6,9 @@ Usage:
 
 Checks the loadable-file contract enforced by the module loader:
   - the literal `# @module` header within the first 20 lines
-  - exactly one concrete Module subclass (base named Module or ActionSurface)
+  - exactly one concrete Module subclass
   - a non-empty `id` assignment on the class
-  - `async def start(self)` and `async def query(self, turn)` present
+  - `async def start(self)` and `async def ask(self, turn)` present
   - `requires` (if present) is a tuple/list of unique identifier strings
 
 Pure AST + text checks; the file is never imported or executed.
@@ -23,7 +23,7 @@ from pathlib import Path
 
 HEADER = "# @module"
 SCAN_LINES = 20
-BASES = {"Module", "ActionSurface"}
+BASES = {"Module"}
 
 
 class Report:
@@ -159,7 +159,7 @@ def check(path: Path) -> Report:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
-    for required in ("start", "query"):
+    for required in ("start", "ask"):
         method = methods.get(required)
 
         if method is None:
@@ -167,20 +167,20 @@ def check(path: Path) -> Report:
         elif not isinstance(method, ast.AsyncFunctionDef):
             report.error(f"`{required}()` must be async")
 
-    on_turn = methods.get("on_turn")
+    tell = methods.get("tell")
 
-    if on_turn is not None and not isinstance(
-        on_turn, ast.AsyncFunctionDef
+    if tell is not None and not isinstance(
+        tell, ast.AsyncFunctionDef
     ):
-        report.error("`on_turn()` must be async")
+        report.error("`tell()` must be async")
 
-    query = methods.get("query")
+    ask = methods.get("ask")
 
-    if isinstance(query, ast.AsyncFunctionDef):
-        args = [arg.arg for arg in query.args.args]
+    if isinstance(ask, ast.AsyncFunctionDef):
+        args = [arg.arg for arg in ask.args.args]
 
         if len(args) != 2 or args[0] != "self":
-            report.error("`query(self, turn)` takes exactly (self, turn)")
+            report.error("`ask(self, turn)` takes exactly (self, turn)")
 
     return report
 

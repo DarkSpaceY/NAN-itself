@@ -5,10 +5,11 @@
 
 ## 可见性边界(黑盒原则)
 
-主流只渲染 agent 层动作:user_input / modules.query / tool / skill / response。
+主流只渲染 agent 层动作:user_input / modules.ask / tool / skill / response。
 **模块内部过程(planner think、memory review…)一律不可见**——模块对 UI 是黑盒,
-只有其抽象属性(可进入非主流展示,v2)。引擎在回合开始的 `modules.query_snapshot`
-处发一条 `record_started(kind:"module", name:"modules.query")`,planner 阻塞多久
+只有其抽象属性(可进入非主流展示,v2)。引擎在回合开始的 ambient 询问
+(`modules.query_snapshot`)处,对每个 RUNNING 模块发一条
+`record_started(kind:"module", name:"<module_id>")`,planner 阻塞多久
 都只是这一行的转轮。
 
 ## 通道

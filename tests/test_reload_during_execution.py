@@ -222,7 +222,7 @@ class ExampleModule(Module):
 
         await asyncio.sleep(3600)
 
-    async def query(
+    async def ask(
         self,
         turn,
     ):
@@ -252,7 +252,7 @@ class ExampleModule(Module):
 
         await asyncio.sleep(3600)
 
-    async def query(
+    async def ask(
         self,
         turn,
     ):

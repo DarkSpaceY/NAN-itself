@@ -38,15 +38,20 @@ On startup it:
 
 ### agent/ — the turn loop
 
-- **Turn is the sole record of a round** (`model.py`). A `Turn` holds
-  `persona`, `history` (the snapshot the model saw), `messages` (what
-  this round produced), `usage`, `finish_reason` and `model`. There is
-  no separate persistent history.
+- **Turn is the sole record of a round** (`model.py`). A `Turn` carries
+  everything as structure: `persona` and `history` (the snapshot the
+  model saw), the observation inputs (`task`, `world`, `ambient` — the
+  Modules' per-turn context, `reports` — harvested child reports), and
+  the round's flow (`reply`, `calls` with `results`, one per call), plus
+  `usage`, `finish_reason` and `model`. No message lives on the Turn and
+  there is no separate persistent history.
 - **Snapshot derivation** (`engine.py`). The next round's snapshot is
-  derived as `last_turn.history + last_turn.messages`. When the
-  character budget is exceeded the snapshot is truncated to an empty
-  tuple — the model then sees only the system prompt plus the newest
-  observation and the chain restarts from there.
+  derived as `last_turn.history + render_turn(last_turn)`; rendering a
+  turn into model messages is the exclusive job of `agent/prompts.py`
+  (`build_messages` / `render_turn`), and the engine is its only caller.
+  When the character budget is exceeded the snapshot is truncated to an
+  empty tuple — the model then sees only the system prompt plus the
+  newest observation and the chain restarts from there.
 - **Core state** (`core.py`). The core holds a single `last_turn`
   reference, replaced after each successful run and kept on failure, so
   a failed round can be inspected as-is.
@@ -88,22 +93,24 @@ layouts — builtin (`builtin/tools/`) and workspace
 
 ### modules/ — ambient state and channels
 
-Builtin modules (`builtin/modules/`) provide ambient state the agent
-can query. The machinery here (`runtime.py` = the Facade) owns:
+Builtin modules (`builtin/modules/`) provide ambient context the
+engine asks for at every turn start. The machinery here
+(`runtime.py` = the Facade) owns:
 
 - dependency graph, lifecycle supervision, retry and hot reload;
 - DataSpace ownership: a module publishes, dependents read detached
   snapshots (`deps.py`);
-- per-turn delivery: `on_turn()` observation and `query()` projection
-  (`model.py` defines `Turn` and `Module`);
+- per-turn coupling: `ask()` ambient projection at turn start and
+  `tell()` notification after it (`model.py` defines `Turn` and
+  `Module`);
 - private state persistence via `serialize_state()` (`persistence.py`);
-- **channels** (`action.py`): modules that opt in via `ActionSurface`
-  expose write-only data slots the model reaches through the
+- **channels** (`model.py`): modules that declare a `channels` mapping
+  on the class expose downlink endpoints the model reaches through the
   `list_channels` / `show_channels` / `invoke_channels` verbs; see
   [design/reactive-modules.md](design/reactive-modules.md).
 
 Module-side contracts: capture/inference work runs on daemon threads
-with interval gating; the agent-facing surface is a pure `query()`
+with interval gating; the per-turn surface is a pure `ask()`
 projection; provisioning failures (e.g. missing model weights) raise
 out of `start()` -- the Facade marks the module DOWN with the error
 and restarts it with backoff, so a module with missing weights comes

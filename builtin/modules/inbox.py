@@ -59,7 +59,7 @@ class InboxModule(Module):
         # restarts it.
         await asyncio.Event().wait()
 
-    async def on_turn(
+    async def tell(
         self,
         record,
     ) -> None:
@@ -67,7 +67,7 @@ class InboxModule(Module):
 
     # ------------------------------------------------------------------
 
-    async def query(
+    async def ask(
         self,
         turn: Turn,
     ) -> str | None:

@@ -23,9 +23,6 @@ from .model import (
     ModuleState,
     Turn,
 )
-from .action import (
-    ActionSurface,
-)
 from .reload import (
     hot_reload,
 )
@@ -91,7 +88,7 @@ class Facade:
             self.modules.values()
         ):
             task = asyncio.create_task(
-                self._safe_on_turn(
+                self._safe_tell(
                     module_record.instance,
                     record,
                 )
@@ -104,12 +101,12 @@ class Facade:
             )
 
     @staticmethod
-    async def _safe_on_turn(
+    async def _safe_tell(
         instance,
         record,
     ) -> None:
         try:
-            await instance.on_turn(
+            await instance.tell(
                 record
             )
 
@@ -118,7 +115,7 @@ class Facade:
 
         except Exception:
             logger.exception(
-                f"Module on_turn failed: "
+                f"Module tell failed: "
                 f"{getattr(instance, 'id', '?')}"
             )
 
@@ -380,7 +377,7 @@ class Facade:
 
             try:
                 result = (
-                    await record.instance.query(
+                    await record.instance.ask(
                         turn
                     )
                 )
@@ -391,7 +388,7 @@ class Facade:
 
             except Exception:
                 logger.exception(
-                    f"Module query failed: "
+                    f"Module ask failed: "
                     f"{record.id}"
                     f"[generation={record.generation}]",
                 )
@@ -430,12 +427,12 @@ class Facade:
     # ==================================================================
     #
     # Routing never raises: every failure (unknown module /
-    # channel, module not running, no action surface, schema
+    # channel, module not running, channel-free module, schema
     # rejection) comes back as a result string.
 
     def list_module_channels(self) -> str:
         """
-        Enumerate every RUNNING action module's channels.
+        Enumerate every RUNNING module's channels.
         """
         lines: list[str] = []
 
@@ -443,24 +440,11 @@ class Facade:
             if record.state is not ModuleState.RUNNING:
                 continue
 
-            if not isinstance(
-                record.instance,
-                ActionSurface,
+            for name in (
+                record.instance.channels
             ):
-                continue
-
-            for name, spec in (
-                record.instance.channels.items()
-            ):
-                depth = (
-                    str(spec.depth)
-                    if spec.depth > 1
-                    else "overwrite"
-                )
-
                 lines.append(
-                    f"{record.id}/{name} "
-                    f"(depth={depth})"
+                    f"{record.id}/{name}"
                 )
 
         if not lines:
@@ -478,10 +462,7 @@ class Facade:
         channel: str | None = None,
     ) -> str:
         """
-        Show channel details: schema, depth, occupancy.
-
-        Slots are write-only: the current payload is never
-        rendered back.
+        Show channel details: description and schema.
         """
         record = self.modules.get(module_id)
 
@@ -498,16 +479,13 @@ class Facade:
                 "RUNNING."
             )
 
-        if not isinstance(
-            record.instance,
-            ActionSurface,
-        ):
+        channels = record.instance.channels
+
+        if not channels:
             return (
                 f"Module '{module_id}' exposes "
                 "no channels."
             )
-
-        channels = record.instance.channels
 
         if channel is not None:
             if channel not in channels:
@@ -521,24 +499,12 @@ class Facade:
         else:
             selected = dict(channels)
 
-        if not selected:
-            return (
-                f"Module '{module_id}' exposes "
-                "no channels."
-            )
-
         lines: list[str] = []
 
         for name, spec in selected.items():
-            occupancy = len(
-                record.instance._slot(name)
-            )
-
             detail: dict[str, Any] = {
                 "name": f"{module_id}/{name}",
                 "description": spec.description,
-                "depth": spec.depth,
-                "occupancy": occupancy,
                 "schema": spec.json_schema(),
             }
 
@@ -559,11 +525,11 @@ class Facade:
         payload: Any,
     ) -> str:
         """
-        Validate and fire one payload into a channel slot.
+        Validate one payload and feed it to the module.
 
-        Returns 'written' / 'replaced' / 'rejected' or an error
-        string. Validation failures are rejected at the boundary;
-        the module's tick never sees malformed payloads.
+        Returns 'written' / 'rejected' or an error string.
+        Validation failures are rejected at the boundary; the
+        module only ever receives well-formed payloads.
         """
         record = self.modules.get(module_id)
 
@@ -577,19 +543,16 @@ class Facade:
         if record.state is not ModuleState.RUNNING:
             return (
                 f"Module '{module_id}' is not "
-                "RUNNING; target not delivered."
+                "RUNNING; payload not delivered."
             )
 
-        if not isinstance(
-            record.instance,
-            ActionSurface,
-        ):
+        channels = record.instance.channels
+
+        if not channels:
             return (
                 f"Module '{module_id}' exposes "
                 "no channels."
             )
-
-        channels = record.instance.channels
 
         if channel not in channels:
             return (
@@ -610,7 +573,7 @@ class Facade:
                 f"{error}"
             )
 
-        return record.instance.set_target(
+        return record.instance.feed(
             channel,
             deepcopy(validated),
         )

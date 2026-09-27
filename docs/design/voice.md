@@ -48,12 +48,12 @@ voice module (requires = ["audio"])            [down: channel slot]
 
 State machine: `idle → listening → thinking (main agent turn or SLM
 fast path) → speaking → (barge-in → idle)`. The full state is part of
-the `query()` projection.
+the `ask()` projection.
 
 ## The uplink (facts)
 
 - Transcript events publish as facts: `{speaker: "user", text, at,
-  final: bool}`. The agent reads them through `query()` projection
+  final: bool}`. The agent reads them through `ask()` projection
   (`[Voice] user said: ...`), exactly like every other ambient module.
 - The module never interprets; the agent decides what a user utterance
   means. Exception: the SLM fast path (below), which reports what it
@@ -61,7 +61,8 @@ the `query()` projection.
 
 ## The downlink: `say` channel
 
-ActionSurface with one channel. Composite name: `module:voice/say`.
+One channel declared on the Module itself. Composite name:
+`module:voice/say`.
 
 ```python
 class TaskPayload(BaseModel):
@@ -71,8 +72,8 @@ class TaskPayload(BaseModel):
     interruptible: bool = True
 ```
 
-- `depth=N` FIFO: a long reply may be written as several tasks;
-  barge-in drains the queue.
+- FIFO (module-private deque): a long reply may be written as
+  several tasks; barge-in drains the queue.
 - The **SLM output** (consumed by TTS, never by the agent) is:
 
 ```python
@@ -98,7 +99,7 @@ class Utterance(BaseModel):
      (no opinions, no actions, no memory-dependent claims);
   2. anything non-trivial escalates: the module publishes the utterance
      as a pending user turn for the main agent;
-  3. everything the SLM said is projected in `query()` as
+  3. everything the SLM said is projected in `ask()` as
      `[Voice] answered myself: ...` so the agent stays consistent;
   4. a task written to `say` always preempts fast-path chatter.
 - The SLM runs locally (transformers, **Qwen3-0.6B** in non-thinking
@@ -110,9 +111,9 @@ class Utterance(BaseModel):
   audio lands while later sentences still synthesize.
 - Playback keeps the VAD armed on the incoming audio ring. Continuous
   speech ≥ 0.5 s (LiveKit adaptive threshold) while speaking =
-  barge-in: stop playback, drain the `say` queue, `emit_event("user
-  interrupted")`, return to listening. The event flows to the agent in
-  the next projection.
+  barge-in: stop playback, drain the `say` queue, record a one-shot
+  "user interrupted" event for the ask() projection, return to
+  listening. The event flows to the agent in the next projection.
 - Echo (v1): headphones assumed; speaker playback is possible but
   self-hearing must be expected. AEC (far-end reference = our own TTS
   stream) is v2 — it is the reason listen and say live in one module.
@@ -161,7 +162,7 @@ speaker identity before hitting the fast path.
   FaceMatcher stance). Survives hot reloads.
 - **Wiring**: `_handle_utterance` embeds the utterance PCM (temp
   wav via soundfile), matches/enrolls, and attaches `speaker` to
-  the transcript entry; query() renders `- user said (person-1)
+  the transcript entry; ask() renders `- user said (person-1)
   ...`. A broken embedder logs and continues unlabeled — the
   transcript itself always stands.
 - **Provisioning**: gated HF model — accept the terms at

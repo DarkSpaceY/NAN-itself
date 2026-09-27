@@ -20,9 +20,10 @@ skills, and an HTTP gateway with a web UI.
 
 ## Features
 
-- **Turn-based agent core** — every round is captured in a single `Turn`
-  record (history snapshot + messages), so any round can be restored or
-  inspected exactly as the model saw it.
+- **Turn-based agent core** — every round is captured in a single
+  structured `Turn` record (history snapshot + the round's reply, calls
+  and results), so any round can be restored or inspected exactly as the
+  model saw it.
 - **Hot-reloadable tool providers** — two interchangeable kinds, reloaded
   live from source with zero restarts:
   - **MCP providers**: one YAML file = one stdio MCP server.
@@ -32,9 +33,9 @@ skills, and an HTTP gateway with a web UI.
   source file disables its provider.
 - **Ambient perception modules** — audio, vision (photometry → flow →
   faces → YOLO → OCR → VLM captioning), inbox, network and system modules
-  run as background daemons and are queried by the agent.
-- **Module channels (reactive modules)** — modules can declare write-only
-  downlink data slots the model writes to through
+  run as background daemons and contribute ambient context every turn.
+- **Module channels (reactive modules)** — modules can declare downlink
+  channels the model writes to through
   `list_channels` / `show_channels` / `invoke_channels`, enabling
   perceive → decide → act loops that run *inside* a module, at module
   frequency, with the LLM staying out of the hot path.
@@ -56,7 +57,7 @@ flowchart LR
     C <--> SK[Skills<br/>hot-reload]
     C <--> MD[Modules<br/>audio / voice / vision / network / system]
     C -. "channels: list / show / invoke" .-> MD
-    MD -. "query() projection + events" .-> C
+    MD -. "ask() ambient + events" .-> C
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full picture.
@@ -64,17 +65,18 @@ See [docs/architecture.md](docs/architecture.md) for the full picture.
 ### The turn loop
 
 Each round is one LLM round-trip. The model sees a derived snapshot of
-the previous round plus the newest observation; everything it produces
-becomes the next round's snapshot. There is no separate history store.
+previous rounds plus the newest observation; the engine renders each
+completed round and appends it to the next round's snapshot. There is no
+separate history store.
 
 ```mermaid
 flowchart TB
     subgraph turn["Turn N"]
-        A["snapshot<br/>= Turn N-1 history + messages"] --> B[LLM round-trip]
-        B --> C["messages<br/>assistant + tool results"]
-        C --> D["Turn record<br/>persona / history / messages / usage"]
+        A["snapshot<br/>= Turn N-1 history + rendering"] --> B[LLM round-trip]
+        B --> C["reply / tool calls<br/>+ results"]
+        C --> D["Turn record<br/>history / ambient / reports / reply / calls / results"]
     end
-    D -->|"history + messages"| E["Turn N+1 snapshot"]
+    D -->|"history + render_turn(Turn N)"| E["Turn N+1 snapshot"]
     E --> A2["..."]
 
     style turn fill:#f6f8fa,stroke:#d0d7de,color:#24292f
@@ -83,9 +85,9 @@ flowchart TB
 ### Modules and channels
 
 Modules are background daemons: heavy work runs in `start()` loops and
-`on_turn()`, while `query()` stays a cheap projection the agent reads
-every turn. Modules that opt in also expose **channels** — write-only
-slots the model fills with targets; the module consumes them at its own
+`tell()`, while `ask()` stays a cheap projection the engine reads every
+turn. Modules that opt in also declare **channels** — downlink endpoints
+the model feeds payloads into; the module consumes them at its own
 tick. Data flows down, state flows up, and neither side blocks the other.
 
 ```mermaid
@@ -93,9 +95,9 @@ flowchart LR
     subgraph agent["Agent (LLM)"]
         V["invoke_channels<br/>schema check → deep copy"]
     end
-    V -->|"written / replaced / rejected"| S["Channel slot<br/>(depth 1: overwrite)<br/>(depth N: FIFO)"]
+    V -->|"written / rejected"| S["Module channel<br/>feed() stores the payload"]
     S --> C2["Module tick loop<br/>consumes at its own pace"]
-    C2 --> Q["DataSpace / query()<br/>progress flows back up"]
+    C2 --> Q["DataSpace / ask()<br/>progress flows back up"]
 
     style agent fill:#f6f8fa,stroke:#d0d7de,color:#24292f
 ```

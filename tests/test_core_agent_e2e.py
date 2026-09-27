@@ -171,7 +171,7 @@ class FakeModules:
         # Real inbox module: the observation carries whatever
         # is queued (user input).
         if self.inbox is not None:
-            body = await self.inbox.query(
+            body = await self.inbox.ask(
                 turn
             )
 

@@ -671,10 +671,10 @@ class ListChannelsVerb:
             name=self.name,
             description=(
                 "List every module channel the model may "
-                "write to, as 'module/channel'. Channels are "
-                "downlink data slots: use show_channels to "
-                "inspect one and invoke_channels to write a "
-                "target."
+                "feed, as 'module/channel'. Channels are "
+                "downlink endpoints: use show_channels to "
+                "inspect one and invoke_channels to feed a "
+                "payload."
             ),
             input_schema={
                 "type": "object",
@@ -705,10 +705,8 @@ class ShowChannelsVerb:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Show channel details: description, JSON "
-                "schema, depth and occupancy. Slots are "
-                "write-only: payloads already written are "
-                "never rendered back."
+                "Show channel details: description and "
+                "JSON schema."
             ),
             input_schema={
                 "type": "object",
@@ -772,12 +770,9 @@ class InvokeChannelsVerb:
         return ToolDefinition(
             name=self.name,
             description=(
-                "Write one target into a module channel: "
-                "schema validation, then fire-into-slot. "
-                "Returns 'written', 'replaced' or "
-                "'rejected'. To retract a not-yet-consumed "
-                "target, write a new one (overwrite "
-                "semantics)."
+                "Feed one payload into a module channel: "
+                "schema validation, then hand-down to the "
+                "module. Returns 'written' or 'rejected'."
             ),
             input_schema={
                 "type": "object",
@@ -797,8 +792,8 @@ class InvokeChannelsVerb:
                     "payload": {
                         "type": "object",
                         "description": (
-                            "Target payload, shaped by "
-                            "the channel schema (see "
+                            "Payload, shaped by the "
+                            "channel schema (see "
                             "show_channels)."
                         ),
                     },

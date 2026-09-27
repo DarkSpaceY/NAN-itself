@@ -801,7 +801,7 @@ def test_vision_module_query_unavailable():
 
     module._stats["reason"] = "no camera"
 
-    text = asyncio.run(module.query(_turn()))
+    text = asyncio.run(module.ask(_turn()))
 
     assert text is not None
 
@@ -846,7 +846,7 @@ def test_vision_module_query_renders_seen():
             },
         )
 
-    text = asyncio.run(module.query(_turn()))
+    text = asyncio.run(module.ask(_turn()))
 
     assert "[Vision]" in text
 
@@ -877,7 +877,7 @@ def test_vision_module_query_silent_when_never_seen():
 
         module._stats["colorfulness"] = 0.0
 
-    text = asyncio.run(module.query(_turn()))
+    text = asyncio.run(module.ask(_turn()))
 
     assert text is None
 
@@ -1112,6 +1112,6 @@ def test_vlm_caption_renders_in_query():
             },
         )
 
-    text = asyncio.run(module.query(_turn()))
+    text = asyncio.run(module.ask(_turn()))
 
     assert '[caption: "a person at a desk"]' in text

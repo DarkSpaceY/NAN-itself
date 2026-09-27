@@ -612,7 +612,7 @@ class Example(Module):
     async def start(self):
         await asyncio.Event().wait()
 
-    async def query(self, turn):
+    async def ask(self, turn):
         return "reloaded"
 """,
         encoding="utf-8",

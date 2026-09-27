@@ -1,13 +1,11 @@
 """
-Reactive Modules -- channel downlink mechanism tests.
+Channel downlink mechanism tests.
 
 Covers:
-    - ChannelSpec schema derivation and boundary validation
+    - ChannelSpec schema derivation and validation
+    - Module.feed base contract ('written' by default)
     - Facade routing (never raises; failure modes as strings)
-    - depth=1 overwrite / depth=N FIFO drop-oldest
-    - veto hook
     - verb triple end-to-end against a live Facade
-    - one-shot event + registry summary rendering
 
 Every Facade is pointed at tmp dirs only (never the real
 builtin/modules -- real modules would start).
@@ -21,11 +19,8 @@ from types import SimpleNamespace
 
 from pydantic import BaseModel
 
-from nan_itself.modules.action import (
-    ActionSurface,
-    ChannelSpec,
-)
 from nan_itself.modules.model import (
+    ChannelSpec,
     Module,
     ModuleState,
 )
@@ -98,102 +93,10 @@ def test_channel_spec_unvalidated_passthrough():
     assert validated is payload
 
 
-def test_channel_spec_depth_must_be_positive():
-    try:
-        ChannelSpec(depth=0)
-
-    except ValueError:
-        pass
-
-    else:
-        raise AssertionError(
-            "depth=0 must be rejected"
-        )
-
-
-# ============================================================================
-# Slot mechanics
-# ============================================================================
-
-
-class _Slots(ActionSurface):
-    id = "slots"
-
-    channels = {
-        "goal": ChannelSpec(Goal),
-        "burst": ChannelSpec(depth=3),
-    }
-
-    async def start(self):
-        await asyncio.Event().wait()
-
-
-def _instance():
-    return _Slots()
-
-
-def test_depth_one_overwrite_semantics():
-    surface = _instance()
-
-    assert (
-        surface.set_target("goal", {"text": "a"})
-        == "written"
-    )
-
-    assert (
-        surface.set_target("goal", {"text": "b"})
-        == "replaced"
-    )
-
-    # Raw write path: payload enters the slot as-is (validation
-    # and normalization belong to Facade routing).
-    assert surface.current_target("goal") == {
-        "text": "b"
-    }
-
-    surface.clear_target("goal")
-
-    assert surface.current_target("goal") is None
-
-
-def test_depth_n_fifo_drop_oldest():
-    surface = _instance()
-
-    for i in range(5):
-        surface.set_target("burst", {"n": i})
-
-    # depth=3: the two oldest were dropped.
-    assert surface.current_target("burst") == {
-        "n": 2
-    }
-
-    surface.clear_target("burst")
-
-    assert surface.current_target("burst") == {
-        "n": 3
-    }
-
-
-def test_veto_hook_rejects_write():
-    class _Veto(_Slots):
-        def on_target(self, channel, payload):
-            return payload.get("text") != "blocked"
-
-    surface = _Veto()
-
-    assert (
-        surface.set_target(
-            "goal", {"text": "blocked"}
-        )
-        == "rejected"
-    )
-
-    assert surface.current_target("goal") is None
-
-    assert (
-        surface.set_target("goal", {"text": "ok"})
-        == "written"
-    )
+def test_module_base_feed_accepts_by_default():
+    # The runtime validates channel existence and schema before
+    # calling feed(); the base default accepts whatever it gets.
+    assert Module().feed("goal", {"text": "x"}) == "written"
 
 
 # ============================================================================
@@ -205,7 +108,7 @@ import asyncio
 
 from pydantic import BaseModel
 
-from nan_itself.modules.action import ActionSurface, ChannelSpec
+from nan_itself.modules import ChannelSpec
 
 
 class Goal(BaseModel):
@@ -213,19 +116,26 @@ class Goal(BaseModel):
     priority: int = 1
 
 
-class Probe(ActionSurface):
+class Probe(Module):
     id = "probe"
 
     channels = {
         "goal": ChannelSpec(Goal, description="Navigation goal"),
-        "burst": ChannelSpec(depth=3, description="Command burst"),
+        "burst": ChannelSpec(description="Command burst"),
     }
+
+    def __init__(self):
+        self.fed = []
+
+    def feed(self, channel, payload):
+        self.fed.append((channel, payload))
+        return "written"
 
     async def start(self):
         await asyncio.Event().wait()
 
-    async def query(self, turn):
-        return self.render_action_section(turn)
+    async def ask(self, turn):
+        return None
 """
 
 
@@ -276,7 +186,7 @@ def test_facade_routing_failure_modes(tmp_path):
         facade.show_module_channel("ghost")
     )
 
-    # A plain Module exposes no channels.
+    # A channel-free Module exposes no channels.
     plain = Module()
 
     from nan_itself.modules.model import (
@@ -320,7 +230,7 @@ class Crashing(Module):
     async def start(self):
         raise RuntimeError("no weights: drop model.onnx")
 
-    async def query(self, turn):
+    async def ask(self, turn):
         return None
 """
 
@@ -365,14 +275,16 @@ async def _full_chain(tmp_path):
         tmp_path
     )
 
-    # list
+    # list: bare 'module/channel' lines, no depth/occupancy.
     listing = facade.list_module_channels()
 
     assert "probe/goal" in listing
 
     assert "probe/burst" in listing
 
-    # show: schema + occupancy, never the payload
+    assert "depth" not in listing
+
+    # show: description + schema only.
     detail = facade.show_module_channel(
         "probe", "goal"
     )
@@ -381,7 +293,12 @@ async def _full_chain(tmp_path):
 
     assert '"text"' in detail
 
-    # invoke: written -> replaced -> rejected
+    assert "occupancy" not in detail
+
+    assert "depth" not in detail
+
+    # invoke: every validated feed is 'written' (the module's
+    # consumption policy is private now).
     assert (
         facade.write_module_channel(
             "probe", "goal", {"text": "a"}
@@ -393,7 +310,7 @@ async def _full_chain(tmp_path):
         facade.write_module_channel(
             "probe", "goal", {"text": "b"}
         )
-        == "replaced"
+        == "written"
     )
 
     rejected = facade.write_module_channel(
@@ -402,24 +319,12 @@ async def _full_chain(tmp_path):
 
     assert rejected.startswith("rejected")
 
-    # The tick loop sees only well-formed payloads.
-    assert instance.current_target("goal") == {
-        "text": "b",
-        "priority": 1,
-    }
-
-    # FIFO channel.
-    facade.write_module_channel(
-        "probe", "burst", {"n": 1}
-    )
-
-    facade.write_module_channel(
-        "probe", "burst", {"n": 2}
-    )
-
-    assert instance.current_target("burst") == {
-        "n": 1
-    }
+    # The module received only the well-formed payloads,
+    # normalized by the declared schema.
+    assert instance.fed == [
+        ("goal", {"text": "a", "priority": 1}),
+        ("goal", {"text": "b", "priority": 1}),
+    ]
 
     # Unknown channel on a known module.
     assert "Unknown channel" in (
@@ -485,10 +390,9 @@ async def _verb_chain(tmp_path):
 
     assert result == "written"
 
-    assert instance.current_target("goal") == {
-        "text": "go home",
-        "priority": 1,
-    }
+    assert instance.fed == [
+        ("goal", {"text": "go home", "priority": 1})
+    ]
 
     # Argument validation failures are plain strings.
     missing = await InvokeChannelsVerb().execute(
@@ -501,57 +405,3 @@ async def _verb_chain(tmp_path):
 
 def test_verbs_end_to_end(tmp_path):
     run(_verb_chain(tmp_path))
-
-
-# ============================================================================
-# query() projection: registry summary + one-shot events
-# ============================================================================
-
-
-async def _projection(tmp_path):
-    facade, instance = await _running_probe(
-        tmp_path
-    )
-
-    # An untouched surface still renders the registry summary
-    # (so the model can discover channels) but no events and no
-    # pending state.
-    first = instance.render_action_section(None)
-
-    assert "probe/goal" in first
-
-    assert "empty" in first
-
-    assert "[event]" not in first
-
-    facade.write_module_channel(
-        "probe", "goal", {"text": "a"}
-    )
-
-    instance.emit_event("tick: goal accepted")
-
-    section = instance.render_action_section(None)
-
-    assert "1 pending" in section
-
-    assert "tick: goal accepted" in section
-
-    # One-shot: the event is gone on the next render, the
-    # occupancy summary persists.
-    again = instance.render_action_section(None)
-
-    assert "tick:" not in again
-
-    assert "1 pending" in again
-
-    instance.clear_target("goal")
-
-    drained = instance.render_action_section(None)
-
-    assert "1 pending" not in drained
-
-    return facade
-
-
-def test_query_projection_one_shot_events(tmp_path):
-    run(_projection(tmp_path))

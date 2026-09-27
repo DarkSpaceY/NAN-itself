@@ -4,5 +4,5 @@
 > reference is intentionally deferred. See
 > [`builtin/modules/`](../builtin/modules/) for the live sources.
 
-For the architecture (daemon threads, `query()` projection, graceful
+For the architecture (daemon threads, `ask()` projection, graceful
 degradation) see [architecture.md](architecture.md).

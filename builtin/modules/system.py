@@ -558,12 +558,12 @@ class SystemModule(Module):
 
             await asyncio.sleep(self.poll_interval)
 
-    async def on_turn(self, record) -> None:
+    async def tell(self, record) -> None:
         pass
 
     # ------------------------------------------------------------------
 
-    async def query(self, turn: Turn) -> str | None:
+    async def ask(self, turn: Turn) -> str | None:
         facts = self._latest
 
         if facts is None:

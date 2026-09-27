@@ -3,23 +3,25 @@
 Notifier: queues short notifications the model hands down, and
 delivers them on a slow tick.
 
-Complete annotated example of an ActionSurface module:
+Complete annotated example of a channel Module:
 - one downlink channel ("send") with a pydantic payload,
-- a tick loop in start() that consumes targets at module rhythm,
-- facts-only uplink via data.publish + a cheap query() projection,
-- one-shot feedback via emit_event, rendered by render_action_section.
+- a feed() override that queues payloads for the tick loop,
+- a tick loop in start() that consumes them at module rhythm,
+- facts-only uplink via data.publish + a cheap ask() projection,
+- one-shot feedback lines drained by ask().
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import ClassVar, Mapping
+from collections import deque
+from typing import Any, ClassVar, Mapping
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from nan_itself.modules.action import ActionSurface, ChannelSpec
+from nan_itself.modules import ChannelSpec
 
 
 class SendPayload(BaseModel):
@@ -29,25 +31,36 @@ class SendPayload(BaseModel):
     urgent: bool = False
 
 
-class NotifierModule(ActionSurface):
+class NotifierModule(Module):
 
     id = "notifier"
 
-    # Downlink: the model writes via invoke_channels. depth=1 keeps a
-    # single overwrite slot; use depth=N for a FIFO queue.
+    # Downlink: the model feeds via invoke_channels; the runtime
+    # validates the schema and calls feed().
     channels: ClassVar[Mapping[str, ChannelSpec]] = {
         "send": ChannelSpec(
             SendPayload,
             description="queue a short notification",
-            depth=4,
         ),
     }
 
     tick_interval: float = 2.0
 
     def __init__(self) -> None:
+        self._queue: deque[dict] = deque()  # fed payloads, FIFO
+        self._events: deque[str] = deque(maxlen=64)
         self._sent: list[dict] = []      # delivered facts (uplink state)
         self._last_error: str | None = None
+
+    def feed(self, channel: str, payload: Any) -> str:
+        # The runtime checked the channel and its schema; queue
+        # the payload for the tick loop.
+        if channel != "send":
+            return "rejected"
+
+        self._queue.append(payload)
+
+        return "written"
 
     async def start(self) -> None:
         # All provisioning happens BEFORE the loop; a failure here
@@ -55,17 +68,16 @@ class NotifierModule(ActionSurface):
         logger.info("notifier ticking every {}s", self.tick_interval)
 
         while True:
-            payload = self.current_target("send")
-
-            if payload is not None:
+            if self._queue:
                 # payload is the validated, normalized dict produced by
                 # the ChannelSpec model.
+                payload = self._queue.popleft()
+
                 try:
                     self._deliver(payload)
-                    self.clear_target("send")
-                    self.emit_event("notification delivered")
+                    self._events.append("notification delivered")
                 except Exception as exc:
-                    self.emit_event(f"delivery failed: {exc}")
+                    self._events.append(f"delivery failed: {exc}")
 
             self.data.publish(
                 {
@@ -88,14 +100,14 @@ class NotifierModule(ActionSurface):
             }
         )
 
-    async def on_turn(self, record: Turn) -> None:
+    async def tell(self, record: Turn) -> None:
         # Runs in its own task after each completed agent execution.
-        # Heavy per-turn processing is allowed here; keep query() cheap.
+        # Heavy per-turn processing is allowed here; keep ask() cheap.
         return None
 
-    async def query(self, turn: Turn) -> str | None:
+    async def ask(self, turn: Turn) -> str | None:
         # PERFORMANCE RULE: cheap projection only -- read state that
-        # start()/on_turn() already computed. This runs every turn on
+        # start()/tell() already computed. This runs every turn on
         # the agent's critical path.
         if not self._sent:
             return None
@@ -111,18 +123,16 @@ class NotifierModule(ActionSurface):
         if self._last_error:
             lines.append(f"- last error: {self._last_error}")
 
-        # ActionSurface modules append the action section so the model
-        # sees channel occupancy and one-shot feedback events.
-        action = self.render_action_section(turn)
-
-        if action:
-            lines.append(action)
+        # One-shot feedback, drained: each event is rendered
+        # exactly once.
+        while self._events:
+            lines.append(f"[event] {self._events.popleft()}")
 
         return "\n".join(lines)
 
     def serialize_state(self) -> dict:
         # JSON-only private state; restored by restore_state() on boot.
-        # Channel slot residue is intentionally NOT persisted.
+        # Downlink residue is intentionally NOT persisted.
         return {"sent": self._sent}
 
     def restore_state(self, state) -> None:

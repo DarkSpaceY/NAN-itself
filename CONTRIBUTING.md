@@ -29,8 +29,8 @@ breaks guarantees the test suite enforces:
 - **Import discipline.** `agent/` may import `modules/model.py`
   (contracts), never `modules/runtime.py`; the root package stays
   import-light (see `tests/test_layering.py`).
-- **`query()` stays cheap.** Heavy work belongs in `start()` loops and
-  `on_turn()`; a slow `query()` delays every agent.
+- **`ask()` stays cheap.** Heavy work belongs in `start()` loops and
+  `tell()`; a slow `ask()` delays every agent.
 
 ## Pull requests
 

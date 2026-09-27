@@ -68,9 +68,9 @@ from faster_whisper import WhisperModel
 from loguru import logger
 from pydantic import BaseModel
 
-from nan_itself.modules.action import (
-    ActionSurface,
+from nan_itself.modules import (
     ChannelSpec,
+    Module,
 )
 from nan_itself.utils import paths as _paths
 
@@ -2020,7 +2020,7 @@ class TaskPayload(BaseModel):
     interruptible: bool = True
 
 
-class VoiceModule(ActionSurface):
+class VoiceModule(Module):
     id = "voice"
 
     requires: ClassVar[tuple[str, ...]] = ("audio",)
@@ -2028,11 +2028,10 @@ class VoiceModule(ActionSurface):
     channels: ClassVar[Mapping[str, ChannelSpec]] = {
         "say": ChannelSpec(
             TaskPayload,
-            depth=8,
             description=(
                 "Speak a semantic task "
                 "{intent, key_points, tone, interruptible}; "
-                "depth-N FIFO, barge-in drains the queue"
+                "queued FIFO, barge-in drains the queue"
             ),
         ),
     }
@@ -2073,12 +2072,10 @@ class VoiceModule(ActionSurface):
 
     transcript_history: int = 8
 
-    def __init__(self) -> None:
-        # ActionSurface.__init__ creates the channel slots and
-        # the one-shot event deque; skipping it would crash the
-        # first set_target/current_target call.
-        super().__init__()
+    # Capacity of the module-private say FIFO (drop-oldest).
+    say_queue_capacity: int = 8
 
+    def __init__(self) -> None:
         cfg = _load_config()
 
         self.stt_model = cfg.stt_model
@@ -2166,7 +2163,16 @@ class VoiceModule(ActionSurface):
 
         self._stop_event = threading.Event()
 
-        # Wake the speak thread when a task lands on the slot.
+        # Say FIFO: the model feeds it through feed(); the speak
+        # thread consumes at its own rhythm (drop-oldest).
+        self._say_queue: deque[Any] = deque(
+            maxlen=self.say_queue_capacity,
+        )
+
+        # One-shot feedback events, drained (once each) by ask().
+        self._events: deque[str] = deque(maxlen=64)
+
+        # Wake the speak thread when a task is fed.
         self._say_event = threading.Event()
 
         # Barge-in signal: listen thread sets, speak thread obeys.
@@ -2563,7 +2569,7 @@ class VoiceModule(ActionSurface):
             return
 
         # A pending say task always preempts fast-path chatter.
-        if self.current_target("say") is not None:
+        if self._pending_say() is not None:
             return
 
         reply = self.slm.fast_reply(text)
@@ -2598,17 +2604,17 @@ class VoiceModule(ActionSurface):
 
     def _speak_once(self) -> bool:
         """
-        Consume one say task (or return False when the slot is
+        Consume one say task (or return False when the FIFO is
         empty): compose, then play. Barge-in drains the FIFO.
         """
-        task = self.current_target("say")
+        task = self._pending_say()
 
         if task is None:
             return False
 
         # Consume immediately: barge-in drains whatever is
         # left behind this task.
-        self.clear_target("say")
+        self._pop_say()
 
         with self._state_lock:
             self._stats["tasks_total"] += 1
@@ -2651,7 +2657,7 @@ class VoiceModule(ActionSurface):
 
                 self._state = "listening"
 
-            self.emit_event(
+            self._emit_event(
                 "voice: SLM failed to compose the say task; "
                 "skipped (rewrite the task and resend)"
             )
@@ -2666,7 +2672,7 @@ class VoiceModule(ActionSurface):
         instruct = sanitize_instruct(raw_instruct)
 
         if raw_instruct and not instruct:
-            self.emit_event(
+            self._emit_event(
                 "voice: SLM instruct not on the TTS whitelist, "
                 f"falling back to neutral: {raw_instruct!r}"
             )
@@ -2708,7 +2714,7 @@ class VoiceModule(ActionSurface):
 
                     if (
                         source == "fast"
-                        and self.current_target("say")
+                        and self._pending_say()
                         is not None
                     ):
                         break
@@ -2721,7 +2727,7 @@ class VoiceModule(ActionSurface):
             except Exception as exc:
                 logger.warning("voice playback failed: {}", exc)
 
-                self.emit_event(
+                self._emit_event(
                     f"voice: playback failed ({exc})"
                 )
 
@@ -2745,13 +2751,12 @@ class VoiceModule(ActionSurface):
 
         if interrupted:
             # Drain the FIFO and surface the interruption once.
-            while self.current_target("say") is not None:
-                self.clear_target("say")
+            self._say_queue.clear()
 
             with self._state_lock:
                 self._stats["bargeins_total"] += 1
 
-            self.emit_event("user interrupted")
+            self._emit_event("user interrupted")
 
     def _open_stream(self) -> Any:
         stream = sd.OutputStream(
@@ -2764,16 +2769,53 @@ class VoiceModule(ActionSurface):
 
         return stream
 
-    def on_target(
+    # ==================================================================
+    # Model downlink: feed
+    # ==================================================================
+
+    def feed(
         self,
         channel: str,
         payload: Any,
-    ) -> bool:
-        # Accept every well-formed payload and wake the speak
-        # thread immediately.
+    ) -> str:
+        """
+        Receive one validated payload from the model.
+
+        The runtime checks the channel and its schema before this
+        call; here the payload is queued and the speak thread
+        woken immediately.
+        """
+        if channel != "say":
+            return "rejected"
+
+        self._say_queue.append(payload)
+
         self._say_event.set()
 
-        return True
+        return "written"
+
+    def _pending_say(self) -> Any | None:
+        """
+        Peek the next say task without consuming it.
+        """
+        if not self._say_queue:
+            return None
+
+        return self._say_queue[0]
+
+    def _pop_say(self) -> None:
+        """
+        Consume the next say task.
+        """
+        if self._say_queue:
+            self._say_queue.popleft()
+
+    def _emit_event(self, text: str) -> None:
+        """
+        Record a one-shot feedback event for the model; ask()
+        renders each event exactly once.
+        """
+        self._events.append(text)
 
     def _current_state(self) -> str:
         with self._state_lock:
@@ -2801,7 +2843,7 @@ class VoiceModule(ActionSurface):
     # Module contract
     # ==================================================================
 
-    async def query(self, turn: Any) -> str | None:
+    async def ask(self, turn: Any) -> str | None:
         with self._state_lock:
             state = self._state
 
@@ -2841,10 +2883,12 @@ class VoiceModule(ActionSurface):
         if stats.get("load_error"):
             lines.append(f"- error: {stats['load_error']}")
 
-        section = self.render_action_section(turn)
-
-        if section:
-            lines.append(section)
+        # One-shot feedback, drained: each event is rendered
+        # exactly once.
+        while self._events:
+            lines.append(
+                f"[event] {self._events.popleft()}"
+            )
 
         if len(lines) == 1 and state == "idle":
             return None
@@ -2853,7 +2897,7 @@ class VoiceModule(ActionSurface):
 
     # ==================================================================
     # Persistence (counters + the last transcript ring only;
-    # channel residue is never persisted)
+    # downlink residue is never persisted)
     # ==================================================================
 
     def serialize_state(self) -> dict[str, Any]:

@@ -138,13 +138,13 @@ class Turn:
         response   usage / finish_reason / model (duck-typed)
         outcome    error / started_at / ended_at
 
-    query() receives the in-flight turn: identity and world are
+    ask() receives the in-flight turn: identity and world are
     already fixed, the observation inputs are already on it
     (task, reports) except the ambient context, which the
-    Modules' own query fills in; the flow and result fields are
+    Modules' own ask fills in; the flow and result fields are
     still empty.
 
-    on_turn() receives the same turn completed, filled via
+    tell() receives the same turn completed, filled via
     dataclasses.replace().
 
     The history snapshot is cleared (empty tuple) whenever the
@@ -190,7 +190,7 @@ class ChannelSpec:
     """
     Declaration of one downlink channel on a Module.
 
-    A channel is a data slot the model may write to through the
+    A channel is a data endpoint the model feeds through the
     invoke_channels verb. The payload shape is declared with a
     pydantic model -- the same annotation-driven mechanism @tool
     uses -- so the JSON schema handed to the model and the
@@ -199,28 +199,18 @@ class ChannelSpec:
         model   pydantic model classifying valid payloads;
                 None means the channel accepts any JSON value
                 unvalidated
-        depth   slot discipline: 1 = overwrite (newest target
-                wins, the default for goals/intents); N > 1 =
-                FIFO queue with drop-oldest overflow
     """
 
-    __slots__ = ("description", "model", "depth")
+    __slots__ = ("description", "model")
 
     def __init__(
         self,
         model: type[BaseModel] | None = None,
         *,
         description: str = "",
-        depth: int = 1,
     ) -> None:
-        if depth < 1:
-            raise ValueError(
-                "ChannelSpec depth must be >= 1"
-            )
-
         self.model = model
         self.description = description
-        self.depth = depth
 
     def json_schema(self) -> dict[str, Any] | None:
         """
@@ -284,11 +274,11 @@ class Module:
 
     Performance rule (the Module's one hard obligation):
 
-        1. query() must only read state that was already computed
+        1. ask() must only read state that was already computed
            earlier; it must not run heavy work or call the LLM.
         2. Heavy work belongs in start()'s background loop and in
-           on_turn(); each of those runs in its own task.
-        3. A slow query() delays every agent's execution start.
+           tell(); each of those runs in its own task.
+        3. A slow ask() delays every agent's execution start.
     """
 
     id: ClassVar[str]
@@ -299,8 +289,9 @@ class Module:
         tuple[str, ...]
     ] = ()
 
-    # Downlink channels the model may write to. Declared only by
-    # ActionSurface subclasses; plain Modules stay channel-free.
+    # Downlink channels the model may feed through the
+    # invoke_channels verb. Declared on the subclass; plain
+    # Modules stay channel-free.
     channels: ClassVar[
         Mapping[str, ChannelSpec]
     ] = MappingProxyType({})
@@ -331,28 +322,43 @@ class Module:
         cleanup of other Modules.
         """
 
-    async def on_turn(
+    async def tell(
         self,
         record: Turn,
     ) -> None:
         """
-        Observe a completed agent execution.
+        The engine tells the module a turn completed.
 
-        Runs in its own task, isolated from other Modules and from
-        the agents themselves. Heavy processing is allowed here;
-        keep query() a cheap projection of the results.
+        Runs in its own task, isolated from other Modules and
+        from the agents themselves; heavy work is allowed. Keep
+        ask() a cheap projection of the results.
         """
 
-    async def query(
+    async def ask(
         self,
         turn: Turn,
     ) -> str | None:
         """
-        Produce Agent-facing context/prompt for this turn.
+        The engine asks for this turn's ambient context.
 
-        Query failure does not automatically bring the Module down.
+        Cheap projection only; failure is logged, not fatal.
         """
         return None
+
+    def feed(
+        self,
+        channel: str,
+        payload: Any,
+    ) -> str:
+        """
+        The model feeds a payload into a channel.
+
+        Returns 'written' or 'rejected'; sync by design. The
+        runtime validates the channel and its schema before this
+        call, so the default accepts the handed-down payload;
+        override feed only to store or act on it.
+        """
+        return "written"
 
     def serialize_state(self) -> Any:
         """
