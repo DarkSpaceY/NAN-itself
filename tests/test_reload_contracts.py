@@ -24,6 +24,7 @@ from nan_itself.skills.runtime import (
 from nan_itself.tools.runtime import (
     ProviderRuntime,
 )
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -66,12 +67,17 @@ class Provider(LocalToolProvider):
 
 def test_local_tool_reload_replaces_only_one_provider(
     tmp_path,
+    monkeypatch,
 ):
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     alpha = (
         tool_dir / "alpha.py"
@@ -93,9 +99,7 @@ def test_local_tool_reload_replaces_only_one_provider(
         value="beta",
     )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -158,12 +162,17 @@ def test_local_tool_reload_replaces_only_one_provider(
 
 def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
     tmp_path,
+    monkeypatch,
 ):
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     source = (
         tool_dir / "one.py"
@@ -175,15 +184,7 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
         value="alpha",
     )
 
-    runtime = ProviderRuntime(
-        # Isolate the builtin root: builtin/tools/local now ships a
-        # real provider ('search') and this test must only see its
-        # own temporary source.
-        builtin_tools_dir=(
-            tmp_path / "builtin"
-        ),
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -228,12 +229,17 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
 def test_removed_local_tool_disappears_completely(
     tmp_path,
+    monkeypatch,
 ):
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     source = (
         tool_dir / "one.py"
@@ -245,9 +251,7 @@ def test_removed_local_tool_disappears_completely(
         value="alpha",
     )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -282,8 +286,10 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -335,10 +341,7 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -400,8 +403,10 @@ def test_skill_reload_preserves_generation(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -434,10 +439,7 @@ def test_skill_reload_preserves_generation(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -475,8 +477,10 @@ def test_removed_skill_disappears_completely(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -509,10 +513,7 @@ def test_removed_skill_disappears_completely(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -545,6 +546,7 @@ def test_removed_skill_disappears_completely(
 
 def test_facade_workspace_module_reload_call_signature(
     tmp_path,
+    monkeypatch,
 ):
     """
     Facade -> hot_reload integration test.
@@ -553,8 +555,10 @@ def test_facade_workspace_module_reload_call_signature(
     hot_reload() directly.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     workspace = (
-        tmp_path / "modules"
+        tmp_path / "workspace" / "modules"
     )
 
     workspace.mkdir(
@@ -578,12 +582,7 @@ class Example(Module):
         encoding="utf-8",
     )
 
-    facade = Facade(
-        workspace_modules=workspace,
-        data_dir=(
-            tmp_path / "data"
-        ),
-    )
+    facade = Facade()
 
     first_fp = facade._fingerprint(
         source
@@ -659,21 +658,19 @@ def test_module_reload_does_not_rebind_unrelated_module(
     dependencies are not even rebound.
     """
 
-    facade = Facade(
-        workspace_modules=(
-            tmp_path / "modules"
-        ),
-        data_dir=(
-            tmp_path / "data"
-        ),
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
 
     a_source = (
-        tmp_path / "a.py"
+        modules_dir / "a.py"
     )
 
     b_source = (
-        tmp_path / "b.py"
+        modules_dir / "b.py"
     )
 
     a_source.write_text(

@@ -46,7 +46,6 @@ class SkillRecord:
     metadata: SkillMetadata
     root: Path
     generation: int = 0
-    fingerprint: tuple[int, int] | None = None
 
 
 class SkillRegistry:
@@ -311,9 +310,6 @@ class SkillRegistry:
             metadata=metadata,
             root=root,
             generation=generation,
-            fingerprint=fingerprint(
-                root / SKILL_FILENAME
-            ),
         )
 
     # ==================================================================

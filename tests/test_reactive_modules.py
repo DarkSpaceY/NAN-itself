@@ -32,6 +32,7 @@ from nan_itself.agent.verbs import (
     ListChannelsVerb,
     ShowChannelsVerb,
 )
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -143,20 +144,22 @@ def _write_probe(path: Path) -> None:
     path.write_text(_PROBE_SOURCE, encoding="utf-8")
 
 
-def _facade(tmp_path: Path) -> Facade:
-    return Facade(
-        workspace_modules=tmp_path / "modules",
-        builtin_modules_dir=tmp_path / "builtin",
-        data_dir=tmp_path / "data",
-    )
+def _facade(tmp_path: Path, monkeypatch) -> Facade:
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    return Facade()
 
 
 async def _running_probe(
     tmp_path: Path,
+    monkeypatch,
 ) -> tuple[Facade, object]:
-    facade = _facade(tmp_path)
+    facade = _facade(tmp_path, monkeypatch)
 
-    source = tmp_path / "probe.py"
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "probe.py"
 
     _write_probe(source)
 
@@ -172,8 +175,8 @@ async def _running_probe(
     return facade, record.instance
 
 
-def test_facade_routing_failure_modes(tmp_path):
-    facade = _facade(tmp_path)
+def test_facade_routing_failure_modes(tmp_path, monkeypatch):
+    facade = _facade(tmp_path, monkeypatch)
 
     # Unknown module: never raises.
     assert "Unknown module" in (
@@ -235,10 +238,13 @@ class Crashing(Module):
 """
 
 
-async def _provisioning_failure_down(tmp_path: Path) -> None:
-    facade = _facade(tmp_path)
+async def _provisioning_failure_down(tmp_path: Path, monkeypatch) -> None:
+    facade = _facade(tmp_path, monkeypatch)
 
-    source = tmp_path / "crashing.py"
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "crashing.py"
 
     source.write_text(_CRASHING_SOURCE, encoding="utf-8")
 
@@ -266,13 +272,14 @@ async def _provisioning_failure_down(tmp_path: Path) -> None:
     assert record.retry_at > 0.0
 
 
-def test_facade_provisioning_failure_records_down(tmp_path):
-    run(_provisioning_failure_down(tmp_path))
+def test_facade_provisioning_failure_records_down(tmp_path, monkeypatch):
+    run(_provisioning_failure_down(tmp_path, monkeypatch))
 
 
-async def _full_chain(tmp_path):
+async def _full_chain(tmp_path, monkeypatch):
     facade, instance = await _running_probe(
-        tmp_path
+        tmp_path,
+        monkeypatch,
     )
 
     # list: bare 'module/channel' lines, no depth/occupancy.
@@ -336,8 +343,8 @@ async def _full_chain(tmp_path):
     return facade, instance
 
 
-def test_facade_full_chain(tmp_path):
-    run(_full_chain(tmp_path))
+def test_facade_full_chain(tmp_path, monkeypatch):
+    run(_full_chain(tmp_path, monkeypatch))
 
 
 # ============================================================================
@@ -345,9 +352,10 @@ def test_facade_full_chain(tmp_path):
 # ============================================================================
 
 
-async def _verb_chain(tmp_path):
+async def _verb_chain(tmp_path, monkeypatch):
     facade, instance = await _running_probe(
-        tmp_path
+        tmp_path,
+        monkeypatch,
     )
 
     # The channel verbs reach the Facade through the agent.
@@ -403,5 +411,5 @@ async def _verb_chain(tmp_path):
     assert "requires 'module'" in missing
 
 
-def test_verbs_end_to_end(tmp_path):
-    run(_verb_chain(tmp_path))
+def test_verbs_end_to_end(tmp_path, monkeypatch):
+    run(_verb_chain(tmp_path, monkeypatch))

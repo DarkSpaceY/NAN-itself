@@ -297,7 +297,6 @@ async def _hot_reload_locked(
         generation=(
             old.generation + 1
         ),
-        source_fingerprint=fingerprint,
         imported_module_name=(
             imported_name
         ),

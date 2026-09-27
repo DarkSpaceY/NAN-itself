@@ -16,6 +16,7 @@ from nan_itself.tools.spec import (
     ProviderSpec,
 )
 from nan_itself.tools.provider import Provider
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -176,9 +177,14 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
     Once the fingerprint changes again, v2 must be retried and installed.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     async def scenario():
+        mcp_dir = tmp_path / "workspace" / "tools" / "mcps"
+        mcp_dir.mkdir(parents=True, exist_ok=True)
+
         source = (
-            tmp_path / "example.yaml"
+            mcp_dir / "example.yaml"
         )
 
         source.write_text(
@@ -207,12 +213,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
             fake_connect,
         )
 
-        runtime = ProviderRuntime(
-            workspace_mcp_dir=tmp_path,
-            workspace_local_dir=(
-                tmp_path / "local"
-            ),
-        )
+        runtime = ProviderRuntime()
 
         try:
             # ------------------------------------------------------
@@ -307,6 +308,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
 
 def test_local_tool_invalid_intermediate_file_keeps_old_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     The Local Tool file may be temporarily syntactically invalid while
@@ -314,9 +316,14 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
     until a valid replacement appears.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     async def scenario():
+        local_dir = tmp_path / "workspace" / "tools" / "local"
+        local_dir.mkdir(parents=True, exist_ok=True)
+
         source = (
-            tmp_path / "example.py"
+            local_dir / "example.py"
         )
 
         source.write_text(
@@ -332,12 +339,7 @@ class Provider(LocalToolProvider):
             encoding="utf-8",
         )
 
-        runtime = ProviderRuntime(
-            workspace_local_dir=tmp_path,
-            workspace_mcp_dir=(
-                tmp_path / "mcps"
-            ),
-        )
+        runtime = ProviderRuntime()
 
         try:
             await runtime._scan_locals()
@@ -422,8 +424,10 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     import nan_itself.skills.registry as registry_module
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
 
     skill_dir = (
@@ -472,10 +476,7 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -531,6 +532,7 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
 def test_module_invalid_intermediate_file_keeps_old_generation(
     tmp_path,
+    monkeypatch,
 ):
     """
     A Python Module source can be temporarily invalid during editing.
@@ -538,9 +540,11 @@ def test_module_invalid_intermediate_file_keeps_old_generation(
     Facade must keep the current generation until a valid source is seen.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     async def scenario():
         workspace = (
-            tmp_path / "modules"
+            tmp_path / "workspace" / "modules"
         )
 
         workspace.mkdir(
@@ -579,12 +583,7 @@ class Example(Module):
             encoding="utf-8",
         )
 
-        facade = Facade(
-            workspace_modules=workspace,
-            data_dir=(
-                tmp_path / "data"
-            ),
-        )
+        facade = Facade()
 
         # Initial scan/register.
         await facade._scan_module_root(

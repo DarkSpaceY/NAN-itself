@@ -421,8 +421,6 @@ class ModuleRecord:
 
     retry_at: float = 0.0
 
-    source_fingerprint: tuple[int, int] | None = None
-
     imported_module_name: str | None = None
 
 

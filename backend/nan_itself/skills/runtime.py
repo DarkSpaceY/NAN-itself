@@ -71,8 +71,6 @@ class SkillRuntime:
 
     def __init__(
         self,
-        workspace_skills: str | Path | None = None,
-        builtin_skills: str | Path | None = None,
         *,
         resource_char_limit: int = 100_000,
         script_timeout: float = 300.0,
@@ -80,24 +78,16 @@ class SkillRuntime:
         project_root = _paths.repo_root()
 
         self.builtin_skills = (
-            Path(builtin_skills).resolve()
-            if builtin_skills is not None
-            else (
-                project_root
-                / "builtin"
-                / "skills"
-            ).resolve()
-        )
+            project_root
+            / "builtin"
+            / "skills"
+        ).resolve()
 
         self.workspace_skills = (
-            Path(workspace_skills).resolve()
-            if workspace_skills is not None
-            else (
-                project_root
-                / "workspace"
-                / "skills"
-            ).resolve()
-        )
+            project_root
+            / "workspace"
+            / "skills"
+        ).resolve()
 
         self.resource_char_limit = (
             resource_char_limit

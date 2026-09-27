@@ -13,6 +13,7 @@ from nan_itself.modules.reload import hot_reload
 from nan_itself.skills.model import SkillMetadata
 from nan_itself.skills.runtime import SkillRuntime
 from nan_itself.tools.runtime import ProviderRuntime
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -59,6 +60,7 @@ def _write_valid_skill(
 
 def test_module_long_running_candidate_can_commit_without_returning(
     tmp_path,
+    monkeypatch,
 ):
     """
     Module.start() is a lifetime coroutine and normally never returns.
@@ -69,12 +71,14 @@ def test_module_long_running_candidate_can_commit_without_returning(
     The important contract is that the candidate is alive before the
     old generation is stopped.
     """
-    facade = Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    source = tmp_path / "module.py"
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "module.py"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -160,13 +164,16 @@ def test_module_long_running_candidate_can_commit_without_returning(
     run(scenario())
 def test_module_candidate_immediate_start_failure_keeps_old_generation(
     tmp_path,
+    monkeypatch,
 ):
-    facade = Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    source = tmp_path / "module.py"
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "module.py"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -225,18 +232,21 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
 
 def test_module_candidate_start_failure_keeps_old_generation(
     tmp_path,
+    monkeypatch,
 ):
     """
     If candidate.start() fails, hot reload must reject the candidate
     and leave the old generation installed and running.
     """
 
-    facade = Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    source = tmp_path / "module.py"
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "module.py"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -304,18 +314,21 @@ def test_module_candidate_start_failure_keeps_old_generation(
 
 def test_module_reload_restore_failure_keeps_old_generation(
     tmp_path,
+    monkeypatch,
 ):
     """
     restore_state() failure is rejected before the candidate enters
     the running lifecycle.
     """
 
-    facade = Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    source = tmp_path / "module.py"
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    source = modules_dir / "module.py"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -380,6 +393,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
 
 def test_module_reload_dependency_cycle_keeps_old_generation(
     tmp_path,
+    monkeypatch,
 ):
     """
     Changing A's requires relationship from:
@@ -397,13 +411,15 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
     The candidate must be rejected while B remains completely untouched.
     """
 
-    facade = Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    a_source = tmp_path / "a.py"
-    b_source = tmp_path / "b.py"
+    facade = Facade()
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    a_source = modules_dir / "a.py"
+    b_source = modules_dir / "b.py"
 
     a_source.write_text(
         "# placeholder",
@@ -499,16 +515,21 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
 
 def test_local_tool_invalid_candidate_keeps_old_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     A malformed replacement must not replace the current provider.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     source = (
         tool_dir / "example.py"
@@ -524,9 +545,7 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 """,
     )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -564,6 +583,7 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 
 def test_local_tool_id_collision_keeps_old_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     Two files are independently owned.
@@ -572,11 +592,15 @@ def test_local_tool_id_collision_keeps_old_provider(
     without removing the existing alpha provider.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     alpha = (
         tool_dir / "alpha.py"
@@ -606,9 +630,7 @@ def test_local_tool_id_collision_keeps_old_provider(
 """,
     )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -658,16 +680,21 @@ def test_local_tool_id_collision_keeps_old_provider(
 
 def test_removed_local_tool_does_not_remove_unrelated_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     Removing one provider file must only remove that provider.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     tool_dir = (
-        tmp_path / "tools"
+        tmp_path / "workspace" / "tools" / "local"
     )
 
-    tool_dir.mkdir()
+    tool_dir.mkdir(
+        parents=True
+    )
 
     alpha = (
         tool_dir / "alpha.py"
@@ -697,9 +724,7 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 """,
     )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=tool_dir,
-    )
+    runtime = ProviderRuntime()
 
     run(
         runtime._scan_locals()
@@ -746,8 +771,10 @@ def test_skill_invalid_candidate_keeps_old_record(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -791,10 +818,7 @@ def test_skill_invalid_candidate_keeps_old_record(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -844,8 +868,10 @@ def test_skill_name_collision_keeps_old_record(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -897,10 +923,7 @@ def test_skill_name_collision_keeps_old_record(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 
@@ -959,8 +982,10 @@ def test_skill_removed_file_does_not_touch_other_skill(
     import nan_itself.skills.registry as registry_module
 
     root = (
-        tmp_path / "skills"
+        tmp_path / "workspace" / "skills"
     )
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     alpha = (
         root / "alpha"
@@ -1012,10 +1037,7 @@ def test_skill_removed_file_does_not_touch_other_skill(
         fake_read_metadata,
     )
 
-    runtime = SkillRuntime(
-        workspace_skills=root,
-        builtin_skills=tmp_path / "builtin-skills",
-    )
+    runtime = SkillRuntime()
 
     runtime.refresh()
 

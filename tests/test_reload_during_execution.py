@@ -13,6 +13,7 @@ from nan_itself.tools import mcp as mcp_backend
 from nan_itself.tools.provider import Provider
 from nan_itself.tools.results import text_result
 from nan_itself.tools.runtime import ProviderRuntime
+from nan_itself.utils import paths as _paths
 from nan_itself.utils.llm import ToolCall
 
 
@@ -266,6 +267,7 @@ class ExampleModule(Module):
 @pytest.mark.asyncio
 async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_isolated(
     tmp_path,
+    monkeypatch,
 ):
     """
     Verify the actual turn-consistency contract:
@@ -284,11 +286,15 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
     of assuming Facade has test-double fields.
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     workspace = (
-        tmp_path / "modules"
+        tmp_path / "workspace" / "modules"
     )
 
-    workspace.mkdir()
+    workspace.mkdir(
+        parents=True
+    )
 
     source = (
         workspace / "example.py"
@@ -303,8 +309,6 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         "nan_itself.modules",
         fromlist=["Facade"],
     ).Facade(
-        workspace_modules=workspace,
-        data_dir=tmp_path / "data",
         scan_interval=60.0,
         retry_interval=60.0,
     )
@@ -667,6 +671,7 @@ class Calculator(LocalToolProvider):
 @pytest.mark.asyncio
 async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     An in-flight Local Tool call is bound to the Provider instance that
@@ -680,8 +685,13 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
         new call           -> v2
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    local_dir = tmp_path / "workspace" / "tools" / "local"
+    local_dir.mkdir(parents=True, exist_ok=True)
+
     source = (
-        tmp_path / "calc.py"
+        local_dir / "calc.py"
     )
 
     marker = (
@@ -698,13 +708,6 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     )
 
     runtime = ProviderRuntime(
-        workspace_mcp_dir=(
-            tmp_path / "mcps"
-        ),
-        workspace_local_dir=tmp_path,
-        builtin_tools_dir=(
-            tmp_path / "no-builtin"
-        ),
         scan_interval=60.0,
         tool_timeout=2.0,
     )
@@ -953,11 +956,15 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
         new call -> new result
     """
 
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     workspace = (
-        tmp_path / "mcps"
+        tmp_path / "workspace" / "tools" / "mcps"
     )
 
-    workspace.mkdir()
+    workspace.mkdir(
+        parents=True
+    )
 
     source = (
         workspace / "example.yaml"
@@ -1021,13 +1028,6 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
     )
 
     runtime = ProviderRuntime(
-        workspace_mcp_dir=workspace,
-        workspace_local_dir=(
-            tmp_path / "local"
-        ),
-        builtin_tools_dir=(
-            tmp_path / "no-builtin"
-        ),
         scan_interval=60.0,
         tool_timeout=2.0,
     )

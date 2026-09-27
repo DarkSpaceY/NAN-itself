@@ -67,78 +67,11 @@ class Facade:
         even when A declares them in `requires`.
     """
 
-    # ------------------------------------------------------------------
-    # Turn delivery
-    # ------------------------------------------------------------------
-
     _DELIVERY_TASKS: set = set()
-
-    def deliver_turn(
-        self,
-        record,
-    ) -> None:
-        """
-        Broadcast one completed Turn to every Module.
-
-        Each handler runs in its own task: a slow or failing
-        module can never delay its peers, and never delays the
-        agents either (this call returns immediately).
-
-        A failing tell() crashes its module (DOWN + supervised
-        restart); the failure never propagates to the agents.
-        """
-        for module_record in list(
-            self.modules.values()
-        ):
-            # Only a RUNNING module receives turns: ask() filters
-            # the same way, and a module that has not finished
-            # starting (or is being replaced / torn down) must not
-            # crash from a delivery aimed at a service that was
-            # never fully up.
-            if (
-                module_record.state
-                is not ModuleState.RUNNING
-            ):
-                continue
-
-            task = asyncio.create_task(
-                self._tell_module(
-                    module_record,
-                    record,
-                )
-            )
-
-            self._DELIVERY_TASKS.add(task)
-
-            task.add_done_callback(
-                self._DELIVERY_TASKS.discard
-            )
-
-    async def _tell_module(
-        self,
-        module_record,
-        turn,
-    ) -> None:
-        try:
-            await module_record.instance.tell(
-                turn
-            )
-
-        except asyncio.CancelledError:
-            raise
-
-        except Exception as exc:
-            self._crash_module(
-                module_record,
-                exc,
-            )
 
     def __init__(
         self,
-        workspace_modules: str | Path | None = None,
         *,
-        builtin_modules_dir: str | Path | None = None,
-        data_dir: str | Path | None = None,
         retry_interval: float = 1.0,
         scan_interval: float = 1.0,
         llm=None,
@@ -152,33 +85,19 @@ class Facade:
         # hot-reload logic. Deleting a source file removes its
         # Module.
         self.builtin_modules_dir = (
-            Path(
-                builtin_modules_dir
-            ).resolve()
-            if builtin_modules_dir is not None
-            else (
-                project_root
-                / "builtin"
-                / "modules"
-            ).resolve()
-        )
+            project_root
+            / "builtin"
+            / "modules"
+        ).resolve()
 
         self.workspace_modules = (
-            Path(
-                workspace_modules
-            ).resolve()
-            if workspace_modules is not None
-            else (
-                project_root
-                / "workspace"
-                / "modules"
-            ).resolve()
-        )
+            project_root
+            / "workspace"
+            / "modules"
+        ).resolve()
 
         self.data_dir = (
-            Path(data_dir).resolve()
-            if data_dir is not None
-            else _paths.data_dir() / "modules"
+            _paths.data_dir() / "modules"
         )
 
         self.private_dir = (
@@ -308,6 +227,70 @@ class Facade:
 
         # Persist final state after Modules have stopped.
         self.save_state()
+
+    # ------------------------------------------------------------------
+    # Turn delivery
+    # ------------------------------------------------------------------
+
+    def deliver_turn(
+        self,
+        record,
+    ) -> None:
+        """
+        Broadcast one completed Turn to every Module.
+
+        Each handler runs in its own task: a slow or failing
+        module can never delay its peers, and never delays the
+        agents either (this call returns immediately).
+
+        A failing tell() crashes its module (DOWN + supervised
+        restart); the failure never propagates to the agents.
+        """
+        for module_record in list(
+            self.modules.values()
+        ):
+            # Only a RUNNING module receives turns: ask() filters
+            # the same way, and a module that has not finished
+            # starting (or is being replaced / torn down) must not
+            # crash from a delivery aimed at a service that was
+            # never fully up.
+            if (
+                module_record.state
+                is not ModuleState.RUNNING
+            ):
+                continue
+
+            task = asyncio.create_task(
+                self._tell_module(
+                    module_record,
+                    record,
+                )
+            )
+
+            self._DELIVERY_TASKS.add(task)
+
+            task.add_done_callback(
+                self._DELIVERY_TASKS.discard
+            )
+
+    async def _tell_module(
+        self,
+        module_record,
+        turn,
+    ) -> None:
+        try:
+            await module_record.instance.tell(
+                turn
+            )
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception as exc:
+            self._crash_module(
+                module_record,
+                exc,
+            )
 
     # ==================================================================
     # Agent / turn snapshots
@@ -615,6 +598,23 @@ class Facade:
     # Persistence
     # ==================================================================
 
+    def save_state(
+        self,
+    ) -> None:
+        self._ensure_data_dirs()
+
+        for record in self.modules.values():
+            try:
+                self._save_record_state(
+                    record
+                )
+
+            except Exception:
+                logger.exception(
+                    f"Failed to persist Module state: "
+                    f"{record.id}"
+                )
+
     def _ensure_data_dirs(
         self,
     ) -> None:
@@ -695,435 +695,6 @@ class Facade:
             record,
             private_dir=self.private_dir,
             dataspace_dir=self.dataspace_dir,
-        )
-
-    def save_state(
-        self,
-    ) -> None:
-        self._ensure_data_dirs()
-
-        for record in self.modules.values():
-            try:
-                self._save_record_state(
-                    record
-                )
-
-            except Exception:
-                logger.exception(
-                    f"Failed to persist Module state: "
-                    f"{record.id}"
-                )
-
-    # ==================================================================
-    # Discovery / loading
-    # ==================================================================
-
-    async def _scan_modules(
-        self,
-    ) -> None:
-        await self._scan_module_root(
-            self.builtin_modules_dir
-        )
-
-        await self._scan_module_root(
-            self.workspace_modules
-        )
-
-    async def _scan_module_root(
-        self,
-        root: Path,
-    ) -> None:
-        root.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        current_files = {
-            path.resolve()
-            for path in (
-                root.rglob(
-                    "*.py"
-                )
-            )
-            if (
-                path.is_file()
-                and not path.name.startswith("_")
-            )
-        }
-
-        known_files = {
-            Path(record.source).resolve()
-            for record in self.modules.values()
-            if Path(
-                record.source
-            ).resolve().is_relative_to(
-                root
-            )
-        }
-
-        # --------------------------------------------------------------
-        # Removed files
-        # --------------------------------------------------------------
-
-        for removed in (
-            known_files - current_files
-        ):
-            record = next(
-                (
-                    item
-                    for item in self.modules.values()
-                    if (
-                        Path(
-                            item.source
-                        ).resolve()
-                        == removed
-                    )
-                ),
-                None,
-            )
-
-            if record is not None:
-                await self._remove_record(
-                    record
-                )
-
-        # --------------------------------------------------------------
-        # New / changed files
-        # --------------------------------------------------------------
-
-        for path in sorted(
-            current_files
-        ):
-            if not self._has_module_header(
-                path
-            ):
-                continue
-
-            fingerprint = self._fingerprint(
-                path
-            )
-
-            previous = (
-                self._workspace_fingerprints.get(
-                    path
-                )
-            )
-
-            previous_error = (
-                self._workspace_load_errors.get(
-                    path
-                )
-            )
-
-            # Don't repeatedly retry an unchanged broken file.
-            if (
-                previous == fingerprint
-                and previous_error is not None
-            ):
-                continue
-
-            existing = (
-                self._find_record_by_source(
-                    path
-                )
-            )
-
-            if (
-                previous == fingerprint
-                and existing is not None
-            ):
-                continue
-
-            self._workspace_fingerprints[
-                path
-            ] = fingerprint
-
-            self._workspace_load_errors.pop(
-                path,
-                None,
-            )
-
-            try:
-                await self._load_or_reload_file(
-                    path,
-                    fingerprint,
-                )
-
-            except Exception as exc:
-                self._workspace_load_errors[
-                    path
-                ] = exc
-
-                logger.exception(
-                    f"Failed to load Module file: "
-                    f"{path}"
-                )
-
-                self._wake.set()
-
-    @staticmethod
-    def _has_module_header(
-        path: Path,
-    ) -> bool:
-        return _loading.has_module_header(
-            path
-        )
-
-    def _fingerprint(
-        self,
-        path: Path,
-    ) -> tuple[int, int]:
-        return _loading.fingerprint(
-            path
-        )
-
-    async def _load_or_reload_file(
-        self,
-        path: Path,
-        fingerprint: tuple[int, int],
-    ) -> None:
-        old = self._find_record_by_source(
-            path
-        )
-
-        (
-            cls,
-            imported_name,
-            _,
-        ) = self._import_module_file(
-            path
-        )
-
-        self._validate_module_class(
-            cls
-        )
-
-        if old is None:
-            self._register_module_class(
-                cls,
-                source=str(path),
-                source_fingerprint=(
-                    fingerprint
-                ),
-                imported_module_name=(
-                    imported_name
-                ),
-            )
-
-            # The new instance was already bound by
-            # _register_module_class().
-            #
-            # Only rebuild pure graph bookkeeping here.
-            self._rebuild_dependency_graph(
-                bind=False
-            )
-
-            self._validate_dependency_graph()
-
-            self._wake.set()
-
-            return
-
-        if old.id != cls.id:
-            raise RuntimeError(
-                f"hot reload changed Module id "
-                f"in {path}: "
-                f"{old.id!r} -> {cls.id!r}"
-            )
-
-        await hot_reload(
-            self,
-            old=old,
-            cls=cls,
-            imported_name=imported_name,
-            fingerprint=fingerprint,
-        )
-
-    def _import_module_file(
-        self,
-        path: Path,
-    ) -> tuple[
-        type[Module],
-        str,
-        Any,
-    ]:
-        (
-            cls,
-            imported_name,
-            module,
-        ) = _loading.import_module_class(
-            path
-        )
-
-        return (
-            cls,
-            imported_name,
-            module,
-        )
-
-    def _validate_module_class(
-        self,
-        cls: type[Module],
-    ) -> None:
-        _loading.validate_module_class(
-            cls
-        )
-
-    def _register_module_class(
-        self,
-        cls: type[Module],
-        *,
-        source: str,
-        source_fingerprint: (
-            tuple[int, int]
-            | None
-        ) = None,
-        imported_module_name: (
-            str
-            | None
-        ) = None,
-    ) -> ModuleRecord:
-        self._validate_module_class(
-            cls
-        )
-
-        module_id = cls.id
-
-        if module_id in self.modules:
-            existing = self.modules[
-                module_id
-            ]
-
-            raise DuplicateModuleError(
-                f"duplicate Module id "
-                f"{module_id!r}: "
-                f"{existing.source} "
-                f"and {source}"
-            )
-
-        data = self.dataspaces.get(
-            module_id
-        )
-
-        if data is None:
-            data = DataSpace(
-                owner=module_id
-            )
-
-            self.dataspaces[
-                module_id
-            ] = data
-
-        instance = cls()
-
-        instance.llm = self.llm
-
-        record = ModuleRecord(
-            id=module_id,
-            cls=cls,
-            instance=instance,
-            data=data,
-            source=source,
-            generation=0,
-            source_fingerprint=(
-                source_fingerprint
-            ),
-            imported_module_name=(
-                imported_module_name
-            ),
-        )
-
-        # Only the new instance is bound.
-        self._bind_instance(
-            record
-        )
-
-        self.modules[
-            module_id
-        ] = record
-
-        self._restore_record_state(
-            record
-        )
-
-        if source_fingerprint is not None:
-            self._workspace_fingerprints[
-                Path(
-                    source
-                ).resolve()
-            ] = source_fingerprint
-
-        return record
-
-    def _bind_instance(
-        self,
-        record: ModuleRecord,
-    ) -> None:
-        _deps.bind_instance(
-            record,
-            self.dataspaces,
-        )
-
-    def _find_record_by_source(
-        self,
-        path: Path,
-    ) -> ModuleRecord | None:
-        path = path.resolve()
-
-        for record in self.modules.values():
-            if (
-                Path(
-                    record.source
-                ).resolve()
-                == path
-            ):
-                return record
-
-        return None
-
-    # ==================================================================
-    # Dependency graph
-    # ==================================================================
-
-    def _rebuild_dependency_graph(
-        self,
-        *,
-        bind: bool = False,
-    ) -> None:
-        """
-        Rebuild dependency metadata.
-
-        By default this is PURE graph bookkeeping.
-
-        `bind=True` exists only for explicit bulk-rebinding callers.
-        Normal reconciliation, validation, removal and hot reload must
-        leave existing Module instance bindings untouched.
-        """
-        (
-            self.dependencies,
-            self.dependents,
-        ) = _deps.build_dependency_maps(
-            self.modules
-        )
-
-        if bind:
-            for record in self.modules.values():
-                self._bind_instance(
-                    record
-                )
-
-    def _validate_dependency_graph(
-        self,
-    ) -> None:
-        self._topological_order()
-
-    def _topological_order(
-        self,
-    ) -> list[str]:
-        return _deps.topological_order(
-            self.modules,
-            self.dependencies,
-            self.dependents,
         )
 
     # ==================================================================
@@ -1460,7 +1031,416 @@ class Facade:
             )
 
     # ==================================================================
-    # Hot Reload
+    # Discovery / loading
+    # ==================================================================
+
+    async def _scan_modules(
+        self,
+    ) -> None:
+        await self._scan_module_root(
+            self.builtin_modules_dir
+        )
+
+        await self._scan_module_root(
+            self.workspace_modules
+        )
+
+    async def _scan_module_root(
+        self,
+        root: Path,
+    ) -> None:
+        root.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        current_files = {
+            path.resolve()
+            for path in (
+                root.rglob(
+                    "*.py"
+                )
+            )
+            if (
+                path.is_file()
+                and not path.name.startswith("_")
+            )
+        }
+
+        known_files = {
+            Path(record.source).resolve()
+            for record in self.modules.values()
+            if Path(
+                record.source
+            ).resolve().is_relative_to(
+                root
+            )
+        }
+
+        # --------------------------------------------------------------
+        # Removed files
+        # --------------------------------------------------------------
+
+        for removed in (
+            known_files - current_files
+        ):
+            record = next(
+                (
+                    item
+                    for item in self.modules.values()
+                    if (
+                        Path(
+                            item.source
+                        ).resolve()
+                        == removed
+                    )
+                ),
+                None,
+            )
+
+            if record is not None:
+                await self._remove_record(
+                    record
+                )
+
+        # --------------------------------------------------------------
+        # New / changed files
+        # --------------------------------------------------------------
+
+        for path in sorted(
+            current_files
+        ):
+            if not self._has_module_header(
+                path
+            ):
+                continue
+
+            fingerprint = self._fingerprint(
+                path
+            )
+
+            previous = (
+                self._workspace_fingerprints.get(
+                    path
+                )
+            )
+
+            previous_error = (
+                self._workspace_load_errors.get(
+                    path
+                )
+            )
+
+            # Don't repeatedly retry an unchanged broken file.
+            if (
+                previous == fingerprint
+                and previous_error is not None
+            ):
+                continue
+
+            existing = (
+                self._find_record_by_source(
+                    path
+                )
+            )
+
+            if (
+                previous == fingerprint
+                and existing is not None
+            ):
+                continue
+
+            self._workspace_fingerprints[
+                path
+            ] = fingerprint
+
+            self._workspace_load_errors.pop(
+                path,
+                None,
+            )
+
+            try:
+                await self._load_or_reload_file(
+                    path,
+                    fingerprint,
+                )
+
+            except Exception as exc:
+                self._workspace_load_errors[
+                    path
+                ] = exc
+
+                logger.exception(
+                    f"Failed to load Module file: "
+                    f"{path}"
+                )
+
+                self._wake.set()
+
+    async def _load_or_reload_file(
+        self,
+        path: Path,
+        fingerprint: tuple[int, int],
+    ) -> None:
+        old = self._find_record_by_source(
+            path
+        )
+
+        (
+            cls,
+            imported_name,
+            _,
+        ) = self._import_module_file(
+            path
+        )
+
+        self._validate_module_class(
+            cls
+        )
+
+        if old is None:
+            self._register_module_class(
+                cls,
+                source=str(path),
+                source_fingerprint=(
+                    fingerprint
+                ),
+                imported_module_name=(
+                    imported_name
+                ),
+            )
+
+            # The new instance was already bound by
+            # _register_module_class().
+            #
+            # Only rebuild pure graph bookkeeping here.
+            self._rebuild_dependency_graph(
+                bind=False
+            )
+
+            self._validate_dependency_graph()
+
+            self._wake.set()
+
+            return
+
+        if old.id != cls.id:
+            raise RuntimeError(
+                f"hot reload changed Module id "
+                f"in {path}: "
+                f"{old.id!r} -> {cls.id!r}"
+            )
+
+        await hot_reload(
+            self,
+            old=old,
+            cls=cls,
+            imported_name=imported_name,
+            fingerprint=fingerprint,
+        )
+
+    def _import_module_file(
+        self,
+        path: Path,
+    ) -> tuple[
+        type[Module],
+        str,
+        Any,
+    ]:
+        (
+            cls,
+            imported_name,
+            module,
+        ) = _loading.import_module_class(
+            path
+        )
+
+        return (
+            cls,
+            imported_name,
+            module,
+        )
+
+    def _validate_module_class(
+        self,
+        cls: type[Module],
+    ) -> None:
+        _loading.validate_module_class(
+            cls
+        )
+
+    def _register_module_class(
+        self,
+        cls: type[Module],
+        *,
+        source: str,
+        source_fingerprint: (
+            tuple[int, int]
+            | None
+        ) = None,
+        imported_module_name: (
+            str
+            | None
+        ) = None,
+    ) -> ModuleRecord:
+        self._validate_module_class(
+            cls
+        )
+
+        module_id = cls.id
+
+        if module_id in self.modules:
+            existing = self.modules[
+                module_id
+            ]
+
+            raise DuplicateModuleError(
+                f"duplicate Module id "
+                f"{module_id!r}: "
+                f"{existing.source} "
+                f"and {source}"
+            )
+
+        data = self.dataspaces.get(
+            module_id
+        )
+
+        if data is None:
+            data = DataSpace(
+                owner=module_id
+            )
+
+            self.dataspaces[
+                module_id
+            ] = data
+
+        instance = cls()
+
+        instance.llm = self.llm
+
+        record = ModuleRecord(
+            id=module_id,
+            cls=cls,
+            instance=instance,
+            data=data,
+            source=source,
+            generation=0,
+            imported_module_name=(
+                imported_module_name
+            ),
+        )
+
+        # Only the new instance is bound.
+        self._bind_instance(
+            record
+        )
+
+        self.modules[
+            module_id
+        ] = record
+
+        self._restore_record_state(
+            record
+        )
+
+        if source_fingerprint is not None:
+            self._workspace_fingerprints[
+                Path(
+                    source
+                ).resolve()
+            ] = source_fingerprint
+
+        return record
+
+    def _bind_instance(
+        self,
+        record: ModuleRecord,
+    ) -> None:
+        _deps.bind_instance(
+            record,
+            self.dataspaces,
+        )
+
+    def _find_record_by_source(
+        self,
+        path: Path,
+    ) -> ModuleRecord | None:
+        path = path.resolve()
+
+        for record in self.modules.values():
+            if (
+                Path(
+                    record.source
+                ).resolve()
+                == path
+            ):
+                return record
+
+        return None
+
+    @staticmethod
+    def _has_module_header(
+        path: Path,
+    ) -> bool:
+        return _loading.has_module_header(
+            path
+        )
+
+    def _fingerprint(
+        self,
+        path: Path,
+    ) -> tuple[int, int]:
+        return _loading.fingerprint(
+            path
+        )
+
+    # ==================================================================
+    # Dependency graph
+    # ==================================================================
+
+    def _rebuild_dependency_graph(
+        self,
+        *,
+        bind: bool = False,
+    ) -> None:
+        """
+        Rebuild dependency metadata.
+
+        By default this is PURE graph bookkeeping.
+
+        `bind=True` exists only for explicit bulk-rebinding callers.
+        Normal reconciliation, validation, removal and hot reload must
+        leave existing Module instance bindings untouched.
+        """
+        (
+            self.dependencies,
+            self.dependents,
+        ) = _deps.build_dependency_maps(
+            self.modules
+        )
+
+        if bind:
+            for record in self.modules.values():
+                self._bind_instance(
+                    record
+                )
+
+    def _validate_dependency_graph(
+        self,
+    ) -> None:
+        self._topological_order()
+
+    def _topological_order(
+        self,
+    ) -> list[str]:
+        return _deps.topological_order(
+            self.modules,
+            self.dependencies,
+            self.dependents,
+        )
+
+    # ==================================================================
+    # Source removal
     # ==================================================================
 
     async def _remove_record(

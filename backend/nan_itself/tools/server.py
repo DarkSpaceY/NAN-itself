@@ -40,15 +40,9 @@ class MCPFacade:
     def __init__(
         self,
         *,
-        builtin_tools_dir=None,
-        workspace_mcp_dir=None,
-        workspace_local_dir=None,
         scan_interval: float = 1.0,
     ) -> None:
         self.runtime = ProviderRuntime(
-            builtin_tools_dir=builtin_tools_dir,
-            workspace_mcp_dir=workspace_mcp_dir,
-            workspace_local_dir=workspace_local_dir,
             scan_interval=scan_interval,
         )
 

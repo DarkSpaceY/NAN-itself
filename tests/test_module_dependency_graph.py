@@ -23,18 +23,17 @@ from nan_itself.modules.model import (
 from nan_itself.modules.runtime import (
     Facade,
 )
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def _facade(tmp_path: Path) -> Facade:
-    return Facade(
-        workspace_modules=tmp_path / "modules",
-        builtin_modules_dir=tmp_path / "builtin",
-        data_dir=tmp_path / "data",
-    )
+def _facade(tmp_path: Path, monkeypatch) -> Facade:
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    return Facade()
 
 
 # ============================================================================
@@ -72,11 +71,14 @@ class B(Module):
 """
 
 
-async def _register_cycle(tmp_path: Path) -> None:
-    facade = _facade(tmp_path)
+async def _register_cycle(tmp_path: Path, monkeypatch) -> None:
+    facade = _facade(tmp_path, monkeypatch)
 
-    a_source = tmp_path / "a.py"
-    b_source = tmp_path / "b.py"
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    a_source = modules_dir / "a.py"
+    b_source = modules_dir / "b.py"
 
     a_source.write_text(_A_SOURCE, encoding="utf-8")
 
@@ -96,9 +98,9 @@ async def _register_cycle(tmp_path: Path) -> None:
     )
 
 
-def test_registering_cyclic_modules_fails_fast(tmp_path):
+def test_registering_cyclic_modules_fails_fast(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError) as exc_info:
-        run(_register_cycle(tmp_path))
+        run(_register_cycle(tmp_path, monkeypatch))
 
     message = str(exc_info.value)
 
@@ -114,7 +116,7 @@ def test_registering_cyclic_modules_fails_fast(tmp_path):
 # ============================================================================
 
 
-def test_acyclic_chain_stops_dependents_first(tmp_path):
+def test_acyclic_chain_stops_dependents_first(tmp_path, monkeypatch):
     stop_order: list[str] = []
 
     class C(Module):
@@ -146,29 +148,32 @@ def test_acyclic_chain_stops_dependents_first(tmp_path):
         async def stop(self):
             stop_order.append("a")
 
-    facade = _facade(tmp_path)
+    facade = _facade(tmp_path, monkeypatch)
+
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
 
     for name in ("a.py", "b.py", "c.py"):
-        (tmp_path / name).write_text(
+        (modules_dir / name).write_text(
             "# placeholder",
             encoding="utf-8",
         )
 
     facade._register_module_class(
         C,
-        source=str(tmp_path / "c.py"),
+        source=str(modules_dir / "c.py"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         B,
-        source=str(tmp_path / "b.py"),
+        source=str(modules_dir / "b.py"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         A,
-        source=str(tmp_path / "a.py"),
+        source=str(modules_dir / "a.py"),
         source_fingerprint=(1, 1),
     )
 

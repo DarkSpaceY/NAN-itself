@@ -24,6 +24,7 @@ from nan_itself.modules.model import (
 from nan_itself.modules.runtime import (
     Facade,
 )
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -40,11 +41,10 @@ def _turn() -> Turn:
     )
 
 
-def _facade(tmp_path: Path) -> Facade:
+def _facade(tmp_path: Path, monkeypatch) -> Facade:
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
     return Facade(
-        workspace_modules=tmp_path / "modules",
-        builtin_modules_dir=tmp_path / "builtin",
-        data_dir=tmp_path / "data",
         retry_interval=0.05,
     )
 
@@ -55,7 +55,10 @@ async def _load_and_start(
     filename: str,
     source: str,
 ):
-    path = tmp_path / filename
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
+    path = modules_dir / filename
 
     path.write_text(source, encoding="utf-8")
 
@@ -129,8 +132,8 @@ class Healthy(Module):
 """
 
 
-async def _ask_crash_full_cycle(tmp_path: Path) -> None:
-    facade = _facade(tmp_path)
+async def _ask_crash_full_cycle(tmp_path: Path, monkeypatch) -> None:
+    facade = _facade(tmp_path, monkeypatch)
 
     crashy = await _load_and_start(
         facade,
@@ -198,8 +201,8 @@ async def _ask_crash_full_cycle(tmp_path: Path) -> None:
     await facade.stop()
 
 
-def test_ask_failure_crashes_and_restarts(tmp_path):
-    run(_ask_crash_full_cycle(tmp_path))
+def test_ask_failure_crashes_and_restarts(tmp_path, monkeypatch):
+    run(_ask_crash_full_cycle(tmp_path, monkeypatch))
 
 
 # ============================================================================
@@ -225,8 +228,8 @@ class TellCrash(Module):
 """
 
 
-async def _tell_crash_deliver_turn(tmp_path: Path) -> None:
-    facade = _facade(tmp_path)
+async def _tell_crash_deliver_turn(tmp_path: Path, monkeypatch) -> None:
+    facade = _facade(tmp_path, monkeypatch)
 
     crashy = await _load_and_start(
         facade,
@@ -268,8 +271,8 @@ async def _tell_crash_deliver_turn(tmp_path: Path) -> None:
     await facade.stop()
 
 
-def test_tell_failure_crashes_module(tmp_path):
-    run(_tell_crash_deliver_turn(tmp_path))
+def test_tell_failure_crashes_module(tmp_path, monkeypatch):
+    run(_tell_crash_deliver_turn(tmp_path, monkeypatch))
 
 
 # ============================================================================
@@ -310,8 +313,8 @@ class FeedCrash(Module):
 """
 
 
-async def _feed_crash_channel_write(tmp_path: Path) -> None:
-    facade = _facade(tmp_path)
+async def _feed_crash_channel_write(tmp_path: Path, monkeypatch) -> None:
+    facade = _facade(tmp_path, monkeypatch)
 
     record = await _load_and_start(
         facade,
@@ -368,8 +371,8 @@ async def _feed_crash_channel_write(tmp_path: Path) -> None:
     await facade.stop()
 
 
-def test_feed_failure_crashes_module_and_reports(tmp_path):
-    run(_feed_crash_channel_write(tmp_path))
+def test_feed_failure_crashes_module_and_reports(tmp_path, monkeypatch):
+    run(_feed_crash_channel_write(tmp_path, monkeypatch))
 
 
 # ============================================================================
@@ -379,8 +382,9 @@ def test_feed_failure_crashes_module_and_reports(tmp_path):
 
 async def _shutdown_cancel_records_no_error(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    facade = _facade(tmp_path)
+    facade = _facade(tmp_path, monkeypatch)
 
     record = await _load_and_start(
         facade,
@@ -399,5 +403,5 @@ async def _shutdown_cancel_records_no_error(
     assert record.state is ModuleState.STOPPING
 
 
-def test_shutdown_cancel_records_no_error(tmp_path):
-    run(_shutdown_cancel_records_no_error(tmp_path))
+def test_shutdown_cancel_records_no_error(tmp_path, monkeypatch):
+    run(_shutdown_cancel_records_no_error(tmp_path, monkeypatch))

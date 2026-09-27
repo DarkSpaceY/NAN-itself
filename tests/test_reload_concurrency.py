@@ -16,6 +16,7 @@ from nan_itself.tools import local as local_backend
 from nan_itself.tools.runtime import (
     ProviderRuntime,
 )
+from nan_itself.utils import paths as _paths
 
 
 def run(coro):
@@ -31,11 +32,10 @@ def result_text(result):
 # ============================================================================
 
 
-def _build_facade(tmp_path):
-    return Facade(
-        workspace_modules=tmp_path / "modules",
-        data_dir=tmp_path / "data",
-    )
+def _build_facade(tmp_path, monkeypatch):
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    return Facade()
 
 
 def _install_module(
@@ -90,15 +90,19 @@ def test_concurrent_reload_of_independent_modules_isolated(
     """
 
     facade = _build_facade(
-        tmp_path
+        tmp_path,
+        monkeypatch,
     )
 
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
     a_source = (
-        tmp_path / "a.py"
+        modules_dir / "a.py"
     )
 
     b_source = (
-        tmp_path / "b.py"
+        modules_dir / "b.py"
     )
 
     class AOld(Module):
@@ -267,6 +271,7 @@ def test_concurrent_reload_of_independent_modules_isolated(
 
 def test_concurrent_reload_same_module_does_not_stop_old_twice(
     tmp_path,
+    monkeypatch,
 ):
     """
     Two callers reload the same old generation concurrently.
@@ -279,11 +284,15 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
     """
 
     facade = _build_facade(
-        tmp_path
+        tmp_path,
+        monkeypatch,
     )
 
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
     source = (
-        tmp_path / "module.py"
+        modules_dir / "module.py"
     )
 
     class OldModule(Module):
@@ -384,6 +393,7 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
 
 def test_reload_candidate_becomes_active_before_old_stop_finishes(
     tmp_path,
+    monkeypatch,
 ):
     """
     Candidate-first / old-second transaction.
@@ -393,11 +403,15 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
     """
 
     facade = _build_facade(
-        tmp_path
+        tmp_path,
+        monkeypatch,
     )
 
+    modules_dir = tmp_path / "workspace" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+
     source = (
-        tmp_path / "module.py"
+        modules_dir / "module.py"
     )
 
     entered_stop = (
@@ -499,6 +513,7 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
 
 def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
     tmp_path,
+    monkeypatch,
 ):
     """
     Existing Local Tool calls belong to the Provider generation
@@ -510,6 +525,8 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
         old in-flight call -> old Provider
         new call           -> new Provider
     """
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     entered = (
         asyncio.Event()
@@ -551,11 +568,7 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
                 "new:" + text
             )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=(
-            tmp_path / "tools"
-        ),
-    )
+    runtime = ProviderRuntime()
 
     old_provider = (
         local_backend.build_provider(
@@ -635,10 +648,13 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
 
 def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
     tmp_path,
+    monkeypatch,
 ):
     """
     Provider replacement for alpha must not replace or mutate beta.
     """
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     class AlphaV1(
         local_backend.LocalToolProvider
@@ -682,11 +698,7 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
                 "beta:" + text
             )
 
-    runtime = ProviderRuntime(
-        workspace_local_dir=(
-            tmp_path / "tools"
-        ),
-    )
+    runtime = ProviderRuntime()
 
     alpha_v1 = (
         local_backend.build_provider(

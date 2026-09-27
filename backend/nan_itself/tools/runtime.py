@@ -188,9 +188,6 @@ class _MCPWorker:
 class ProviderRuntime:
     def __init__(
         self,
-        builtin_tools_dir: str | Path | None = None,
-        workspace_mcp_dir: str | Path | None = None,
-        workspace_local_dir: str | Path | None = None,
         *,
         scan_interval: float = 1.0,
         tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
@@ -203,54 +200,36 @@ class ProviderRuntime:
             mcp_start_timeout
         )
 
-        builtin_root = (
-            Path(
-                builtin_tools_dir
-            ).resolve()
-            if builtin_tools_dir is not None
-            else (
-                project_root
-                / "builtin"
-                / "tools"
-            ).resolve()
-        )
-
         # Builtin and workspace sources live in parallel directory
         # layouts and are scanned with exactly the same hot-reload
         # logic. Deleting a source file disables its provider.
         self.builtin_mcps_dir = (
-            builtin_root / "mcps"
-        )
+            project_root
+            / "builtin"
+            / "tools"
+            / "mcps"
+        ).resolve()
 
         self.builtin_locals_dir = (
-            builtin_root / "local"
-        )
+            project_root
+            / "builtin"
+            / "tools"
+            / "local"
+        ).resolve()
 
         self.workspace_mcp_dir = (
-            Path(
-                workspace_mcp_dir
-            ).resolve()
-            if workspace_mcp_dir is not None
-            else (
-                project_root
-                / "workspace"
-                / "tools"
-                / "mcps"
-            ).resolve()
-        )
+            project_root
+            / "workspace"
+            / "tools"
+            / "mcps"
+        ).resolve()
 
         self.workspace_local_dir = (
-            Path(
-                workspace_local_dir
-            ).resolve()
-            if workspace_local_dir is not None
-            else (
-                project_root
-                / "workspace"
-                / "tools"
-                / "local"
-            ).resolve()
-        )
+            project_root
+            / "workspace"
+            / "tools"
+            / "local"
+        ).resolve()
 
         self.scan_interval = (
             scan_interval
