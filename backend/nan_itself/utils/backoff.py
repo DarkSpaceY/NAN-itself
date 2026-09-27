@@ -3,8 +3,8 @@ Shared escalating-retry schedule.
 
 One form, two callers:
 
-    - CoreAgent.run_forever(): failed turns retry with
-      escalating delays; a successful turn resets the index
+    - Agent.loop(): failed turns retry with escalating delays;
+      a successful turn resets the index
     - SourceTracker: failed source loads are retried after
       escalating delays while the file stays unchanged
 

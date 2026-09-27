@@ -445,13 +445,17 @@ async def _verb_chain(tmp_path):
         tmp_path
     )
 
+    # The channel verbs reach the Facade through the agent.
+    agent = SimpleNamespace(
+        depth=0,
+        modules=facade,
+    )
+
     call = SimpleNamespace(arguments={})
 
     listing = await ListChannelsVerb().execute(
         call=call,
-        context=SimpleNamespace(depth=0),
-        state=SimpleNamespace(),
-        engine=SimpleNamespace(modules=facade),
+        agent=agent,
     )
 
     assert "probe/goal" in listing
@@ -463,9 +467,7 @@ async def _verb_chain(tmp_path):
                 "channel": "goal",
             }
         ),
-        context=SimpleNamespace(depth=0),
-        state=SimpleNamespace(),
-        engine=SimpleNamespace(modules=facade),
+        agent=agent,
     )
 
     assert "Navigation goal" in detail
@@ -478,9 +480,7 @@ async def _verb_chain(tmp_path):
                 "payload": {"text": "go home"},
             }
         ),
-        context=SimpleNamespace(depth=0),
-        state=SimpleNamespace(),
-        engine=SimpleNamespace(modules=facade),
+        agent=agent,
     )
 
     assert result == "written"
@@ -493,9 +493,7 @@ async def _verb_chain(tmp_path):
     # Argument validation failures are plain strings.
     missing = await InvokeChannelsVerb().execute(
         call=SimpleNamespace(arguments={}),
-        context=SimpleNamespace(depth=0),
-        state=SimpleNamespace(),
-        engine=SimpleNamespace(modules=facade),
+        agent=agent,
     )
 
     assert "requires 'module'" in missing

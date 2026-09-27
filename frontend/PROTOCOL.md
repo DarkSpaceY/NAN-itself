@@ -31,25 +31,64 @@
 
 ## server → client
 
-| t | 对应原语 | 字段 | 语义 |
+每条事件 = **信封字段**(顶层,由传输层/`sink` 填)+ `t`(类型判别)+ `content`(业务载荷)。
+
+信封字段:
+
+| 字段 | 由谁填 | 语义 |
+|---|---|---|
+| `seq` | EventBus | 单调递增序号;前端按此去重历史重放 |
+| `ts` | EventBus | wall-clock 数值 epoch;前端在渲染/折叠边缘转成日期或时间(数值形式由 bus 统一加盖) |
+| `t` | 调用方 | **唯一**事件类型判别字段(扁平字符串) |
+| `id` | sink | 事件 id,UI 行关联键;调用方可显式提供以复用既有行,否则由 sink 生成 |
+| `boot_id` | sink | 进程唯一 id,`attach` 时记录;已设置则每条事件都带,未设置则不带该键 |
+
+`content` 规则:
+
+- 恒为一个对象;无载荷的事件也必须为 `{}`,绝不省略。
+- 承载该 `t` 的全部业务字段(不再是散落在顶层的 kwargs)。
+- 身份三键(见下)仅在 agent 上下文中出现。
+
+各 `t` 的 `content` 形状:
+
+| t | 对应原语 | content | 语义 |
 |---|---|---|---|
-| `hello` | — | `seq, boot, model, base_url, status` | 握手;`boot` 为进程唯一 id,客户端检测到变化即清空本地流并重置 seq 基线 |
+| `hello` | — | `boot, model, base_url, status:{state}` | 握手;`boot` 为进程唯一 id,客户端检测到变化即清空本地流并重置 seq 基线。此事件无 `id`(不经 sink) |
 | `status` | Pulse | `state:"idle"\|"working"\|"error"` | 循环状态机变化 |
-| `user_input` | Message | `id, text` | 用户输入回显(进了 Inbox 才发) |
-| `record_started` | Record | `id, kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"target"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
-| `record_detail` | Record | `id, line(html-free 纯文本)` | 详节逐行追加 |
-| `record_done` | Record | `id, summary?, note?` | ✓ 自动折叠 |
-| `record_failed` | Record | `id, summary?` | ✗ 保持展开 |
-| `output_started` | Message | `id` | NAN 文本开始 |
-| `output_delta` | Message | `id, text` | 流式增量(直接拼接) |
-| `output_done` | Message | `id, ts, duration` | 停止打字;`ts` 为数值 epoch(与所有事件一致,由 bus 统一加盖),前端渲染为人类可读;尾部 Note `✓ ts · duration` |
-| `output_cancelled` | Message | `id` | 文本流中途出现 tool_call,撤回该段(非最终输出) |
+| `user_input` | Message | `text`, `mid?` | 用户输入回显(进了 Inbox 才发);`mid` 原样回带 |
+| `record_started` | Record | `kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"target"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
+| `record_detail` | Record | `line`(html-free 纯文本) | 详节逐行追加 |
+| `record_done` | Record | `summary?`, `note?` | ✓ 自动折叠 |
+| `record_failed` | Record | `summary?` | ✗ 保持展开 |
+| `record_void` | Record | `{}` | 该记录无用户可见产出,撤回行 |
+| `output_started` | Message | `{}` | NAN 文本开始 |
+| `output_delta` | Message | `text` | 流式增量(直接拼接) |
+| `output_done` | Message | `duration` | 停止打字;信封 `ts` 为数值 epoch,前端渲染为人类可读;尾部 Note `✓ ts · duration` |
+| `output_cancelled` | Message | `{}` | 文本流中途出现 tool_call,撤回该段(非最终输出) |
+
+`id` 的关联规则:`record_started` 返回新生成/指定的 id,后续同一记录的 `record_detail` /
+`record_done` / `record_failed` / `record_void` 复用该 id;`output_started` 同理,后接
+`output_delta` / `output_done` / `output_cancelled`。`record_void` 与 `output_cancelled` 只撤回
+最近一条同 id 的行,旧回合的同 id 行不受影响。
 
 divider 不是协议事件:前端按每个事件的数值 `ts` 自行派生日期分隔(本地日期变化时插入)。
 
+`pong` 是心跳应答,形状为 `{"t":"pong","content":{}}`,不参与上述流折叠。
+
+## 公共身份字段(content 携带)
+
+身份三键由发出该事件的一方在 `content` 中携带;未携带即表示该事件无 agent 上下文
+(module 生命周期、gateway 的 `user_input` 回显)。未携带时,这三个键**不存在**(不是 `null`)。
+
+- `agent_hash`:发出该事件的 agent 的稳定标识。
+- `parent_hash`:其父 agent 的 `agent_hash`;root agent 为 `null`。
+- `depth`:该 agent 在树上的深度;root 为 `0`。
+
+非 agent 事件(module 生命周期、gateway 的 `user_input` 回显)无 agent 上下文,不携带这三个键。
+
 ## 约定
 
-1. `id` 由 server 生成,单调递增;前端不生成 id。
+1. `id` 由 server 生成,单调递增;前端不生成 id。调用方也可显式提供 id 以关联既有行(如 `record_detail` 复用 `record_started` 的 id)。
 2. `record_detail.line` 为纯文本;前端可对 `·`、`✓`、`✗` 做轻量着色,不做 HTML 注入。
 3. verb 的 kind 映射:invoke_tool/list_tools/show_tool → `tool`,invoke_skill/list_skills/show_skill → `skill`,invoke_channels/list_channels/show_channels → `target`(glyph ⌖),spawn → `spawn`,sleep → `sleep`,finish → `finish`(glyph ⏻);未知 verb 落 `verb` 兜底(前端 glyph '•')。
 4. 子代理简报 = `record_started(kind:"spawn")` 的 detail;报告 = 独立 `record_started(kind:"agent", name:"report · <task>")`。

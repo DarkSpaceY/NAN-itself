@@ -37,5 +37,5 @@ src/
 | Message(用户) | `user_input` |
 | Message(NAN) | `output_started/delta/done` |
 | Record | `record_started/detail/done/failed` |
-| Pulse | `hello.status` / `status` |
+| Pulse | `hello.content.status` / `status` |
 | Divider | `divider` |

@@ -7,9 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nan_itself.agent.core import CoreAgent
+from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
-from nan_itself.agent.runtime import AgentRuntime
 from nan_itself.tools import mcp as mcp_backend
 from nan_itself.tools.provider import Provider
 from nan_itself.tools.results import text_result
@@ -89,6 +88,23 @@ def request_text(
             str,
         )
     )
+
+
+def reply_text(
+    turn,
+):
+    """
+    The turn's reply: the text of its last assistant message. A
+    turn may end on a tool result, so scan backwards.
+    """
+    for message in reversed(turn.messages):
+        if (
+            getattr(message, "role", None)
+            == "assistant"
+        ):
+            return message.content or ""
+
+    return ""
 
 
 # ============================================================================
@@ -190,7 +206,7 @@ class QueueLLM:
 
 
 # ============================================================================
-# Module reload during an active CoreAgent turn
+# Module reload during an active Agent turn
 # ============================================================================
 
 
@@ -303,10 +319,6 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
     providers = EmptyProviders()
     skills = EmptySkills()
 
-    persona = {
-        "value": "test persona",
-    }
-
     llm = QueueLLM(
         [
             make_response(
@@ -319,14 +331,13 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         block_first=True,
     )
 
-    core = CoreAgent(
-        llm=llm,
+    agent = Agent(
+        engine=StepEngine(
+            llm=llm,
+        ),
         modules=modules,
         tools=providers,
         skills=skills,
-        persona_source=lambda: persona[
-            "value"
-        ],
         max_subagent_depth=3,
     )
 
@@ -392,19 +403,20 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # --------------------------------------------------------------
         # Start Turn 1.
         #
-        # CoreAgent:
+        # Agent:
         #
         #   skills.refresh()
-        #   persona_source()
+        #   persona re-read
         #   modules.snapshot()
-        #   engine.execute()
+        #   modules.query_snapshot()
+        #   engine.step()
         #
         # Then the fake LLM blocks.
         # --------------------------------------------------------------
 
         first_task = asyncio.create_task(
-            core.run(),
-            name="test-core-turn-1",
+            agent.run(),
+            name="test-agent-turn-1",
         )
 
         await asyncio.wait_for(
@@ -524,7 +536,7 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         )
 
         assert (
-            first_result.content
+            reply_text(first_result)
             == "turn one complete"
         )
 
@@ -551,13 +563,13 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
         second_result = (
             await asyncio.wait_for(
-                core.run(),
+                agent.run(),
                 timeout=1.0,
             )
         )
 
         assert (
-            second_result.content
+            reply_text(second_result)
             == "turn two complete"
         )
 
@@ -617,8 +629,6 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         llm.release_first.set()
 
         await modules.stop()
-
-        await core.agent_runtime.shutdown()
 
 
 # ============================================================================

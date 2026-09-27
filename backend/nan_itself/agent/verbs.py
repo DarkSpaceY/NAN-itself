@@ -5,8 +5,7 @@ One registry, one protocol:
 
     name            literal tool name
     definition()    JSON schema handed to the model
-    execute(...)    performs the action, may mutate
-                    the execution state
+    execute(...)    performs the action against the Agent
 
 Every agent sees every verb except finish, which is filtered out at
 depth 0: only subagents may end their own loop. Tools and skills are
@@ -20,25 +19,25 @@ module channels alike.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import mcp.types as mcp_types
-from loguru import logger
 
 from .model import (
-    ChildSubagent,
-)
-from .runtime import (
     SubagentLimitError,
 )
-from ..events import StreamSink
+from ..events import sink
 from ..skills import (
     UnknownSkillError,
 )
 from ..utils.llm import (
     ToolDefinition,
 )
+
+if TYPE_CHECKING:
+    from .core import Agent
 
 
 SLEEP_TOOL_NAME = "sleep"
@@ -64,33 +63,6 @@ SHOW_CHANNELS_TOOL_NAME = "show_channels"
 INVOKE_CHANNELS_TOOL_NAME = "invoke_channels"
 
 FINISH_TOOL_NAME = "finish"
-
-
-class ExecutionState:
-    """
-    Per-agent mutable state a verb may read or change.
-
-    The main agent gets a fresh one per turn; a subagent's worker
-    owns one per AGENT and passes it into every engine.execute
-    call, so its children list spans the whole task.
-    """
-
-    def __init__(
-        self,
-        *,
-        persona: str,
-        sink: StreamSink | None = None,
-    ) -> None:
-        self.persona = persona
-
-        self.sink = sink
-
-        self.children: list[ChildSubagent] = []
-
-        # Set by FinishVerb; the subagent loop checks it.
-        self.finished = False
-
-        self.report: str | None = None
 
 
 class SleepVerb:
@@ -121,9 +93,7 @@ class SleepVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         seconds = call.arguments.get("seconds")
 
@@ -143,7 +113,7 @@ class SleepVerb:
 
         waited = float(seconds)
 
-        await engine.agent_runtime.sleep(
+        await asyncio.sleep(
             waited
         )
 
@@ -185,9 +155,7 @@ class SpawnVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         task = call.arguments.get("task")
 
@@ -197,126 +165,68 @@ class SpawnVerb:
                 "a non-empty 'task'."
             )
 
-        async def worker(
-            child_context,
-        ):
-            # Subagent loop: identical to the main agent cycle
-            # (obs -> model call -> result), but only the finish
-            # tool ends it. There is no persistent history: each
-            # turn rides out as its own Turn record, and the next
-            # turn derives its history snapshot from the last one
-            # (same retention policy as the main agent). The
-            # child's turn chain dies with the worker.
-            #
-            # Report delivery is one level up: this agent's own
-            # children are archived into `report_buffer` at turn
-            # boundaries and drained into the next observation.
-            # A child that has not delivered by the time this
-            # agent finishes loses its report (warning logged) --
-            # the parent decided not to wait for it.
-            child_state = ExecutionState(
-                persona=state.persona,
-            )
-
-            report_buffer: list[str] = []
-
-            last_turn = None
-
-            while True:
-                result = await engine.execute(
-                    context=child_context,
-                    persona=state.persona,
-                    last_turn=last_turn,
-                    state=child_state,
-                    report_sink=report_buffer.extend,
-                    pending_reports=(
-                        _drain(report_buffer)
-                    ),
-                )
-
-                last_turn = result.turn
-
-                if result.finished:
-                    lost = [
-                        child
-                        for child in child_state.children
-                        if not child.reported
-                    ]
-
-                    if lost:
-                        logger.warning(
-                            "Subagent {} finished with {} "
-                            "undelivered child report(s); "
-                            "dropped",
-                            child_context.agent_hash[:8],
-                            len(lost),
-                        )
-
-                    return result
-
         try:
-            handle = engine.agent_runtime.dispatch(
-                context,
-                task=task,
-                worker=worker,
+            child = agent.spawn(
+                task,
             )
 
         except SubagentLimitError as exc:
             return str(exc)
 
-        child = ChildSubagent(
-            id=handle.agent_hash[:8],
-            task=task,
-            handle=handle,
+        record_id = sink.emit(
+            "record_started",
+            content={
+                "kind": "agent",
+                "name": task,
+                "summary": "",
+                "agent_hash": agent.agent_hash,
+                "parent_hash": agent.parent_hash,
+                "depth": agent.depth,
+            },
         )
 
-        state.children.append(
-            child
-        )
-
-        if state.sink is not None:
-            record_id = state.sink.record_started(
-                kind="agent",
-                name=task,
+        if record_id:
+            sink.emit(
+                "record_detail",
+                id=record_id,
+                content={
+                    "line": f"id: {child.agent_hash[:8]}",
+                    "agent_hash": agent.agent_hash,
+                    "parent_hash": agent.parent_hash,
+                    "depth": agent.depth,
+                },
             )
 
-            state.sink.record_detail(
-                record_id,
-                f"id: {child.id}",
+            sink.emit(
+                "record_detail",
+                id=record_id,
+                content={
+                    "line": f"depth: {child.depth}",
+                    "agent_hash": agent.agent_hash,
+                    "parent_hash": agent.parent_hash,
+                    "depth": agent.depth,
+                },
             )
 
-            state.sink.record_detail(
-                record_id,
-                f"depth: {handle.depth}",
-            )
-
-            state.sink.record_done(
-                record_id,
-                summary="spawned",
+            sink.emit(
+                "record_done",
+                id=record_id,
+                content={
+                    "summary": "spawned",
+                    "note": "",
+                    "agent_hash": agent.agent_hash,
+                    "parent_hash": agent.parent_hash,
+                    "depth": agent.depth,
+                },
             )
 
         return (
             "Subagent spawned.\n"
-            f"id: {child.id}\n"
-            f"depth: {handle.depth}\n"
+            f"id: {child.agent_hash[:8]}\n"
+            f"depth: {child.depth}\n"
             "It runs in parallel; its report will be "
             "delivered automatically."
         )
-
-
-def _drain(
-    buffer: list[str],
-) -> list[str]:
-    """
-    Take everything currently buffered. Reports that arrive while
-    a turn is running stay buffered until the next turn's
-    observation picks them up.
-    """
-    reports = list(buffer)
-
-    buffer.clear()
-
-    return reports
 
 
 class ListToolsVerb:
@@ -342,12 +252,10 @@ class ListToolsVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         try:
-            pairs = engine.tools.list_all_tools()
+            pairs = agent.tools.list_all_tools()
 
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
@@ -391,9 +299,7 @@ class ShowToolVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         name = call.arguments.get("name")
 
@@ -405,7 +311,7 @@ class ShowToolVerb:
 
         try:
             resolved = (
-                await engine.tools.resolve_tool(
+                await agent.tools.resolve_tool(
                     name
                 )
             )
@@ -475,9 +381,7 @@ class InvokeToolVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         name = call.arguments.get("name")
 
@@ -500,7 +404,7 @@ class InvokeToolVerb:
 
         try:
             resolved = (
-                await engine.tools.resolve_tool(
+                await agent.tools.resolve_tool(
                     name
                 )
             )
@@ -514,7 +418,7 @@ class InvokeToolVerb:
             provider, tool = resolved
 
             result = (
-                await engine.tools.call_tool(
+                await agent.tools.call_tool(
                     provider.spec.name,
                     tool.name,
                     arguments,
@@ -559,11 +463,9 @@ class ListSkillsVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
-        catalog = engine.skills.catalog()
+        catalog = agent.skills.catalog()
 
         if not catalog:
             return "No skills are available."
@@ -604,16 +506,14 @@ class ShowSkillVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         name = call.arguments.get("name")
 
         if not isinstance(name, str) or not name.strip():
             return "show_skill requires 'name'."
 
-        metadata = engine.skills.get_metadata(
+        metadata = agent.skills.get_metadata(
             name
         )
 
@@ -631,7 +531,7 @@ class ShowSkillVerb:
 
         try:
             resources = (
-                engine.skills.resource_paths(
+                agent.skills.resource_paths(
                     name
                 )
             )
@@ -713,9 +613,7 @@ class InvokeSkillVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         name = call.arguments.get("name")
 
@@ -746,7 +644,7 @@ class InvokeSkillVerb:
 
         try:
             result = (
-                await engine.skills.invoke(
+                await agent.skills.invoke(
                     name,
                     path,
                     args,
@@ -789,13 +687,11 @@ class ListChannelsVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         try:
             return (
-                engine.modules.list_module_channels()
+                agent.modules.list_module_channels()
             )
 
         except Exception as exc:
@@ -840,9 +736,7 @@ class ShowChannelsVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         module_id = call.arguments.get("module")
 
@@ -862,7 +756,7 @@ class ShowChannelsVerb:
             )
 
         try:
-            return engine.modules.show_module_channel(
+            return agent.modules.show_module_channel(
                 module_id,
                 channel,
             )
@@ -903,8 +797,8 @@ class InvokeChannelsVerb:
                     "payload": {
                         "type": "object",
                         "description": (
-                            "Target payload, shaped by the "
-                            "channel schema (see "
+                            "Target payload, shaped by "
+                            "the channel schema (see "
                             "show_channels)."
                         ),
                     },
@@ -918,9 +812,7 @@ class InvokeChannelsVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
         module_id = call.arguments.get("module")
 
@@ -942,7 +834,7 @@ class InvokeChannelsVerb:
         payload = call.arguments["payload"]
 
         try:
-            return engine.modules.write_module_channel(
+            return agent.modules.write_module_channel(
                 module_id,
                 channel,
                 payload,
@@ -955,7 +847,7 @@ class InvokeChannelsVerb:
 class FinishVerb:
     """
     Subagent-only tool: submit the final report and end the
-    task. The main agent never gets this definition, so a
+    task. The root agent never gets this definition, so a
     depth-0 call is rejected defensively.
     """
 
@@ -992,11 +884,9 @@ class FinishVerb:
         self,
         *,
         call,
-        context,
-        state,
-        engine,
+        agent: "Agent",
     ) -> str:
-        if context.depth == 0:
+        if agent.depth == 0:
             return (
                 "finish is only available to subagents."
             )
@@ -1009,9 +899,9 @@ class FinishVerb:
                 "a non-empty 'report'."
             )
 
-        state.finished = True
-
-        state.report = report
+        agent.finish(
+            report,
+        )
 
         return "Report submitted; task finished."
 

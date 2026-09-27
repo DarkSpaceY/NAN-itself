@@ -22,9 +22,6 @@ skills:
   script_timeout: 300.0
 
 runtime:
-  turn:
-    grace: 5.0
-
   retry:
     backoff:
       - 1.0

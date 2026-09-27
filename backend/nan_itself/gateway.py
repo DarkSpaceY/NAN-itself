@@ -43,6 +43,7 @@ class Gateway:
         on_input: Callable[[str, Any], None] | None = None,
         state_provider: Callable[[], dict] | None = None,
         frontend_dir: str | Path | None = None,
+        dedup_cache_size: int = 256,
     ) -> None:
         self.bus = bus
         self.host = host
@@ -50,6 +51,7 @@ class Gateway:
         self.on_input = on_input
         self.state_provider = state_provider
         self.frontend_dir = Path(frontend_dir) if frontend_dir else None
+        self.dedup_cache_size = dedup_cache_size
 
         self._app: FastAPI | None = None
         self._server: uvicorn.Server | None = None
@@ -286,7 +288,12 @@ class Gateway:
             elif not text:
                 logger.debug("Empty input ignored")
         elif kind == "ping":
-            asyncio.create_task(self._safe_send(websocket, {"t": "pong"}))
+            asyncio.create_task(
+                self._safe_send(
+                    websocket,
+                    {"t": "pong", "content": {}},
+                )
+            )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -303,8 +310,10 @@ class Gateway:
 
         self._seen_mids[mid] = None
 
-        if len(self._seen_mids) > 256:
-            for key in list(self._seen_mids)[:128]:
+        if len(self._seen_mids) > self.dedup_cache_size:
+            for key in list(self._seen_mids)[
+                : max(1, self.dedup_cache_size // 2)
+            ]:
                 self._seen_mids.pop(key, None)
 
         return True
@@ -313,7 +322,11 @@ class Gateway:
         """bus 历史里最近一条 status 事件的快照；没有则 idle。"""
         for event in reversed(self.bus.history()):
             if event.get("t") == "status":
-                return {"state": event.get("state", "idle")}
+                content = event.get("content") or {}
+
+                return {
+                    "state": content.get("state", "idle"),
+                }
 
         return {"state": "idle"}
 
@@ -346,4 +359,8 @@ class Gateway:
         if "status" not in state:
             state["status"] = self._latest_status()
 
-        return {"t": "hello", "seq": self.bus.seq, **state}
+        return {
+            "t": "hello",
+            "seq": self.bus.seq,
+            "content": state,
+        }

@@ -32,3 +32,8 @@ def data_dir() -> Path:
 def models_dir() -> Path:
     """Root for all model weights."""
     return repo_root() / "models"
+
+
+def persona_path() -> Path:
+    """The Agent's persona prompt file."""
+    return repo_root() / "workspace" / "persona.md"

@@ -89,9 +89,7 @@ def test_gateway_hello_snapshots_latest_status():
     bus.emit(
         {
             "t": "status",
-            "state": "working",
-            "seq": 0,
-            "ts": 0.0,
+            "content": {"state": "working"},
         }
     )
 
@@ -104,7 +102,7 @@ def test_gateway_hello_snapshots_latest_status():
 
     payload = gateway._hello_payload()
 
-    assert payload["status"] == {
+    assert payload["content"]["status"] == {
         "state": "working",
     }
 
@@ -116,6 +114,6 @@ def test_gateway_hello_defaults_to_idle():
 
     payload = gateway._hello_payload()
 
-    assert payload["status"] == {
+    assert payload["content"]["status"] == {
         "state": "idle",
     }

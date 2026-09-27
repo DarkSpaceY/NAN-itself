@@ -3,13 +3,13 @@
 """
 Inbox: everything addressed to the agent arrives here.
 
-User messages, external events, late subagent reports -- the
-InboxModule drains them at query time so each turn's observation
-carries the current backlog. Empty inbox means the section simply
-disappears from the observation.
+User messages and external events -- the InboxModule drains them
+at query time so each turn's observation carries the current
+backlog. Empty inbox means the section simply disappears from the
+observation.
 
 Subagents never see the inbox: their instruction is the task they
-were spawned with, which the engine places into the observation
+were spawned with, which the Agent places into the observation
 directly.
 """
 
@@ -30,8 +30,7 @@ class InboxModule(Module):
         self._items: deque[str] = deque()
 
     # ------------------------------------------------------------------
-    # Delivery API (used by the composition root and by the engine's
-    # subagent-report parking)
+    # Delivery API (used by the composition root)
     # ------------------------------------------------------------------
 
     def put(

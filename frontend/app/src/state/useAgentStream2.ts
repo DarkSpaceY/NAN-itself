@@ -12,7 +12,7 @@ import { fold, initialSnapshot, type Snapshot } from './store';
 //     重复投递(回合繁忙时必然发生)。
 //   - 真正断线(onclose)时若 pending 仍在 → 重连后以同一 mid 补发,
 //     服务端按 mid 去重,保证恰好一次。
-//   - 历史重放按 seq 去重;hello.boot 变化 → 重置基线并通知上层清流
+//   - 历史重放按 seq 去重;hello 的 content.boot 变化 → 重置基线并通知上层清流
 export const UI_VERSION = '2026-08-28.r5';
 
 const PING_INTERVAL_MS = 15000;
@@ -89,7 +89,11 @@ function createWsDriver(url: string, cb: WsCallbacks): Driver {
         return;
       }
 
-      const raw = evt as { t?: string; boot?: string; seq?: number; text?: string; mid?: string };
+      const raw = evt as {
+        t?: string;
+        seq?: number;
+        content?: { boot?: string; mid?: string; text?: string };
+      };
 
       if (raw.t === 'pong') {
         gotPong = true;
@@ -97,14 +101,15 @@ function createWsDriver(url: string, cb: WsCallbacks): Driver {
         return;
       }
 
-      if (raw.t === 'hello' && raw.boot) {
-        if (boot && boot !== raw.boot) {
+      if (raw.t === 'hello' && raw.content?.boot) {
+        const helloBoot = raw.content.boot;
+        if (boot && boot !== helloBoot) {
           // NAN 进程更换:基线清零 + 上层清流
-          boot = raw.boot;
+          boot = helloBoot;
           lastSeq = 0;
           cb.onReset();
         } else if (!boot) {
-          boot = raw.boot;
+          boot = helloBoot;
         }
         // hello 是基线握手,永远放行:新进程首个 hello 常携带
         // seq=0,无新事件的重连则 seq == lastSeq,按 seq 去重会
@@ -113,7 +118,11 @@ function createWsDriver(url: string, cb: WsCallbacks): Driver {
         return;
       }
 
-      if (raw.t === 'user_input' && pendingAck && (raw.mid === pendingAck.mid || raw.text === pendingAck.text)) {
+      if (
+        raw.t === 'user_input' &&
+        pendingAck &&
+        (raw.content?.mid === pendingAck.mid || raw.content?.text === pendingAck.text)
+      ) {
         pendingAck = null;
         if (ackTimer) clearTimeout(ackTimer);
       }

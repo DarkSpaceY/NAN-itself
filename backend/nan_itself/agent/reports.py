@@ -2,20 +2,14 @@
 Subagent report formatting.
 
 When a spawned Subagent finishes, its final report is formatted
-here. Delivery is exactly one level up: the root agent parks
-reports into the shared Inbox, while a subagent's own engine
-folds its children's reports into that subagent's next-turn
-observation. A child that has not delivered by the time its
-parent finishes loses its report (dropped with a warning).
+here. Delivery is exactly one level up: every agent harvests its
+finished children's reports at its own next turn boundary and
+folds them into that turn's observation. A child that has not
+reported by the time its parent finishes loses its report
+(dropped with a warning).
 """
 
 from __future__ import annotations
-
-import asyncio
-
-from .model import (
-    ChildSubagent,
-)
 
 
 REPORT_TAG = "subagent_report"
@@ -35,31 +29,24 @@ def report_record_name(
     return "report"
 
 
-async def format_child_report(
-    child: ChildSubagent,
+def format_child_report(
+    *,
+    agent_id: str,
+    task: str | None,
+    status: str,
+    body: str,
 ) -> str:
-    try:
-        result = await child.handle.wait()
+    """
+    Wrap one finished agent's report for delivery to its parent.
 
-    except asyncio.CancelledError:
-        raise
-
-    except Exception as exc:
-        body = (
-            "status: failed\n"
-            f"error: {exc}"
-        )
-
-    else:
-        body = (
-            "status: completed\n"
-            + (result.content or "")
-        )
-
+    `status` is "completed" with the report body as `body`, or
+    "failed" with `body="error: <reason>"`.
+    """
     return (
         f"<{REPORT_TAG}>\n"
-        f"id: {child.id}\n"
-        f"task: {child.task}\n"
-        + body
-        + f"\n</{REPORT_TAG}>"
+        f"id: {agent_id}\n"
+        f"task: {task}\n"
+        f"status: {status}\n"
+        f"{body}\n"
+        f"</{REPORT_TAG}>"
     )

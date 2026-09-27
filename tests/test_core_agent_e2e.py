@@ -6,9 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nan_itself.agent.core import CoreAgent
+from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
-from nan_itself.agent.runtime import AgentRuntime
 from nan_itself.tools.results import text_result
 from nan_itself.utils.llm import ToolCall
 
@@ -16,6 +15,21 @@ from nan_itself.utils.llm import ToolCall
 # ============================================================================
 # Generic helpers
 # ============================================================================
+
+
+def write_persona(
+    tmp_path,
+    text="persona",
+):
+    """
+    Every Agent re-reads its persona file at each turn boundary, so
+    each test needs a real file to point it at.
+    """
+    path = tmp_path / "persona.md"
+
+    path.write_text(text, encoding="utf-8")
+
+    return path
 
 
 def make_tool_call(
@@ -43,6 +57,30 @@ def make_response(
         provider="fake-provider",
         finish_reason="stop",
     )
+
+
+def reply_text(turn):
+    """
+    The turn's reply: the text of its last assistant message. A
+    turn may end on a tool result, so scan backwards.
+    """
+    for message in reversed(turn.messages):
+        if (
+            getattr(message, "role", None)
+            == "assistant"
+        ):
+            return message.content or ""
+
+    return ""
+
+
+def tool_messages(turn):
+    return [
+        message
+        for message in turn.messages
+        if getattr(message, "role", None)
+        == "tool"
+    ]
 
 
 # ============================================================================
@@ -346,58 +384,48 @@ class QueueLLM:
 
 
 # ============================================================================
-# CoreAgent construction
+# Agent construction
 # ============================================================================
 
 
-def make_core(
+def make_agent(
     *,
     llm,
     modules,
     tools,
     skills,
-    persona,
 ):
-    runtime = AgentRuntime(
-        max_subagent_depth=3
-    )
-
-    core = CoreAgent(
-        llm=llm,
+    return Agent(
+        engine=StepEngine(
+            llm=llm,
+        ),
         modules=modules,
         tools=tools,
         skills=skills,
-        persona_source=lambda: persona[
-            "value"
-        ],
         max_subagent_depth=3,
     )
 
-    # Make the CoreAgent use our deterministic runtime so tests can
-    # inspect the dispatch tree directly.
-    core.agent_runtime = runtime
 
-    core.engine = StepEngine(
-        llm=llm,
-        modules=modules,
-        tools=tools,
-        skills=skills,
-        agent_runtime=runtime,
-    )
+async def cancel_children(agent):
+    """
+    Stop and cancel any live child agent. These tests drive
+    Agent.run() directly, so there is no loop task to await.
+    """
+    for child in list(agent.children):
+        child.request_stop()
 
-    return (
-        core,
-        runtime,
-    )
+        await Agent._cancel_and_suppress(
+            child._task
+        )
 
 
 # ============================================================================
-# Real CoreAgent -> StepEngine -> route -> tool -> final
+# Real Agent -> StepEngine -> route -> tool -> final
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_core_agent_runs_real_route_tool_final_chain():
+async def test_agent_runs_real_route_tool_final_chain(tmp_path):
     modules = FakeModules(
         initial_value=7
     )
@@ -406,9 +434,10 @@ async def test_core_agent_runs_real_route_tool_final_chain():
 
     skills = FakeSkills()
 
-    persona = {
-        "value": "persona-v1"
-    }
+    write_persona(
+        tmp_path,
+        "persona-v1",
+    )
 
     llm = QueueLLM(
         [
@@ -444,35 +473,34 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         ]
     )
 
-    core, runtime = make_core(
+    agent = make_agent(
         llm=llm,
         modules=modules,
         tools=providers,
         skills=skills,
-        persona=persona,
     )
 
     try:
-        # Single-step turn 1: it ends with the invoke_tool call.
-        first = await core.run()
+        # Single-step turn 1: it runs the invoke_tool call and
+        # ends on the appended tool result.
+        first = await agent.run()
 
-        assert first.content is None
+        assert first.messages[-1].role == "tool"
+
+        assert first.messages[-1].content
 
         # Turn 2: the observation is rebuilt and the model
         # finalizes with the tool result in history.
-        result = await core.run()
+        result = await agent.run()
 
         # ----------------------------------------------------------
-        # Final Agent result.
+        # Final reply of the turn.
         # ----------------------------------------------------------
 
-        assert (
-            result.content
-            == "42"
-        )
+        assert reply_text(result) == "42"
 
         # ----------------------------------------------------------
-        # CoreAgent turn boundary.
+        # Agent turn boundary.
         # ----------------------------------------------------------
 
         assert (
@@ -489,7 +517,7 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         # World snapshot crosses into Turn / StepEngine.
         #
         # Do not assume the world is directly rendered into the
-        # final LLM prompt. CoreAgent passes it into StepEngine,
+        # final LLM prompt. The Agent passes it into StepEngine,
         # which passes it to modules.query_snapshot().
         # ----------------------------------------------------------
 
@@ -676,16 +704,16 @@ async def test_core_agent_runs_real_route_tool_final_chain():
         )
 
     finally:
-        await runtime.shutdown()
+        await cancel_children(agent)
 
 
 # ============================================================================
-# CoreAgent turn boundary: world + persona + skills
+# Agent turn boundary: world + persona + skills
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
+async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
     modules = FakeModules(
         initial_value=1
     )
@@ -694,9 +722,10 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
 
     skills = FakeSkills()
 
-    persona = {
-        "value": "persona-v1"
-    }
+    write_persona(
+        tmp_path,
+        "persona-v1",
+    )
 
     llm = QueueLLM(
         [
@@ -709,34 +738,29 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
         ]
     )
 
-    core, runtime = make_core(
+    agent = make_agent(
         llm=llm,
         modules=modules,
         tools=providers,
         skills=skills,
-        persona=persona,
     )
 
     try:
-        first = await core.run()
+        first = await agent.run()
 
-        persona[
-            "value"
-        ] = "persona-v2"
+        # Persona edits hot-reload: the file is re-read per turn.
+        write_persona(
+            tmp_path,
+            "persona-v2",
+        )
 
         modules.value = 2
 
-        second = await core.run()
+        second = await agent.run()
 
-        assert (
-            first.content
-            == "first"
-        )
+        assert reply_text(first) == "first"
 
-        assert (
-            second.content
-            == "second"
-        )
+        assert reply_text(second) == "second"
 
         # ----------------------------------------------------------
         # Exactly one refresh/snapshot per turn.
@@ -783,7 +807,7 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
 
         # ----------------------------------------------------------
         # Persona is injected independently on every turn.
-        # The production StepEngine gets it from CoreAgent.
+        # The production StepEngine gets it from the Agent's Turn.
         # We verify it from the actual system prompt.
         # ----------------------------------------------------------
 
@@ -867,34 +891,33 @@ async def test_core_agent_refreshes_skill_persona_and_world_each_turn():
         )
 
     finally:
-        await runtime.shutdown()
+        await cancel_children(agent)
 
 
 # ============================================================================
-# Late Subagent report -> next CoreAgent turn
+# Late subagent report -> next Agent turn
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
+async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
     """
     This is the complete late-report path:
 
-        CoreAgent.run(parent)
+        Agent.run(root)
             ->
         real StepEngine
             ->
-        dispatch_subagent
+        SpawnVerb -> Agent.spawn
             ->
-        parent finishes before child
+        the root's turn ends before the child reports
             ->
-        late report is parked
+        the child finishes; its report settles on the child
             ->
-        CoreAgent.run(next turn)
+        Agent.run(root) harvests it
             ->
-        pending report is drained into seed_reports
-            ->
-        StepEngine receives the report in the new turn
+        the report is folded into the root's own observation
+            (the inbox is never involved)
     """
 
     modules = FakeModules(
@@ -905,9 +928,10 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
 
     skills = FakeSkills()
 
-    persona = {
-        "value": "persona"
-    }
+    write_persona(
+        tmp_path,
+        "persona",
+    )
 
     child_started = asyncio.Event()
     release_child = asyncio.Event()
@@ -1001,9 +1025,8 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
                     "Parent request has no user messages."
                 )
 
-            # A later CoreAgent turn contains the original new input
-            # as the first user message. The parked report is another
-            # user message containing REPORT_TAG.
+            # A later root turn carries the harvested child report as
+            # a user message; the report is recognized by REPORT_TAG.
             has_report = any(
                 "<subagent_report>"
                 in (
@@ -1120,92 +1143,98 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
 
     llm = LateReportLLM()
 
-    # A real InboxModule is required: the engine parks late
-    # subagent reports into it and the next observation drains it.
+    # A real InboxModule is running: the report must NOT travel
+    # through it, so its emptiness is part of the assertion.
     modules.inbox = _load_inbox()
 
-    core, runtime = make_core(
+    agent = make_agent(
         llm=llm,
         modules=modules,
         tools=providers,
         skills=skills,
-        persona=persona,
     )
 
     try:
         # ----------------------------------------------------------
-        # Parent turn.
+        # Root turn.
         #
         # Child must start but remain blocked.
         # ----------------------------------------------------------
 
-        first = await core.run()
+        first = await agent.run()
 
-        # Single-step turn: it ends with the spawn call.
-        assert first.content is None
+        # Single-step turn: it runs the spawn call and ends on the
+        # appended tool result.
+        assert first.messages[-1].role == "tool"
+
+        assert (
+            "Subagent spawned"
+            in first.messages[-1].content
+        )
 
         await asyncio.wait_for(
             child_started.wait(),
             timeout=1.0,
         )
 
-        # At this point the child is still running and no
-        # report has been parked yet.
-        assert (
-            runtime.active_subagent_count
-            == 1
-        )
+        # At this point the child is still running and still
+        # listed; nothing has been parked anywhere.
+        assert len(agent.children) == 1
 
         assert not modules.inbox._items
 
         # ----------------------------------------------------------
-        # Second turn: the inbox is still empty, so the parent
-        # just wraps up.
+        # Second turn: no report yet, so the root just wraps up.
         # ----------------------------------------------------------
 
-        second = await core.run()
+        second = await agent.run()
 
         assert (
-            second.content
+            reply_text(second)
             == "parent finished early"
         )
 
         # ----------------------------------------------------------
-        # Now let child complete.
+        # Now let the child complete.
         # ----------------------------------------------------------
 
         release_child.set()
 
-        # Wait until the background archival task has parked
-        # the formatted report into the inbox.
-        for _ in range(100):
-            if modules.inbox._items:
+        child = agent.children[0]
+
+        # Wait until the child's report has settled on the child.
+        for _ in range(200):
+            if child.done and child.report is not None:
                 break
 
             await asyncio.sleep(
                 0
             )
 
-        assert modules.inbox._items
+        assert child.report is not None
 
         assert (
-            runtime.active_subagent_count
-            == 0
+            "status: completed"
+            in child.report
         )
 
+        # The report never travelled through the inbox.
+        assert not modules.inbox._items
+
         # ----------------------------------------------------------
-        # Next turn: the observation now carries the report.
+        # Next turn: the harvest folds the report into this
+        # turn's observation.
         # ----------------------------------------------------------
 
-        third = await core.run()
+        third = await agent.run()
 
         assert (
-            third.content
+            reply_text(third)
             == "report received"
         )
 
-        # The report was drained by this turn's observation.
-        assert not modules.inbox._items
+        # The harvested child left the tree.
+        assert agent.children == []
 
         # ----------------------------------------------------------
         # Verify report reached the actual StepEngine request.
@@ -1285,4 +1314,255 @@ async def test_late_subagent_report_is_parked_and_injected_on_next_turn():
     finally:
         release_child.set()
 
-        await runtime.shutdown()
+        await cancel_children(agent)
+
+
+# ============================================================================
+# Agent.run returns the completed Turn
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_run_returns_the_turn_whose_last_assistant_text_is_the_reply(tmp_path):
+    """
+    Agent.run() hands back the completed Turn: the model's reply is
+    its last assistant message, and that same Turn is what reaches
+    the Modules.
+    """
+    modules = FakeModules()
+
+    providers = FakeProviderRuntime()
+
+    skills = FakeSkills()
+
+    write_persona(
+        tmp_path,
+        "persona",
+    )
+
+    llm = QueueLLM(
+        [
+            make_response(
+                content="the answer"
+            )
+        ]
+    )
+
+    agent = make_agent(
+        llm=llm,
+        modules=modules,
+        tools=providers,
+        skills=skills,
+    )
+
+    try:
+        turn = await agent.run()
+
+        assert turn is agent.last_turn
+
+        assert reply_text(turn) == "the answer"
+
+        assert turn.messages[-1].role == "assistant"
+
+        assert (
+            turn.messages[-1].content
+            == "the answer"
+        )
+
+        # The same Turn was delivered to the Modules.
+        assert (
+            modules.delivered_turns[-1]
+            is turn
+        )
+
+    finally:
+        await cancel_children(agent)
+
+
+@pytest.mark.asyncio
+async def test_tool_messages_are_appended_to_the_same_turn(tmp_path):
+    """
+    A turn that ends with tool calls runs its verbs and appends each
+    result as a tool message to THAT SAME Turn, right after the
+    assistant message carrying the calls.
+    """
+    modules = FakeModules()
+
+    providers = FakeProviderRuntime()
+
+    skills = FakeSkills()
+
+    write_persona(
+        tmp_path,
+        "persona",
+    )
+
+    llm = QueueLLM(
+        [
+            make_response(
+                tool_calls=[
+                    make_tool_call(
+                        "add-1",
+                        "invoke_tool",
+                        {
+                            "name": "calc/add",
+                            "arguments": {
+                                "x": 2,
+                                "y": 3,
+                            },
+                        },
+                    )
+                ]
+            ),
+        ]
+    )
+
+    agent = make_agent(
+        llm=llm,
+        modules=modules,
+        tools=providers,
+        skills=skills,
+    )
+
+    try:
+        turn = await agent.run()
+
+        # observation + assistant(tool_calls) + tool
+        assert len(turn.messages) == 3
+
+        assert turn.messages[1].role == "assistant"
+
+        assert [
+            call.name
+            for call in turn.messages[1].tool_calls
+        ] == ["invoke_tool"]
+
+        assert turn.messages[2].role == "tool"
+
+        assert (
+            turn.messages[2].tool_call_id
+            == "add-1"
+        )
+
+        assert (
+            '"text":"5"'
+            in turn.messages[2].content
+        )
+
+        # The provider tool really ran.
+        assert providers.calls == [
+            (
+                "calc",
+                "add",
+                {
+                    "x": 2,
+                    "y": 3,
+                },
+            )
+        ]
+
+        # The delivered Turn carries the tool messages too.
+        assert (
+            tool_messages(
+                modules.delivered_turns[-1]
+            )
+            == [turn.messages[2]]
+        )
+
+    finally:
+        await cancel_children(agent)
+
+
+# ============================================================================
+# Failure visibility on the delivered Turn
+# ============================================================================
+
+
+class FailingEngine:
+    """
+    StepEngine double whose model call always fails: the Turn that
+    reaches the Modules must still show the failure.
+    """
+
+    def __init__(self, exc):
+        self.exc = exc
+
+    async def step(self, turn):
+        raise self.exc
+
+
+def make_failing_agent(
+    *,
+    tmp_path,
+    exc,
+):
+    modules = FakeModules()
+
+    write_persona(
+        tmp_path,
+        "persona",
+    )
+
+    agent = make_agent(
+        llm=QueueLLM([]),
+        modules=modules,
+        tools=FakeProviderRuntime(),
+        skills=FakeSkills(),
+    )
+
+    agent.engine = FailingEngine(exc)
+
+    return agent, modules
+
+
+@pytest.mark.asyncio
+async def test_step_failure_is_visible_on_the_delivered_turn(
+    tmp_path,
+):
+    agent, modules = make_failing_agent(
+        tmp_path=tmp_path,
+        exc=RuntimeError("boom"),
+    )
+
+    try:
+        with pytest.raises(RuntimeError):
+            await agent.run()
+
+        record = modules.delivered_turns[-1]
+
+        assert (
+            record.error
+            == "RuntimeError: boom"
+        )
+
+        assert record.ended_at is not None
+
+        # A failed turn never becomes the next turn's history
+        # source: last_turn only advances on success.
+        assert agent.last_turn is None
+
+    finally:
+        await cancel_children(agent)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_step_is_visible_on_the_delivered_turn(
+    tmp_path,
+):
+    agent, modules = make_failing_agent(
+        tmp_path=tmp_path,
+        exc=asyncio.CancelledError(),
+    )
+
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await agent.run()
+
+        record = modules.delivered_turns[-1]
+
+        assert record.error == "cancelled"
+
+        assert record.ended_at is not None
+
+    finally:
+        await cancel_children(agent)

@@ -3,15 +3,13 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import time
 import uuid
-from typing import Any
 
 from loguru import logger
 
-from .agent import CoreAgent
+from .agent import Agent, StepEngine
 from .config import get_settings
-from .events import EventBus
+from .events import EventBus, sink
 from .gateway import Gateway
 from .modules import (
     Facade as ModuleFacade,
@@ -25,8 +23,12 @@ settings = get_settings()
 
 
 async def run_agent_process() -> None:
-    # NAN talks to local models on loopback interfaces; ambient
-    # shell proxies must never intercept that traffic.
+    # --------------------------------------------------------------
+    # Environment: NAN talks to local models on loopback
+    # interfaces; ambient shell proxies must never intercept that
+    # traffic.
+    # --------------------------------------------------------------
+
     for key in (
         "ALL_PROXY",
         "all_proxy",
@@ -36,6 +38,10 @@ async def run_agent_process() -> None:
         "https_proxy",
     ):
         os.environ.pop(key, None)
+
+    # --------------------------------------------------------------
+    # Model and capabilities.
+    # --------------------------------------------------------------
 
     llm = LLMProvider(
         provider=settings.llm.provider,
@@ -51,13 +57,6 @@ async def run_agent_process() -> None:
         tool_timeout=settings.providers.tool_timeout,
     )
 
-    bus = EventBus(
-        history_limit=settings.events.history_limit,
-        subscriber_queue_size=(
-            settings.events.subscriber_queue_size
-        ),
-    )
-
     modules = ModuleFacade(
         llm=llm,
         retry_interval=settings.modules.retry_interval,
@@ -65,43 +64,110 @@ async def run_agent_process() -> None:
     )
 
     skills = SkillRuntime(
-        resource_char_limit=(
-            settings.skills.resource_char_limit
-        ),
+        resource_char_limit=settings.skills.resource_char_limit,
         script_timeout=settings.skills.script_timeout,
     )
 
-    persona_path = (
-        _paths.repo_root()
-        / "workspace"
-        / "persona.md"
+    # --------------------------------------------------------------
+    # Agent: the trunk.
+    # --------------------------------------------------------------
+
+    engine = StepEngine(
+        llm=llm,
+    )
+
+    agent = Agent(
+        engine=engine,
+        modules=modules,
+        tools=providers,
+        skills=skills,
+        max_subagent_depth=settings.agent.max_subagent_depth,
+        history_char_limit=settings.agent.history_char_limit,
+        backoff=settings.runtime.retry.backoff,
     )
 
     # --------------------------------------------------------------
-    # Runtime tasks / resources.
+    # UI channel: agent events reach the browser through the global
+    # sink -> bus -> gateway.
     # --------------------------------------------------------------
 
-    gateway_task: asyncio.Task[None] | None = None
+    bus = EventBus(
+        history_limit=settings.events.history_limit,
+        subscriber_queue_size=settings.events.subscriber_queue_size,
+    )
 
-    gateway: Gateway | None = None
+    boot_id = uuid.uuid4().hex[:12]
+
+    sink.attach(bus, boot_id=boot_id)
+
+    # --------------------------------------------------------------
+    # Gateway, with its two app-side callbacks.
+    # --------------------------------------------------------------
+
+    def ingest(
+        text: str,
+        mid: str | None = None,
+    ) -> None:
+        # The one receiving point: the text enters the Inbox
+        # module and is echoed to the UI at once, so a user
+        # message never seems to vanish during a long turn.
+        # (mid dedup is the gateway's business.)
+        inbox = modules.get("inbox")
+
+        if inbox is None:
+            logger.warning(
+                "Inbox module not running; input dropped"
+            )
+
+        else:
+            inbox.put(text)
+
+        if text.strip():
+            sink.emit(
+                "user_input",
+                content=(
+                    {"text": text}
+                    | ({"mid": mid} if mid else {})
+                ),
+            )
+
+    def gateway_state() -> dict:
+        # status 快照由 gateway 负责（从 bus 历史提取），
+        # 这里只提供 app 才知道的身份信息。
+        return {
+            "boot": boot_id,
+            "model": settings.llm.model,
+            "base_url": settings.llm.base_url,
+        }
+
+    gateway = Gateway(
+        bus=bus,
+        host=settings.gateway.host,
+        port=settings.gateway.port,
+        on_input=ingest,
+        state_provider=gateway_state,
+        frontend_dir=(
+            _paths.repo_root()
+            / "frontend"
+            / "app"
+            / "dist"
+        ),
+        dedup_cache_size=settings.events.input_dedup_cache_size,
+    )
+
+    # --------------------------------------------------------------
+    # Shutdown handles: pre-initialized so the finally block can
+    # reference them even when startup fails early.
+    # --------------------------------------------------------------
+
+    agent_task: asyncio.Task[None] | None = None
+    gateway_task: asyncio.Task[None] | None = None
 
     running_loop = asyncio.get_running_loop()
 
-    def remove_signal_handlers() -> None:
-        for sig in (
-            signal.SIGINT,
-            signal.SIGTERM,
-        ):
-            try:
-                running_loop.remove_signal_handler(
-                    sig
-                )
-            except Exception:
-                pass
-
     try:
         # ----------------------------------------------------------
-        # Start providers.
+        # Start: capabilities first, then the two long-lived tasks.
         # ----------------------------------------------------------
 
         logger.info(
@@ -110,119 +176,15 @@ async def run_agent_process() -> None:
 
         await providers.start()
 
-        # ----------------------------------------------------------
-        # Start module facade.
-        # ----------------------------------------------------------
-
         logger.info(
             "Starting module facade"
         )
 
         await modules.start()
 
-        skills.discover()
-
-        if not persona_path.is_file():
-            logger.error(
-                "Persona file not found: {}; "
-                "cannot start without it",
-                persona_path,
-            )
-
-            return
-
-        def read_persona() -> str:
-            # Re-read on every access: the agent calls this at each
-            # turn start, so persona edits hot-reload.
-            return persona_path.read_text(
-                encoding="utf-8",
-            )
-
-        agent = CoreAgent(
-            llm=llm,
-            modules=modules,
-            tools=providers,
-            skills=skills,
-            persona_source=read_persona,
-            bus=bus,
-            max_subagent_depth=(
-                settings.agent.max_subagent_depth
-            ),
-            history_char_limit=(
-                settings.agent.history_char_limit
-            ),
-            turn_grace=(
-                settings.runtime.turn.grace
-            ),
-            backoff=(
-                settings.runtime.retry.backoff
-            ),
-        )
-
         agent_task = asyncio.create_task(
-            agent.run_forever(),
+            agent.loop(),
             name="agent-loop",
-        )
-
-        boot_id = uuid.uuid4().hex[:12]
-
-        def ingest(
-            text: str,
-            mid: str | None = None,
-        ) -> None:
-            # 唯一的接收点：进入 Inbox 模块的同时立刻回显，
-            # 用户消息不因 sleep/长回合而“消失”。
-            # （mid 去重由 gateway 负责。）
-            inbox = modules.get("inbox")
-
-            if inbox is None:
-                logger.warning(
-                    "Inbox module not running; input dropped"
-                )
-
-            else:
-                inbox.put(text)
-
-            if text.strip():
-                echo: dict[str, Any] = {
-                    "t": "user_input",
-                    "id": (
-                        f"u{time.time_ns()}"
-                    ),
-                    "text": text,
-                    "boot_id": boot_id,
-                }
-
-                if mid:
-                    echo["mid"] = mid
-
-                bus.emit(echo)
-
-        # ----------------------------------------------------------
-        # Gateway.
-        # ----------------------------------------------------------
-
-        def gateway_state() -> dict:
-            # status 快照由 gateway 负责（从 bus 历史提取），
-            # 这里只提供 app 才知道的身份信息。
-            return {
-                "boot": boot_id,
-                "model": settings.llm.model,
-                "base_url": settings.llm.base_url,
-            }
-
-        gateway = Gateway(
-            bus=bus,
-            host=settings.gateway.host,
-            port=settings.gateway.port,
-            on_input=ingest,
-            state_provider=gateway_state,
-            frontend_dir=(
-                _paths.repo_root()
-                / "frontend"
-                / "app"
-                / "dist"
-            ),
         )
 
         gateway_task = asyncio.create_task(
@@ -231,16 +193,14 @@ async def run_agent_process() -> None:
         )
 
         # ----------------------------------------------------------
-        # Wait for Ctrl+C / SIGTERM.
+        # Stop signal.
         # ----------------------------------------------------------
 
         stop_received = asyncio.Event()
 
         def _request_stop() -> None:
             logger.info(
-                "Stop signal received; grace {}s "
-                "for the current turn",
-                agent.turn_grace,
+                "Stop signal received; stopping agent"
             )
 
             agent.request_stop()
@@ -260,68 +220,74 @@ async def run_agent_process() -> None:
         )
 
         # ----------------------------------------------------------
-        # Wait for Ctrl+C / SIGTERM.
+        # Run until stopped.
         # ----------------------------------------------------------
 
         await stop_received.wait()
 
     finally:
-        # ==========================================================
-        # Shutdown
-        # ==========================================================
+        # ----------------------------------------------------------
+        # Shutdown.
+        #
+        # Best-effort cleanup that must run to completion: the
+        # steps below catch BaseException on purpose, so a
+        # cancellation arriving during shutdown cannot leave
+        # modules or providers running.
+        # ----------------------------------------------------------
 
-        remove_signal_handlers()
+        for sig in (
+            signal.SIGINT,
+            signal.SIGTERM,
+        ):
+            try:
+                running_loop.remove_signal_handler(
+                    sig
+                )
+            except Exception:
+                logger.debug(
+                    "Signal handler for {} not removed",
+                    sig,
+                )
 
         # ----------------------------------------------------------
         # Stop accepting / processing agent work.
         # ----------------------------------------------------------
 
         if agent_task is not None:
-            if not agent_task.done():
-                try:
-                    await agent_task
+            # Awaiting unconditionally retrieves an earlier
+            # failure; cancellation is swallowed on purpose so
+            # the remaining cleanup still runs (see above).
+            try:
+                await agent_task
 
-                except asyncio.CancelledError:
+            except asyncio.CancelledError:
+                if agent_task.cancelled():
                     logger.debug(
                         "Agent loop cancelled during shutdown"
                     )
 
-                except Exception:
-                    logger.exception(
-                        "Agent loop shutdown failed"
+                else:
+                    logger.debug(
+                        "Agent loop wait cancelled during "
+                        "shutdown"
                     )
 
-        # ----------------------------------------------------------
-        # Stop all Subagents.
-        #
-        # A Subagent may outlive its parent Agent turn during normal
-        # operation, so it must have an explicit application-level
-        # shutdown boundary.
-        #
-        # This MUST happen before Modules and Providers are stopped,
-        # because a running Subagent may still be using them.
-        # ----------------------------------------------------------
-
-        try:
-            await agent.agent_runtime.shutdown()
-
-        except BaseException:
-            logger.exception(
-                "Subagent runtime shutdown failed; continuing"
-            )
+            except Exception:
+                logger.exception(
+                    "Agent loop shutdown failed"
+                )
 
         # ----------------------------------------------------------
         # Gateway.
         # ----------------------------------------------------------
 
-        if gateway is not None:
-            try:
-                await gateway.close()
+        try:
+            await gateway.close()
 
-            except BaseException:
-                logger.exception(
-                    "Gateway shutdown failed"
-                )
+        except BaseException:
+            logger.exception(
+                "Gateway shutdown failed"
+            )
 
         # The serve() task may still be alive after close().
         if gateway_task is not None:

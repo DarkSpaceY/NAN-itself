@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from nan_itself.agent.core import CoreAgent
+import pytest
+
+from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
-from nan_itself.agent.runtime import AgentRuntime
-from nan_itself.agent.verbs import ExecutionState, SpawnVerb
+from nan_itself.agent.reports import format_child_report
+from nan_itself.agent.verbs import SpawnVerb
+from nan_itself.events import EventBus, sink
 from nan_itself.modules.loading import import_module_class
 from nan_itself.modules.model import DataSpace, Turn
 from nan_itself.utils.llm import Message, ToolCall
@@ -21,6 +24,28 @@ from nan_itself.utils.llm import Message, ToolCall
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def reply_text(turn):
+    """
+    The turn's reply: the text of its last assistant message. A
+    turn may end on a tool result, so scan backwards.
+    """
+    for message in reversed(turn.messages):
+        if (
+            getattr(message, "role", None)
+            == "assistant"
+        ):
+            return message.content or ""
+
+    return ""
+
+
+@pytest.fixture(autouse=True)
+def _reset_sink():
+    yield
+
+    sink.reset()
 
 
 # ============================================================================
@@ -77,8 +102,8 @@ class FakeModules:
 
 class FakeSkills:
     """
-    Skill runtime that exposes only refresh/catalog semantics needed
-    by CoreAgent.
+    Skill runtime that exposes only the refresh/catalog semantics
+    needed by the Agent and the skill verbs.
     """
 
     def __init__(self):
@@ -140,22 +165,27 @@ class EchoLLM:
 
 @dataclass
 class CapturedExecution:
-    context: object
-    persona: str
-    last_turn: object | None
     turn: object
+
+    @property
+    def persona(self):
+        return self.turn.persona
+
+    @property
+    def history(self):
+        return self.turn.history
 
 
 class CapturingEngine:
     """
-    Replaces StepEngine while retaining CoreAgent's real turn-boundary
-    behavior.
+    Replaces StepEngine while retaining the Agent's real
+    turn-boundary behavior.
 
-    This allows us to verify exactly what CoreAgent constructs and
-    passes into the execution engine. The fake mirrors the engine's
-    snapshot-derivation contract: each turn's Turn record carries
-    the history snapshot as of its start, and CoreAgent chains
-    turns through it (no persistent history anywhere).
+    This allows us to verify exactly what the Agent constructs and
+    passes into the engine. The fake mirrors the engine's contract:
+    each turn's Turn record carries the history snapshot as of its
+    start and this turn's messages, and the Agent chains turns
+    through it (no persistent history anywhere).
     """
 
     def __init__(self):
@@ -165,41 +195,12 @@ class CapturingEngine:
 
         self.on_execute = None
 
-        self.reply = "done"
-
-    async def execute(
+    async def step(
         self,
-        *,
-        context,
-        persona,
-        last_turn=None,
-        report_sink=None,
-        sink=None,
+        turn,
     ):
-        # Mirror the real StepEngine contract: derive this
-        # turn's history snapshot from the last turn.
-        prior: tuple = ()
-
-        if last_turn is not None:
-            prior = (
-                last_turn.history
-                + last_turn.messages
-            )
-
-        turn = SimpleNamespace(
-            history=prior,
-            messages=(
-                SimpleNamespace(
-                    content="assistant-done",
-                ),
-            ),
-        )
-
         self.executions.append(
             CapturedExecution(
-                context=context,
-                persona=persona,
-                last_turn=last_turn,
                 turn=turn,
             )
         )
@@ -209,7 +210,7 @@ class CapturingEngine:
         if callback is not None:
             outcome = callback(
                 self,
-                context,
+                turn,
             )
 
             if asyncio.iscoroutine(
@@ -217,46 +218,83 @@ class CapturingEngine:
             ):
                 await outcome
 
-        return SimpleNamespace(
-            content=self.reply,
-            turn=turn,
+        return replace(
+            turn,
+            messages=(
+                turn.messages
+                + (
+                    Message(
+                        role="assistant",
+                        content=(
+                            "assistant-done"
+                        ),
+                    ),
+                )
+            ),
         )
 
 
 def make_agent(
     *,
     engine=None,
+    modules=None,
     history_char_limit=100_000,
     autonomous_interval=0.0,
 ):
-    core = CoreAgent(
-        llm=FakeLLM(),
-        modules=FakeModules(),
+    return Agent(
+        engine=engine or CapturingEngine(),
+        modules=modules or FakeModules(),
         tools=FakeProviders(),
         skills=FakeSkills(),
-        persona_source=lambda: "You are NAN.",
         history_char_limit=history_char_limit,
         autonomous_interval=autonomous_interval,
     )
 
-    if engine is not None:
-        core.engine = engine
 
-    return core
+def make_child(
+    parent,
+    *,
+    task,
+):
+    """
+    A child Agent without its own loop task: the harvest tests only
+    need the tree shape and the child's report slot.
+    """
+    return Agent(
+        engine=parent.engine,
+        modules=parent.modules,
+        tools=parent.tools,
+        skills=parent.skills,
+        task=task,
+        parent=parent,
+    )
 
 
 # ============================================================================
-# Turn boundaries (CoreAgent.run)
+# Turn boundaries (Agent.run)
 # ============================================================================
 
 
-def test_run_assembles_turn_boundaries():
+def test_run_assembles_turn_boundaries(
+    tmp_path,
+):
+    (tmp_path / "persona.md").write_text(
+        "You are NAN.",
+        encoding="utf-8",
+    )
+
     engine = CapturingEngine()
-    core = make_agent(engine=engine)
 
-    result = run(core.run())
+    modules = FakeModules()
 
-    assert result.content == "done"
+    agent = make_agent(
+        engine=engine,
+        modules=modules,
+    )
+
+    result = run(agent.run())
+
+    assert reply_text(result) == "assistant-done"
 
     # One execution captured, one turn chained.
     assert len(engine.executions) == 1
@@ -266,61 +304,77 @@ def test_run_assembles_turn_boundaries():
     assert captured.persona == "You are NAN."
 
     # First turn: no prior turn, nothing derived.
-    assert captured.last_turn is None
+    assert captured.history == ()
 
-    # The completed Turn rides on the result and becomes the
+    # The completed Turn rides out on run() and becomes the
     # single last_turn reference; nothing else is retained.
-    assert core.last_turn is captured.turn
+    assert agent.last_turn is not None
 
     assert [
         m.content
-        for m in captured.turn.messages
-    ] == ["assistant-done"]
+        for m in agent.last_turn.messages
+    ] == ["", "assistant-done"]
 
     # Per-turn boundaries: refresh + snapshot exactly once.
-    assert core.skills.refresh_calls == 1
-    assert core.modules.snapshot_calls == 1
+    assert agent.skills.refresh_calls == 1
+    assert agent.modules.snapshot_calls == 1
 
-    # Root context: depth 0, no task (input rides in the inbox).
-    assert captured.context.depth == 0
-    assert captured.context.task is None
+    # Root turn: depth 0, no task (input rides in the inbox).
+    assert captured.turn.depth == 0
+    assert captured.turn.task is None
 
 
 def test_run_extends_history_across_turns():
     engine = CapturingEngine()
-    core = make_agent(engine=engine)
 
-    run(core.run())
-    run(core.run())
+    agent = make_agent(
+        engine=engine,
+    )
+
+    run(agent.run())
+    run(agent.run())
 
     first, second = engine.executions
 
     # First turn starts from nothing; the second turn derives
-    # its history snapshot from the first turn's record.
-    assert first.last_turn is None
-
-    assert second.last_turn is first.turn
+    # its history snapshot from the first turn's record
+    # (observation + assistant reply).
+    assert first.history == ()
 
     assert [
-        m.content for m in second.turn.history
-    ] == ["assistant-done"]
+        m.content for m in second.history
+    ] == ["", "assistant-done"]
 
 
-def test_core_agent_forwards_history_char_limit_to_engine():
-    # The retention policy lives in the StepEngine; CoreAgent
-    # only forwards the configured limit at construction time.
-    core = make_agent(history_char_limit=5)
+def test_agent_retains_history_char_limit_and_clears_over_it():
+    # The retention policy lives on the Agent (the engine no
+    # longer knows about it); it is applied at derivation time.
+    engine = CapturingEngine()
 
-    assert core.engine.history_char_limit == 5
+    agent = make_agent(
+        engine=engine,
+        history_char_limit=5,
+    )
+
+    assert agent.history_char_limit == 5
+
+    run(agent.run())
+
+    # The first turn's messages exceed the limit, so the second
+    # turn's derived snapshot is cleared to empty.
+    run(agent.run())
+
+    assert len(engine.executions) == 2
+
+    assert (
+        engine.executions[1].history
+        == ()
+    )
 
 
 def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
     engine = StepEngine(
         llm=FakeLLM(),
-        modules=FakeModules(),
-        tools=FakeProviders(),
-        skills=FakeSkills(),
-        agent_runtime=SimpleNamespace(),
     )
 
     root_names = {
@@ -342,151 +396,161 @@ def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
     assert "finish" in child_names
 
 
-def test_engine_derives_history_snapshot_from_last_turn():
+def test_step_sees_history_plus_the_turn_messages():
     llm = EchoLLM()
 
     engine = StepEngine(
         llm=llm,
-        modules=FakeModules(),
-        tools=FakeProviders(),
-        skills=FakeSkills(),
-        agent_runtime=SimpleNamespace(),
     )
 
-    context = SimpleNamespace(
+    history = (
+        Message(role="user", content="old"),
+        Message(role="assistant", content="last"),
+    )
+
+    observation = Message(
+        role="user",
+        content="observation",
+    )
+
+    turn = Turn(
         agent_hash="hash123",
         parent_hash=None,
         depth=0,
         task=None,
         world={"state": {"value": 1}},
-    )
-
-    last_turn = SimpleNamespace(
-        history=(
-            Message(role="user", content="old"),
-        ),
-        messages=(
-            Message(role="assistant", content="last"),
-        ),
+        persona="p",
+        history=history,
+        messages=(observation,),
     )
 
     result = run(
-        engine.execute(
-            context=context,
-            persona="p",
-            last_turn=last_turn,
-        )
+        engine.step(turn)
     )
 
-    # The derived snapshot became the model-visible prefix:
-    # system + history + this turn's observation.
+    # The turn's history snapshot became the model-visible
+    # prefix: system + history + this turn's messages.
     request = llm.requests[0]
 
     assert len(request.messages) == 4
+
+    assert [
+        m.content
+        for m in request.messages[:3]
+    ] == ["p", "old", "last"]
 
     # The completed Turn carries the same snapshot plus this
     # turn's messages (observation + assistant reply) -- the
     # full model input is history + messages.
     assert [
-        m.content for m in result.turn.history
+        m.content for m in result.history
     ] == ["old", "last"]
 
     assert [
-        m.content for m in result.turn.messages
-    ] == ["", "reply"]
-
-
-def test_engine_clears_history_over_char_limit():
-    llm = EchoLLM()
-
-    engine = StepEngine(
-        llm=llm,
-        modules=FakeModules(),
-        tools=FakeProviders(),
-        skills=FakeSkills(),
-        agent_runtime=SimpleNamespace(),
-        history_char_limit=5,
-    )
-
-    context = SimpleNamespace(
-        agent_hash="hash123",
-        parent_hash=None,
-        depth=0,
-        task=None,
-        world={"state": {"value": 1}},
-    )
-
-    last_turn = SimpleNamespace(
-        history=(
-            Message(role="user", content="x" * 100),
-        ),
-        messages=(),
-    )
-
-    result = run(
-        engine.execute(
-            context=context,
-            persona="p",
-            last_turn=last_turn,
-        )
-    )
-
-    # The oversized snapshot was cleared at derivation time:
-    # only the system message and this turn's observation
-    # reached the model.
-    assert len(llm.requests) == 1
-
-    assert len(llm.requests[0].messages) == 2
-
-    # The chain restarts fresh from the completed turn; the
-    # broken-off turns stay on record elsewhere.
-    assert result.turn.history == ()
-
-    assert [
-        m.content for m in result.turn.messages
-    ] == ["", "reply"]
+        m.content for m in result.messages
+    ] == ["observation", "reply"]
 
 
 # ============================================================================
-# Subagent report parking
+# Child report harvesting (one level up, no inbox)
 # ============================================================================
 
 
-def test_park_reports_routes_to_inbox_module():
-    core = make_agent()
-
-    class FakeInbox:
-        def __init__(self):
-            self.items = []
-
-        def put(
-            self,
-            item,
-        ):
-            self.items.append(item)
-
-    fake = FakeInbox()
-    core.modules.inbox = fake
-
-    core._park_reports(
-        [
-            "<subagent_report>\nstatus: completed",
-            "<subagent_report>\nstatus: failed",
-        ]
+def _child_report(
+    task: str,
+) -> str:
+    return format_child_report(
+        agent_id="abc12345",
+        task=task,
+        status="completed",
+        body=f"{task} result",
     )
 
-    assert len(fake.items) == 2
 
+def test_harvest_children_collects_and_mirrors_finished_reports():
+    bus = EventBus()
 
-def test_park_reports_drops_without_inbox():
-    core = make_agent()
+    sink.attach(bus)
 
-    # No inbox module running: must not raise.
-    core._park_reports(
-        [
-            "<subagent_report>\nstatus: completed",
-        ]
+    agent = make_agent()
+
+    report = _child_report("child task")
+
+    finished = make_child(
+        agent,
+        task="child task",
     )
+
+    finished.done = True
+    finished.report = report
+
+    running = make_child(
+        agent,
+        task="running task",
+    )
+
+    agent.children = [finished, running]
+
+    reports = agent._harvest_children()
+
+    # The finished child's report is collected and handed back
+    # for folding into this agent's own next observation.
+    assert reports == [report]
+
+    # Harvested children are removed; running ones stay listed.
+    assert agent.children == [running]
+
+    events = bus.history()
+
+    kinds = [event["t"] for event in events]
+
+    assert "record_started" in kinds
+    assert "record_detail" in kinds
+    assert "record_done" in kinds
+
+    started = events[0]
+
+    assert started["content"]["kind"] == "agent"
+
+    assert (
+        started["content"]["name"]
+        == "report · child task"
+    )
+
+    lines = [
+        event["content"]["line"]
+        for event in events
+        if event["t"] == "record_detail"
+    ]
+
+    assert lines == report.splitlines()
+
+    done = [
+        event
+        for event in events
+        if event["t"] == "record_done"
+    ][0]
+
+    assert done["content"]["summary"] == "report"
+
+
+def test_harvest_children_drops_finished_child_without_report():
+    agent = make_agent()
+
+    lost = make_child(
+        agent,
+        task="lost task",
+    )
+
+    lost.done = True
+    lost.report = None
+
+    agent.children = [lost]
+
+    # Must not raise, and must not invent a report.
+    assert agent._harvest_children() == []
+
+    assert agent.children == []
 
 
 # ============================================================================
@@ -501,9 +565,9 @@ class ScriptedLLM:
 
         - the depth-2 grandchild finishes with its report
           (optionally gated, to simulate a slow child);
-        - the depth-1 parent spawns on its first turn, then
-          finishes once the child report reached its observation
-          (or immediately when finish_on_call is set).
+        - the depth-1 parent waits for the child report to reach
+          its observation and then finishes (or finishes on
+          schedule when finish_on_call is set).
     """
 
     model = "fake-model"
@@ -545,22 +609,6 @@ class ScriptedLLM:
             finish_reason="tool_calls",
         )
 
-    def _spawn(self, task: str):
-        return SimpleNamespace(
-            content=None,
-            tool_calls=[
-                ToolCall(
-                    id=self._id(),
-                    name="spawn",
-                    arguments={"task": task},
-                ),
-            ],
-            model="fake-model",
-            usage=None,
-            provider="fake-provider",
-            finish_reason="tool_calls",
-        )
-
     @staticmethod
     def _text(text: str):
         return SimpleNamespace(
@@ -579,8 +627,8 @@ class ScriptedLLM:
         self.requests.append(request)
 
         # A real yield point: without it the all-inline fakes
-        # would never let sibling tasks (the spawned grandchild,
-        # the report archive) run between this agent's turns.
+        # would never let sibling tasks (the spawned grandchild)
+        # run between this agent's turns.
         await asyncio.sleep(0)
 
         observation = (
@@ -592,9 +640,6 @@ class ScriptedLLM:
         # grandchild task verbatim in its header.
         if "parent task" in observation:
             self.parent_calls += 1
-
-            if self.parent_calls == 1:
-                return self._spawn("grandchild task")
 
             if (
                 self.finish_on_call is not None
@@ -638,64 +683,80 @@ async def _run_spawn_scenario(
     llm,
 ):
     """
-    Spawn through the real SpawnVerb so the real worker loop runs:
-    the spawned agent (depth 2, task 'parent task') spawns its own
-    grandchild (depth 3, task 'grandchild task'), then finishes.
-    Returns the spawned agent's settled result.
+    Spawn through the real SpawnVerb: a real parent Agent at depth 1
+    spawns its own grandchild (depth 2, task 'grandchild task')
+    through the verb, runs its homogeneous loop against the real
+    StepEngine, and finishes once the child report reached its
+    observation.
+
+    Returns the settled parent Agent.
     """
+    modules = FakeModules()
+
     engine = StepEngine(
         llm=llm,
-        modules=FakeModules(),
+    )
+
+    root = Agent(
+        engine=engine,
+        modules=modules,
         tools=FakeProviders(),
         skills=FakeSkills(),
-        agent_runtime=AgentRuntime(
-            max_subagent_depth=3
-        ),
     )
 
-    state = ExecutionState(persona="p")
-
-    context = SimpleNamespace(
-        agent_hash="parent-hash",
-        parent_hash="root-hash",
-        depth=1,
-        task="parent task",
-        world={},
-    )
+    parent = root.spawn("parent task")
 
     call = SimpleNamespace(
         id="call-0",
         name="spawn",
-        arguments={"task": "parent task"},
+        arguments={"task": "grandchild task"},
     )
 
     await SpawnVerb().execute(
         call=call,
-        context=context,
-        state=state,
-        engine=engine,
+        agent=parent,
     )
 
-    result = await state.children[0].handle.wait()
+    try:
+        await asyncio.wait_for(
+            parent._task,
+            timeout=5.0,
+        )
 
-    await engine.agent_runtime.shutdown()
+    finally:
+        if not parent._task.done():
+            parent._task.cancel()
 
-    return result
+            await asyncio.gather(
+                parent._task,
+                return_exceptions=True,
+            )
+
+    return parent
 
 
 def test_child_report_reaches_parent_observation():
     llm = ScriptedLLM()
 
-    result = run(_run_spawn_scenario(llm))
+    parent = run(
+        _run_spawn_scenario(
+            llm,
+        )
+    )
 
     # The parent finished by synthesizing the report that was
-    # delivered into its observation.
-    assert result.finished is True
+    # harvested into its observation.
+    assert parent.done
 
-    assert result.content == "parent report"
+    assert (
+        "status: completed"
+        in parent.report
+    )
 
-    # Some parent turn's observation carried the [Subagent
-    # Report] block from the grandchild.
+    assert "parent report" in parent.report
+
+    # Some parent turn's observation carried the <subagent_report>
+    # block from the grandchild.
     observations = [
         request.messages[-1].content or ""
         for request in llm.requests
@@ -716,52 +777,71 @@ def test_early_finish_drops_running_children_reports():
         grandchild_gate=gate,
     )
 
-    result = run(_run_spawn_scenario(llm))
+    parent = run(
+        _run_spawn_scenario(
+            llm,
+        )
+    )
 
-    # The parent finished before the grandchild delivered: the
-    # late report is dropped, not appended to the finish report.
-    assert result.finished is True
+    # The parent finished before the grandchild reported: the
+    # late report is dropped, not folded into the finish report.
+    assert parent.done
 
-    assert result.content == "parent report"
+    assert "parent report" in parent.report
+
+    assert (
+        "grandchild report"
+        not in parent.report
+    )
 
 
 # ============================================================================
-# Autonomous loop (CoreAgent.run_forever)
+# The autonomous loop (Agent.loop)
 # ============================================================================
 
 
-def test_run_forever_runs_turns_until_stop():
+def test_loop_runs_turns_until_stop():
     engine = CapturingEngine()
 
-    core = make_agent(engine=engine)
+    agent = make_agent(
+        engine=engine,
+    )
 
     def stop_after_second(
         engine_self,
-        context,
+        turn,
     ):
         if len(engine_self.executions) >= 2:
-            core.request_stop()
+            agent.request_stop()
 
     engine.on_execute = stop_after_second
 
-    run(core.run_forever())
+    run(
+        asyncio.wait_for(
+            agent.loop(),
+            timeout=1.0,
+        )
+    )
 
     assert len(engine.executions) == 2
-    assert core.cycles == 2
-    assert core.stopping
+    assert agent.cycles == 2
+    assert agent.stopping
 
 
-def test_run_forever_backoff_retries_failed_turn():
+def test_loop_backoff_retries_failed_turn():
     engine = CapturingEngine()
 
-    core = make_agent(engine=engine)
-    core.backoff = (0.0,)
+    agent = make_agent(
+        engine=engine,
+    )
+
+    agent.backoff = (0.0,)
 
     calls = 0
 
     def fail_once(
         engine_self,
-        context,
+        turn,
     ):
         nonlocal calls
 
@@ -770,63 +850,64 @@ def test_run_forever_backoff_retries_failed_turn():
         if calls == 1:
             raise RuntimeError("boom")
 
-        core.request_stop()
+        agent.request_stop()
 
     engine.on_execute = fail_once
 
-    run(core.run_forever())
+    run(
+        asyncio.wait_for(
+            agent.loop(),
+            timeout=1.0,
+        )
+    )
 
     # The failed turn retried immediately (zero backoff) and the
     # retry succeeded.
     assert calls == 2
-    assert core.cycles == 1
+    assert agent.cycles == 1
 
 
-def test_run_forever_grace_completes_turn_on_stop():
+def test_stop_takes_effect_at_the_next_turn_boundary():
+    """
+    A stop request is cooperative: an in-flight turn always runs to
+    completion and the loop exits at the next boundary. There is no
+    grace window and the turn is never cancelled mid-flight.
+    """
     engine = CapturingEngine()
 
-    core = make_agent(engine=engine)
-    core.turn_grace = 2.0
+    agent = make_agent(
+        engine=engine,
+    )
 
-    async def stop_and_finish(
+    observed = {}
+
+    async def stop_mid_turn(
         engine_self,
-        context,
+        turn,
     ):
-        core.request_stop()
+        agent.request_stop()
 
-    engine.on_execute = stop_and_finish
+        # Still inside the in-flight turn: it keeps running.
+        await asyncio.sleep(0)
 
-    run(core.run_forever())
+        observed["in_flight"] = True
 
-    # The in-flight turn was allowed to finish inside the grace
-    # window and its result counted as a completed cycle.
-    assert len(engine.executions) == 1
-    assert core.cycles == 1
+    engine.on_execute = stop_mid_turn
 
-
-def test_run_forever_cancels_turn_after_grace():
-    engine = CapturingEngine()
-
-    core = make_agent(engine=engine)
-    core.turn_grace = 0.05
-
-    async def stop_and_hang(
-        engine_self,
-        context,
-    ):
-        core.request_stop()
-
-        await asyncio.sleep(
-            1.0,
+    run(
+        asyncio.wait_for(
+            agent.loop(),
+            timeout=1.0,
         )
+    )
 
-    engine.on_execute = stop_and_hang
+    # The in-flight turn ran to completion despite the stop
+    # request and counted as a cycle; then the loop exited.
+    assert observed["in_flight"]
 
-    run(core.run_forever())
-
-    # Grace expired: the turn was cancelled mid-flight.
-    assert core.stopping
-    assert core.cycles == 0
+    assert len(engine.executions) == 1
+    assert agent.cycles == 1
+    assert agent.stopping
 
 
 # ============================================================================

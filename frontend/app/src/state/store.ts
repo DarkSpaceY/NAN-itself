@@ -71,23 +71,30 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
 
   switch (e.t) {
     case 'hello':
-      return { ...s, seq: e.seq, model: e.model, baseUrl: e.base_url ?? s.baseUrl, status: e.status ?? s.status };
+      return {
+        ...s,
+        seq: e.seq ?? s.seq,
+        model: e.content.model,
+        baseUrl: e.content.base_url ?? s.baseUrl,
+        status: e.content.status ?? s.status,
+      };
 
     case 'status':
-      return { ...s, status: { state: e.state } };
+      return { ...s, status: { state: e.content.state } };
 
     case 'user_input':
-      return { ...s, items: [...s.items, { k: 'user', id: e.id, key: nextId(), text: e.text }] };
+      return { ...s, items: [...s.items, { k: 'user', id: e.id, key: nextId(), text: e.content.text }] };
 
     case 'record_started': {
+      const kind = e.content.kind;
       const item: Item = {
         k: 'record',
         id: e.id,
         key: nextId(),
-        kind: e.kind,
-        glyph: e.kind === 'error' ? '✗' : e.kind === 'module' ? '◈' : e.kind === 'skill' ? '✦' : '▸',
-        name: e.name,
-        summary: e.summary,
+        kind,
+        glyph: kind === 'error' ? '✗' : kind === 'module' ? '◈' : kind === 'skill' ? '✦' : '▸',
+        name: e.content.name,
+        summary: e.content.summary,
         state: 'running',
         open: false,
         detail: [],
@@ -98,7 +105,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
     case 'record_detail':
       return mapRecord(s, e.id, (r) => ({
         ...r,
-        detail: [...r.detail, ...e.line.split('\n')],
+        detail: [...r.detail, ...e.content.line.split('\n')],
       }));
 
     case 'record_void': {
@@ -113,8 +120,8 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
         ...r,
         state: 'done',
         glyph: '✓',
-        summary: e.summary ?? r.summary,
-        note: e.note ?? r.note,
+        summary: e.content.summary ?? r.summary,
+        note: e.content.note ?? r.note,
         open: false,
       }));
 
@@ -123,7 +130,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
         ...r,
         state: 'failed',
         glyph: '✗',
-        summary: e.summary ?? r.summary,
+        summary: e.content.summary ?? r.summary,
         open: true,
       }));
 
@@ -131,7 +138,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
       return { ...s, items: [...s.items, { k: 'nano', id: e.id, key: nextId(), text: '' }] };
 
     case 'output_delta':
-      return mapNano(s, e.id, (it) => ({ ...it, text: it.text + e.text }));
+      return mapNano(s, e.id, (it) => ({ ...it, text: it.text + e.content.text }));
 
     case 'output_cancelled': {
       const idx = findLastIndex(s.items, (it) => it.id === e.id && it.k === 'nano');
@@ -140,7 +147,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
     }
 
     case 'output_done':
-      return mapNano(s, e.id, (it) => ({ ...it, ts: e.ts, duration: e.duration }));
+      return mapNano(s, e.id, (it) => ({ ...it, ts: e.ts, duration: e.content.duration }));
 
     default:
       return s;

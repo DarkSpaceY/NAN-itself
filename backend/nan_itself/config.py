@@ -31,10 +31,6 @@ class SkillsConfig(BaseModel):
     script_timeout: float = 300.0
 
 
-class TurnConfig(BaseModel):
-    grace: float = 5.0
-
-
 class RetryConfig(BaseModel):
     backoff: tuple[float, ...] = (
         1.0,
@@ -48,7 +44,6 @@ class RetryConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    turn: TurnConfig = Field(default_factory=TurnConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
 

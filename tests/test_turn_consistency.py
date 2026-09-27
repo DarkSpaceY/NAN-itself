@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from types import SimpleNamespace
+from dataclasses import dataclass, replace
 
 import pytest
 
-from nan_itself.agent.core import CoreAgent
-from nan_itself.agent.runtime import AgentRuntime
+from nan_itself.agent.core import Agent
+from nan_itself.agent.model import SubagentLimitError
 from nan_itself.modules.model import DataSpace
+from nan_itself.utils.llm import Message
 
 
 # ============================================================================
@@ -76,7 +76,7 @@ class FakeModules:
 
 
 # ============================================================================
-# Fake Skills / Providers / LLM
+# Fake Skills / Providers
 # ============================================================================
 
 
@@ -105,11 +105,6 @@ class FakeProviders:
         return None
 
 
-class FakeLLM:
-    model = "fake-model"
-    provider = "fake-provider"
-
-
 # ============================================================================
 # Turn consistency fixtures
 # ============================================================================
@@ -117,17 +112,25 @@ class FakeLLM:
 
 @dataclass
 class CapturedExecution:
-    context: object | None = None
-    persona: str | None = None
-    last_turn: object | None = None
+    turn: object
+
+    @property
+    def world(self):
+        return self.turn.world
+
+    @property
+    def persona(self):
+        return self.turn.persona
 
 
 class CapturingEngine:
     """
-    Replaces StepEngine inside CoreAgent.
+    Replaces StepEngine inside Agent.
 
-    This lets tests inspect the exact AgentContext created at
-    each turn boundary without invoking an LLM.
+    This lets tests inspect the exact Turn created at each turn
+    boundary without invoking an LLM. It mirrors the real engine's
+    contract: the completed Turn carries this turn's messages, and
+    the Agent chains turns through it.
     """
 
     def __init__(self):
@@ -135,58 +138,55 @@ class CapturingEngine:
 
         self.on_execute = None
 
-    async def execute(
+    async def step(
         self,
-        *,
-        context,
-        persona,
-        last_turn=None,
-        report_sink=None,
-        sink=None,
+        turn,
     ):
         self.executions.append(
             CapturedExecution(
-                context=context,
-                persona=persona,
-                last_turn=last_turn,
+                turn=turn,
             )
         )
 
-        if self.on_execute is not None:
-            await self.on_execute(
-                context
-            )
+        callback = self.on_execute
 
-        return SimpleNamespace(
-            content="done",
-            turn=SimpleNamespace(),
+        if callback is not None:
+            outcome = callback(turn)
+
+            if asyncio.iscoroutine(outcome):
+                await outcome
+
+        return replace(
+            turn,
+            messages=(
+                turn.messages
+                + (
+                    Message(
+                        role="assistant",
+                        content="assistant-done",
+                    ),
+                )
+            ),
         )
 
 
-def make_core(
+def make_agent(
     modules,
-    *,
-    persona="test-persona",
+    **kwargs,
 ):
     skills = FakeSkills()
 
-    providers = FakeProviders()
-
-    core = CoreAgent(
-        llm=FakeLLM(),
+    agent = Agent(
+        engine=CapturingEngine(),
         modules=modules,
-        tools=providers,
+        tools=FakeProviders(),
         skills=skills,
-        persona_source=lambda: persona,
+        **kwargs,
     )
 
-    engine = CapturingEngine()
-
-    core.engine = engine
-
     return (
-        core,
-        engine,
+        agent,
+        agent.engine,
         skills,
     )
 
@@ -246,31 +246,32 @@ def test_dataspace_revision_changes_when_published():
 
 
 # ============================================================================
-# CoreAgent turn snapshot
+# Agent turn snapshot
 # ============================================================================
 
 
-def test_core_captures_exactly_one_world_snapshot_per_turn():
+def test_agent_captures_exactly_one_world_snapshot_per_turn():
     """
-    CoreAgent is responsible for the turn boundary:
+    Agent is responsible for the turn boundary:
 
         skills.refresh()
-        persona_source()
+        persona re-read
         modules.snapshot()
-        engine.execute()
+        modules.query_snapshot() (observation assembly)
+        engine.step()
 
     The fake CapturingEngine deliberately bypasses StepEngine, so
-    modules.query_snapshot() is NOT expected to run here.
+    the query_snapshot() call comes from the Agent itself.
     """
 
     async def scenario():
         modules = FakeModules()
 
-        core, engine, skills = make_core(
-            modules
+        agent, engine, skills = make_agent(
+            modules,
         )
 
-        await core.run()
+        await agent.run()
 
         assert (
             modules.snapshot_calls
@@ -284,7 +285,7 @@ def test_core_captures_exactly_one_world_snapshot_per_turn():
 
         assert (
             modules.query_calls
-            == 0
+            == 1
         )
 
         assert (
@@ -301,18 +302,18 @@ def test_each_main_turn_gets_a_new_world_snapshot():
     async def scenario():
         modules = FakeModules()
 
-        core, engine, skills = make_core(
-            modules
+        agent, engine, skills = make_agent(
+            modules,
         )
 
-        await core.run()
+        await agent.run()
 
-        first_context = (
-            engine.executions[0].context
+        first_turn = (
+            engine.executions[0].turn
         )
 
         assert (
-            first_context.world[
+            first_turn.world[
                 "state"
             ]["value"]
             == 1
@@ -324,29 +325,29 @@ def test_each_main_turn_gets_a_new_world_snapshot():
             }
         )
 
-        await core.run()
+        await agent.run()
 
-        second_context = (
-            engine.executions[1].context
+        second_turn = (
+            engine.executions[1].turn
         )
 
         assert (
-            first_context.world[
+            first_turn.world[
                 "state"
             ]["value"]
             == 1
         )
 
         assert (
-            second_context.world[
+            second_turn.world[
                 "state"
             ]["value"]
             == 2
         )
 
         assert (
-            first_context.world
-            is not second_context.world
+            first_turn.world
+            is not second_turn.world
         )
 
         assert (
@@ -373,17 +374,17 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
     async def scenario():
         modules = FakeModules()
 
-        core, engine, skills = make_core(
-            modules
+        agent, engine, skills = make_agent(
+            modules,
         )
 
         observed = {}
 
         async def on_execute(
-            context,
+            turn,
         ):
             observed["before"] = (
-                context.world[
+                turn.world[
                     "state"
                 ]["value"]
             )
@@ -397,7 +398,7 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
             )
 
             observed["after"] = (
-                context.world[
+                turn.world[
                     "state"
                 ]["value"]
             )
@@ -412,7 +413,7 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
             on_execute
         )
 
-        await core.run()
+        await agent.run()
 
         assert (
             observed["before"]
@@ -431,224 +432,15 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
             == 2
         )
 
-        context = (
-            engine.executions[0].context
+        turn = (
+            engine.executions[0].turn
         )
 
         assert (
-            context.world[
+            turn.world[
                 "state"
             ]["value"]
             == 1
-        )
-
-    run(
-        scenario()
-    )
-
-
-# ============================================================================
-# Subagent dispatch-tree world identity
-# ============================================================================
-
-
-def test_subagents_share_exact_same_world_object():
-    async def scenario():
-        runtime = AgentRuntime(
-            max_subagent_depth=3
-        )
-
-        source_world = {
-            "state": {
-                "value": 1,
-            }
-        }
-
-        root = runtime.create_root(
-            world=source_world,
-            task="root",
-        )
-
-        observed = {}
-
-        async def grandchild_worker(
-            context,
-        ):
-            observed["grandchild"] = context
-            return "grandchild"
-
-        async def child_worker(
-            context,
-        ):
-            observed["child"] = context
-
-            handle = runtime.dispatch(
-                context,
-                task="grandchild",
-                worker=grandchild_worker,
-            )
-
-            return await handle.wait()
-
-        child_handle = runtime.dispatch(
-            root,
-            task="child",
-            worker=child_worker,
-        )
-
-        result = (
-            await child_handle.wait()
-        )
-
-        assert (
-            result
-            == "grandchild"
-        )
-
-        child = observed["child"]
-        grandchild = (
-            observed["grandchild"]
-        )
-
-        # Root creates one frozen world mapping.
-        # Every descendant reuses exactly that mapping.
-        assert (
-            child.world
-            is root.world
-        )
-
-        assert (
-            grandchild.world
-            is root.world
-        )
-
-        # The runtime-created mapping is not the original source mapping.
-        assert (
-            root.world
-            is not source_world
-        )
-
-    run(
-        scenario()
-    )
-
-
-def test_subagent_does_not_recapture_live_module_state():
-    async def scenario():
-        modules = FakeModules()
-
-        runtime = AgentRuntime(
-            max_subagent_depth=3
-        )
-
-        root = runtime.create_root(
-            world=modules.snapshot(),
-            task="root",
-        )
-
-        observed = {}
-
-        async def child_worker(
-            context,
-        ):
-            observed["child"] = context
-
-            # Change live Module state after child creation.
-            modules.space.publish(
-                {
-                    "value": 99,
-                }
-            )
-
-            return "done"
-
-        handle = runtime.dispatch(
-            root,
-            task="child",
-            worker=child_worker,
-        )
-
-        assert (
-            await handle.wait()
-            == "done"
-        )
-
-        child = (
-            observed["child"]
-        )
-
-        assert (
-            child.world[
-                "state"
-            ]["value"]
-            == 1
-        )
-
-        assert (
-            modules.space.snapshot()[
-                "value"
-            ]
-            == 99
-        )
-
-    run(
-        scenario()
-    )
-
-
-# ============================================================================
-# Root / child identity
-# ============================================================================
-
-
-def test_child_has_distinct_identity_but_same_world():
-    async def scenario():
-        runtime = AgentRuntime()
-
-        root = runtime.create_root(
-            world={
-                "value": 1,
-            }
-        )
-
-        observed = {}
-
-        async def worker(
-            context,
-        ):
-            observed["child"] = context
-            return "done"
-
-        handle = runtime.dispatch(
-            root,
-            task="child",
-            worker=worker,
-        )
-
-        await handle.wait()
-
-        child = (
-            observed["child"]
-        )
-
-        assert (
-            child.agent_hash
-            != root.agent_hash
-        )
-
-        assert (
-            child.parent_hash
-            == root.agent_hash
-        )
-
-        assert (
-            child.depth
-            == 1
-        )
-
-        assert (
-            child.world
-            is root.world
         )
 
     run(
@@ -665,14 +457,14 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
     async def scenario():
         modules = FakeModules()
 
-        core, engine, skills = make_core(
-            modules
+        agent, engine, skills = make_agent(
+            modules,
         )
 
-        await core.run()
+        await agent.run()
 
         first = (
-            engine.executions[0].context
+            engine.executions[0].turn
         )
 
         modules.space.publish(
@@ -681,10 +473,10 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
             }
         )
 
-        await core.run()
+        await agent.run()
 
         second = (
-            engine.executions[1].context
+            engine.executions[1].turn
         )
 
         modules.space.publish(
@@ -719,161 +511,6 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
     )
 
 
-def test_turn_snapshot_is_shared_across_recursive_dispatch_tree():
-    async def scenario():
-        runtime = AgentRuntime(
-            max_subagent_depth=3
-        )
-
-        source_world = {
-            "state": {
-                "value": 42,
-            }
-        }
-
-        root = runtime.create_root(
-            world=source_world
-        )
-
-        observed = []
-
-        async def level_two(
-            context,
-        ):
-            observed.append(
-                context.world
-            )
-
-            return "level-two"
-
-        async def level_one(
-            context,
-        ):
-            observed.append(
-                context.world
-            )
-
-            child = runtime.dispatch(
-                context,
-                task="level-two",
-                worker=level_two,
-            )
-
-            return await child.wait()
-
-        level_one_handle = (
-            runtime.dispatch(
-                root,
-                task="level-one",
-                worker=level_one,
-            )
-        )
-
-        result = await level_one_handle.wait()
-
-        assert (
-            result
-            == "level-two"
-        )
-
-        assert (
-            len(observed)
-            == 2
-        )
-
-        # The source mapping is copied into a frozen outer mapping
-        # when the root is created.
-        assert (
-            root.world
-            is not source_world
-        )
-
-        # Every descendant shares the root's turn world.
-        assert (
-            observed[0]
-            is root.world
-        )
-
-        assert (
-            observed[1]
-            is root.world
-        )
-
-    run(
-        scenario()
-    )
-
-
-# ============================================================================
-# Context immutability / execution state separation
-# ============================================================================
-
-
-def test_agent_context_world_outer_mapping_is_immutable():
-    runtime = AgentRuntime()
-
-    root = runtime.create_root(
-        world={
-            "state": {
-                "value": 1,
-            }
-        }
-    )
-
-    with pytest.raises(
-        TypeError
-    ):
-        root.world["other"] = {}
-
-
-def test_agent_runtime_freezes_only_outer_world_mapping():
-    """
-    AgentRuntime._freeze_world() deliberately performs only:
-
-        MappingProxyType(dict(world))
-
-    Therefore:
-        - the outer mapping is protected
-        - nested objects are NOT recursively copied/frozen
-
-    Deep-detached world snapshots are the responsibility of the
-    DataSpace / Module snapshot producer.
-    """
-
-    runtime = AgentRuntime()
-
-    source = {
-        "state": {
-            "value": 1,
-        }
-    }
-
-    root = runtime.create_root(
-        world=source
-    )
-
-    assert (
-        root.world
-        is not source
-    )
-
-    # Outer mapping is frozen.
-    with pytest.raises(
-        TypeError
-    ):
-        root.world["other"] = {}
-
-    # Nested object remains shared by the shallow outer copy.
-    source["state"]["value"] = 99
-
-    assert (
-        root.world[
-            "state"
-        ]["value"]
-        == 99
-    )
-
-
 def test_dataspace_snapshot_provides_the_deep_detachment_contract():
     """
     The actual Agent world normally originates from:
@@ -902,34 +539,292 @@ def test_dataspace_snapshot_provides_the_deep_detachment_contract():
 
 
 # ============================================================================
-# CoreAgent skill / persona / world boundary
+# Root identity
 # ============================================================================
 
 
-def test_turn_boundary_refreshes_skill_persona_and_world_together():
+def test_root_agent_hash_is_stable_across_turns():
+    async def scenario():
+        agent, engine, skills = make_agent(
+            FakeModules(),
+        )
+
+        await agent.run()
+        await agent.run()
+
+        assert len(engine.executions) == 2
+
+        # Same Agent instance, same identity, no rotation: both
+        # turns carry the instance's own hash.
+        assert (
+            engine.executions[0].turn.agent_hash
+            == agent.agent_hash
+        )
+
+        assert (
+            engine.executions[1].turn.agent_hash
+            == agent.agent_hash
+        )
+
+        assert engine.executions[0].turn.depth == 0
+
+        assert (
+            engine.executions[0].turn.parent_hash
+            is None
+        )
+
+    run(
+        scenario()
+    )
+
+
+# ============================================================================
+# Spawn tree (one homogeneous Agent class)
+# ============================================================================
+
+
+def test_spawn_builds_a_homogeneous_child_tree():
     async def scenario():
         modules = FakeModules()
 
-        persona = {
-            "value": "persona-v1"
-        }
-
-        skills = FakeSkills()
-
-        core = CoreAgent(
-            llm=FakeLLM(),
-            modules=modules,
-            tools=FakeProviders(),
-            skills=skills,
-            persona_source=lambda: persona[
-                "value"
-            ],
+        root, engine, skills = make_agent(
+            modules,
         )
 
-        engine = CapturingEngine()
-        core.engine = engine
+        child = root.spawn("child task")
 
-        await core.run()
+        assert child.depth == 1
+
+        assert child.parent is root
+
+        assert (
+            child.parent_hash
+            == root.agent_hash
+        )
+
+        assert child.task == "child task"
+
+        # Capabilities are shared references, not copies.
+        assert child.engine is root.engine
+        assert child.modules is root.modules
+        assert child.tools is root.tools
+        assert child.skills is root.skills
+
+        assert (
+            child.agent_hash
+            != root.agent_hash
+        )
+
+        assert child.max_subagent_depth == (
+            root.max_subagent_depth
+        )
+
+        assert root.children == [child]
+
+        assert child._task is not None
+
+        grandchild = child.spawn("grandchild task")
+
+        assert grandchild.depth == 2
+
+        assert (
+            grandchild.parent_hash
+            == child.agent_hash
+        )
+
+        assert grandchild.task == "grandchild task"
+
+        assert child.children == [grandchild]
+
+        for agent in (child, grandchild):
+            agent._task.cancel()
+
+        await asyncio.gather(
+            child._task,
+            grandchild._task,
+            return_exceptions=True,
+        )
+
+    run(
+        scenario()
+    )
+
+
+def test_spawn_rejects_beyond_max_subagent_depth():
+    async def scenario():
+        root, engine, skills = make_agent(
+            FakeModules(),
+            max_subagent_depth=1,
+        )
+
+        child = root.spawn("child task")
+
+        with pytest.raises(SubagentLimitError):
+            child.spawn("grandchild task")
+
+        child._task.cancel()
+
+        await asyncio.gather(
+            child._task,
+            return_exceptions=True,
+        )
+
+    run(
+        scenario()
+    )
+
+
+# ============================================================================
+# Stop cascade (no grace window anywhere)
+# ============================================================================
+
+
+class BlockingEngine:
+    """
+    Stub engine: the root's first turn spawns one child, and every
+    child turn blocks forever inside step() -- an in-flight turn
+    that only a task cancellation can end.
+
+    step() no longer receives the Agent, so the test wires the root
+    in (the stub is shared by the whole tree).
+    """
+
+    def __init__(self):
+        self.root = None
+
+        self.child_started = asyncio.Event()
+
+    async def step(
+        self,
+        turn,
+    ):
+        if turn.depth == 0:
+            if not self.root.children:
+                self.root.spawn("child task")
+
+            return replace(
+                turn,
+                messages=(
+                    turn.messages
+                    + (
+                        Message(
+                            role="assistant",
+                            content="ok",
+                        ),
+                    )
+                ),
+            )
+
+        self.child_started.set()
+
+        await asyncio.Event().wait()
+
+
+async def cascade_stop():
+    """
+    Run a root whose first turn spawns a child that then blocks
+    inside its own turn; then stop the root and let the teardown
+    cascade down the tree.
+    """
+    engine = BlockingEngine()
+
+    root = Agent(
+        engine=engine,
+        modules=FakeModules(),
+        tools=FakeProviders(),
+        skills=FakeSkills(),
+        autonomous_interval=0.05,
+    )
+
+    engine.root = root
+
+    root_task = asyncio.create_task(
+        root.loop()
+    )
+
+    await asyncio.wait_for(
+        engine.child_started.wait(),
+        timeout=1.0,
+    )
+
+    child = root.children[0]
+
+    assert child.depth == 1
+
+    assert not child._task.done()
+
+    root.request_stop()
+
+    await asyncio.wait_for(
+        root_task,
+        timeout=1.0,
+    )
+
+    return child
+
+
+def test_cascade_stop_cancels_a_blocked_child():
+    async def scenario():
+        child = await cascade_stop()
+
+        assert child.stopping
+
+        assert child._task.done()
+
+    run(
+        scenario()
+    )
+
+
+def test_cancelled_child_reports_failure():
+    async def scenario():
+        child = await cascade_stop()
+
+        assert child.done
+
+        assert child.report is not None
+
+        assert (
+            "status: failed"
+            in child.report
+        )
+
+        assert (
+            "error: cancelled"
+            in child.report
+        )
+
+        assert (
+            "task: child task"
+            in child.report
+        )
+
+    run(
+        scenario()
+    )
+
+
+# ============================================================================
+# Agent skill / persona / world boundary
+# ============================================================================
+
+
+def test_turn_boundary_refreshes_skill_persona_and_world_together(
+    tmp_path,
+):
+    async def scenario():
+        modules = FakeModules()
+
+        (tmp_path / "persona.md").write_text(
+            "persona-v1",
+            encoding="utf-8",
+        )
+
+        agent, engine, skills = make_agent(
+            modules,
+        )
+
+        await agent.run()
 
         first = (
             engine.executions[0]
@@ -941,15 +836,17 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
         )
 
         assert (
-            first.context.world[
+            first.turn.world[
                 "state"
             ]["value"]
             == 1
         )
 
-        persona[
-            "value"
-        ] = "persona-v2"
+        # Persona edits hot-reload: the file is re-read every turn.
+        (tmp_path / "persona.md").write_text(
+            "persona-v2",
+            encoding="utf-8",
+        )
 
         modules.space.publish(
             {
@@ -957,7 +854,7 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
             }
         )
 
-        await core.run()
+        await agent.run()
 
         second = (
             engine.executions[1]
@@ -969,7 +866,7 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together():
         )
 
         assert (
-            second.context.world[
+            second.turn.world[
                 "state"
             ]["value"]
             == 2

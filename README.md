@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/nan-title-dark.png">
+    <img src="docs/assets/nan-title.png" alt="NAN-itself">
+  </picture>
+</p>
+
 # NAN-itself
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
