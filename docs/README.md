@@ -1,75 +1,63 @@
 # NAN-itself Documentation
 
-This is the documentation for NAN-itself, a local-first autonomous agent
-framework; it is organized with the Diataxis framework, so every document
-serves exactly one of four purposes and you can go straight to the one
-that matches what you need.
+NAN-itself is a local-first autonomous agent framework. These documents are
+organized by who you are: find the path below that matches what you are here
+to do, and follow the reading order inside it.
 
-## The four quadrants
+## Who are you?
 
-Every document answers one kind of question. To place a new topic, ask
-two questions: are you *studying* or *working*, and do you need
-*practical steps* or *theoretical knowledge*?
+### You want to run the framework
 
-```
-                     PRACTICAL
-                        │
-         Tutorials      │      How-to guides
-        (learning)      │      (task-oriented)
-                        │
-   ACQUISITION ─────────┼───────── APPLICATION
-                        │
-        Explanation     │      Reference
-      (understanding)   │      (information)
-                        │
-                    THEORETICAL
-```
+You cloned the repository and want a working agent on your machine. Start
+with [for-users/](for-users/):
 
-| Quadrant | Answers | Documents |
-|---|---|---|
-| [Tutorials](tutorials/) | "Can you teach me to...?" | [first-run.md](tutorials/first-run.md) |
-| [How-to guides](how-to/) | "How do I...?" | [develop.md](how-to/develop.md), [add-a-tool.md](how-to/add-a-tool.md), [add-a-module.md](how-to/add-a-module.md), [add-a-skill.md](how-to/add-a-skill.md) |
-| [Reference](reference/) | "What is...?" | [modules.md](reference/modules.md), [tools.md](reference/tools.md), [skills.md](reference/skills.md), [configuration.md](reference/configuration.md) |
-| [Explanation](explanation/) | "Why...?" | [principles.md](explanation/principles.md), [architecture.md](explanation/architecture.md) |
+1. [Get started](for-users/get-started.md) — from a fresh clone to a first
+   conversation.
+2. [Configuration](for-users/configuration.md) — `settings.yaml` and
+   per-module `config/modules/*.yaml`.
 
-## Start here
+### You want to write plugins
 
-Follow this path the first time:
+You want to extend the agent with your own tools, modules or skills. Start
+with [for-plugin-authors/](for-plugin-authors/):
 
-1. **Learn by doing** — [Your first run](tutorials/first-run.md) takes a
-   fresh clone to a working agent.
-2. **Do a task** — the [how-to guides](how-to/) cover the day-to-day
-   developer workflow.
-3. **Look it up** — the [reference](reference/) describes the machinery
-   precisely.
+1. [Add a tool](for-plugin-authors/add-a-tool.md) — an MCP or local Python
+   tool provider.
+2. [Add a module](for-plugin-authors/add-a-module.md) — an ambient or
+   reactive module.
+3. [Add a skill](for-plugin-authors/add-a-skill.md) — a skill package.
+4. Reference: [tools](for-plugin-authors/tools.md),
+   [modules](for-plugin-authors/modules.md),
+   [skills](for-plugin-authors/skills.md).
 
-If you want the why behind the system, read
-[principles.md](explanation/principles.md) and then
-[architecture.md](explanation/architecture.md).
+### You want to modify the framework
+
+You want to work on NAN-itself itself. Start with
+[for-contributors/](for-contributors/):
+
+1. [Develop](for-contributors/develop.md) — setup, tests, conventions and
+   pull requests.
+2. [Core principles](for-contributors/principles.md) — the load-bearing
+   principles behind every design decision.
+3. [Architecture](for-contributors/architecture.md) — how the system is
+   shaped, and why.
 
 ## Document index
 
-| Document | Purpose |
+| Document | Contents |
 |---|---|
-| [tutorials/first-run.md](tutorials/first-run.md) | End-to-end first run: install, configure, start, converse. |
-| [how-to/develop.md](how-to/develop.md) | Set up, test, and follow the developer conventions; open a PR. |
-| [how-to/add-a-tool.md](how-to/add-a-tool.md) | Add an MCP or local Python tool provider. |
-| [how-to/add-a-module.md](how-to/add-a-module.md) | Add an ambient or reactive module. |
-| [how-to/add-a-skill.md](how-to/add-a-skill.md) | Add a skill package. |
-| [reference/modules.md](reference/modules.md) | The module subsystem: surface, lifecycle, DataSpace, channels. |
-| [reference/tools.md](reference/tools.md) | The tool subsystem: provider kinds, discovery, reload, verbs. |
-| [reference/skills.md](reference/skills.md) | The skill subsystem: format, discovery, resources. |
-| [reference/configuration.md](reference/configuration.md) | `settings.yaml` and per-module `config/modules/*.yaml`. |
-| [explanation/principles.md](explanation/principles.md) | The load-bearing design principles. |
-| [explanation/architecture.md](explanation/architecture.md) | How the system is shaped, and why. |
-| [WRITING.md](WRITING.md) | The documentation standard and terminology glossary. |
+| [for-users/get-started.md](for-users/get-started.md) | Quick start: install, configure, start, converse. |
+| [for-users/configuration.md](for-users/configuration.md) | `settings.yaml` and per-module `config/modules/*.yaml`. |
+| [for-plugin-authors/add-a-tool.md](for-plugin-authors/add-a-tool.md) | Add an MCP or local Python tool provider. |
+| [for-plugin-authors/add-a-module.md](for-plugin-authors/add-a-module.md) | Add an ambient or reactive module. |
+| [for-plugin-authors/add-a-skill.md](for-plugin-authors/add-a-skill.md) | Add a skill package. |
+| [for-plugin-authors/tools.md](for-plugin-authors/tools.md) | The tool subsystem: provider kinds, discovery, reload, verbs. |
+| [for-plugin-authors/modules.md](for-plugin-authors/modules.md) | The module subsystem: surface, lifecycle, DataSpace, channels. |
+| [for-plugin-authors/skills.md](for-plugin-authors/skills.md) | The skill subsystem: format, discovery, resources. |
+| [for-contributors/develop.md](for-contributors/develop.md) | Set up, test, and follow the developer conventions; open a PR. |
+| [for-contributors/principles.md](for-contributors/principles.md) | The load-bearing design principles. |
+| [for-contributors/architecture.md](for-contributors/architecture.md) | How the system is shaped, and why. |
 
 For the project overview, install requirements and license, see the
 [root README](../README.md). For the security model, see
 [SECURITY.md](../SECURITY.md).
-
-## Writing documentation
-
-Before adding or changing a document, read [WRITING.md](WRITING.md) — it
-defines which quadrant a document belongs to, the writing rules, and the
-project terminology glossary.

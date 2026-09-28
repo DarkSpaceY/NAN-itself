@@ -38,10 +38,15 @@ once a stable release line starts.
   directly by the config loader and the MCP backend, and `soundfile`,
   imported by the voice module, are now declared instead of relying on
   transitively installed copies.
+- Documentation reorganized by audience — users, plugin authors and
+  contributors — replacing the Diataxis quadrant structure; the
+  documentation writing standard was dropped, with its terminology
+  glossary folded into
+  [`docs/for-contributors/develop.md`](docs/for-contributors/develop.md).
 
 ### Removed
 
 - `memory` and `plan` builtin modules (superseded by the channels
   design and upcoming reactive flows).
 - Root `CONTRIBUTING.md`, merged into
-  [`docs/how-to/develop.md`](docs/how-to/develop.md).
+  [`docs/for-contributors/develop.md`](docs/for-contributors/develop.md).

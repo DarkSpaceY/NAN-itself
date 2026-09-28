@@ -8,7 +8,7 @@ every turn, so no restart is needed.
 To add a skill to the shipped set, create the directory under
 `builtin/skills/`; to keep it in your own territory, create it under
 `workspace/skills/`. For the full format and runtime contract, see
-[../reference/skills.md](../reference/skills.md).
+[skills.md](skills.md).
 
 ## Create the directory
 
@@ -83,6 +83,6 @@ The `writing-skills` skill also ships a skeleton to copy from at
 
 ## Related
 
-- [../reference/skills.md](../reference/skills.md) — the full skill
-  subsystem reference.
-- [develop.md](develop.md) — the conventions a skill must follow.
+- [skills.md](skills.md) — the full skill subsystem reference.
+- [../for-contributors/develop.md](../for-contributors/develop.md) — the
+  conventions a skill must follow.

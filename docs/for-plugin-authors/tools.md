@@ -7,7 +7,7 @@ is one source file, loaded and hot-reloaded by
 document describes the tool subsystem: its two provider kinds, the
 source layout, the reload model, the call bounds, and the verb surface.
 It does not describe how to create a provider — see
-[../how-to/add-a-tool.md](../how-to/add-a-tool.md) for that.
+[add-a-tool.md](add-a-tool.md) for that.
 
 Tools are never addressed by the model directly. The model sees the
 verb triples `list_tools` / `show_tool` / `invoke_tool` and refers to a

@@ -8,7 +8,7 @@ context each turn. Modules are hot-reloaded, so no restart is needed.
 To add a module to the shipped set, create the file under
 `builtin/modules/`; to keep it in your own territory, create it under
 `workspace/modules/`. For the full contract, see
-[../reference/modules.md](../reference/modules.md).
+[modules.md](modules.md).
 
 ## Create the module file
 
@@ -87,14 +87,14 @@ If the module needs to consume model-driven payloads at its own tick —
 a perceive → decide → act loop faster than LLM round-trips — declare a
 `channels` mapping of `ChannelSpec` on the class and consume fed payloads
 from your `start()` loop. See
-[../reference/modules.md](../reference/modules.md) for the channel
+[modules.md](modules.md) for the channel
 contract and the downlink verbs.
 
 ## Add module configuration
 
 A module that needs configuration owns exactly one file,
 `config/modules/<module_id>.yaml`, and loads and validates it itself. See
-[../reference/configuration.md](../reference/configuration.md).
+[../for-users/configuration.md](../for-users/configuration.md).
 
 ## Verify
 
@@ -105,6 +105,6 @@ next turn.
 
 ## Related
 
-- [../reference/modules.md](../reference/modules.md) — the full module
-  subsystem reference.
-- [develop.md](develop.md) — the conventions this module must follow.
+- [modules.md](modules.md) — the full module subsystem reference.
+- [../for-contributors/develop.md](../for-contributors/develop.md) — the
+  conventions this module must follow.

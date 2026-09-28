@@ -7,7 +7,8 @@ interfaces may still change.
 
 For the design principles that constrain these decisions, see
 [principles.md](principles.md). For exact interfaces and contracts, see
-the [reference](../reference/) documents.
+the reference documents under [`for-plugin-authors/`](../for-plugin-authors/)
+and [`for-users/`](../for-users/).
 
 ## Repository layout
 
@@ -134,7 +135,7 @@ sequenceDiagram
     Note over Old,New: both generations coexist during handoff
 ```
 
-See [tools.md](../reference/tools.md) for the full contract.
+See [tools.md](../for-plugin-authors/tools.md) for the full contract.
 
 ### modules/ — ambient state and channels
 
@@ -152,7 +153,7 @@ engine asks for at every turn start. The machinery here
 - **channels** (`model.py`): modules that declare a `channels` mapping
   on the class expose downlink endpoints the model reaches through the
   `list_channels` / `show_channels` / `invoke_channels` verbs; see
-  [modules.md](../reference/modules.md) for the channel contract.
+  [modules.md](../for-plugin-authors/modules.md) for the channel contract.
 
 Module-side contracts: capture/inference work runs on daemon threads
 with interval gating; the per-turn surface is a pure `ask()`
@@ -193,7 +194,7 @@ The runtime (`runtime.py`) discovers skills from the same parallel
 builtin/workspace roots at boot, re-scans at every turn start (shared
 hot-reload logic), and applies progressive disclosure: metadata lookups
 never load bodies; invoking a script executes it, other resources
-return as text. See [skills.md](../reference/skills.md) for the skill
+return as text. See [skills.md](../for-plugin-authors/skills.md) for the skill
 format and runtime surface.
 
 ### gateway and events
@@ -226,7 +227,7 @@ Core configuration lives in `config/settings.yaml` (loaded by
 and loads and validates it itself, keeping modules independent of
 any shared config machinery; `searxng.yml` configures the bundled
 SearxNG instance used by the search tool. There are no
-environment variables. See [configuration.md](../reference/configuration.md).
+environment variables. See [configuration.md](../for-users/configuration.md).
 
 ## tests/
 

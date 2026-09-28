@@ -9,7 +9,7 @@ needed.
 To add the provider to the shipped set, create the file under
 `builtin/tools/`; to keep it in your own territory, create it under
 `workspace/tools/` with the same layout. For the full provider model, see
-[../reference/tools.md](../reference/tools.md).
+[tools.md](tools.md).
 
 ## Add an MCP provider
 
@@ -87,6 +87,6 @@ call it with `invoke_tool`.
 
 ## Related
 
-- [../reference/tools.md](../reference/tools.md) — the full tool
-  subsystem reference.
-- [develop.md](develop.md) — the conventions this provider must follow.
+- [tools.md](tools.md) — the full tool subsystem reference.
+- [../for-contributors/develop.md](../for-contributors/develop.md) — the
+  conventions this provider must follow.

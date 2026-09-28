@@ -25,17 +25,17 @@ organized so you can go straight to the page that matches what you need.
 
 | Document | Contents |
 |---|---|
-| [First run](docs/tutorials/first-run.md) | End-to-end lesson: install, configure, start, converse |
-| [Develop](docs/how-to/develop.md) | Setup, tests, conventions, pull requests |
-| [Add a tool](docs/how-to/add-a-tool.md) | Create an MCP or local Python tool provider |
-| [Add a module](docs/how-to/add-a-module.md) | Create an ambient or reactive module |
-| [Add a skill](docs/how-to/add-a-skill.md) | Create a skill package |
-| [Core principles](docs/explanation/principles.md) | The load-bearing principles behind every design decision |
-| [Architecture](docs/explanation/architecture.md) | How the system is shaped, and why |
-| [Configuration](docs/reference/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
-| [Tools](docs/reference/tools.md) | Tool subsystem reference: provider kinds, reload, verbs |
-| [Skills](docs/reference/skills.md) | Skill subsystem reference: format, discovery, resources |
-| [Modules](docs/reference/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
+| [Get started](docs/for-users/get-started.md) | Quick start: install, configure, start, converse |
+| [Configuration](docs/for-users/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
+| [Add a tool](docs/for-plugin-authors/add-a-tool.md) | Create an MCP or local Python tool provider |
+| [Add a module](docs/for-plugin-authors/add-a-module.md) | Create an ambient or reactive module |
+| [Add a skill](docs/for-plugin-authors/add-a-skill.md) | Create a skill package |
+| [Tools](docs/for-plugin-authors/tools.md) | Tool subsystem reference: provider kinds, reload, verbs |
+| [Modules](docs/for-plugin-authors/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
+| [Skills](docs/for-plugin-authors/skills.md) | Skill subsystem reference: format, discovery, resources |
+| [Develop](docs/for-contributors/develop.md) | Setup, tests, conventions, pull requests |
+| [Core principles](docs/for-contributors/principles.md) | The load-bearing principles behind every design decision |
+| [Architecture](docs/for-contributors/architecture.md) | How the system is shaped, and why |
 
 ## Features
 
@@ -79,7 +79,7 @@ flowchart LR
     MD -. "ask() ambient + events" .-> C
 ```
 
-See [docs/explanation/architecture.md](docs/explanation/architecture.md) for the
+See [docs/for-contributors/architecture.md](docs/for-contributors/architecture.md) for the
 turn loop, module channels, and hot reload explained in full.
 
 ## Quick start
@@ -116,7 +116,7 @@ stack — live in `tests/builtin/` and are excluded there.
 
 Contributor conventions (path anchoring, one-file-one-provider, hot-reload
 contracts) are documented in
-[docs/how-to/develop.md](docs/how-to/develop.md).
+[docs/for-contributors/develop.md](docs/for-contributors/develop.md).
 
 ## Project layout
 

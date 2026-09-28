@@ -6,7 +6,7 @@ stack, an inbox, a realtime controller. This document is the reference
 for the modules subsystem in
 [`backend/nan_itself/modules/`](../../backend/nan_itself/modules/) and
 the contract every module implements. For how modules fit into the
-whole, see [architecture.md](../explanation/architecture.md).
+whole, see [architecture.md](../for-contributors/architecture.md).
 
 ## Where modules live
 
@@ -18,7 +18,7 @@ one concrete `Module` subclass. Editing a file replaces the module
 live; deleting the file removes it.
 
 Each module owns `config/modules/<module_id>.yaml` and loads and
-validates it itself. See [configuration.md](configuration.md).
+validates it itself. See [../for-users/configuration.md](../for-users/configuration.md).
 
 ## The modules package
 

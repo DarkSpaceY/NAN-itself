@@ -8,7 +8,7 @@ a lightweight metadata catalog, and serves their resources through the
 `invoke_skill` verb.
 
 This document describes the skill format and runtime surface. See
-[../how-to/add-a-skill.md](../how-to/add-a-skill.md) for how to create
+[add-a-skill.md](add-a-skill.md) for how to create
 one.
 
 ## Format
@@ -130,7 +130,7 @@ folder:
 Both the executed output and the returned text are truncated to
 `skills.resource_char_limit` (100 000 characters default). These two
 settings live in `config/settings.yaml`; see
-[configuration.md](configuration.md).
+[../for-users/configuration.md](../for-users/configuration.md).
 
 ## Verb surface
 
