@@ -84,7 +84,7 @@ root; absolute paths (and `~/...`) pass through unchanged.
   with backoff until the weights are present.
 
 All of these locations are fixed derivatives of the repository root
-([`backend/nan_itself/utils/paths.py`](../backend/nan_itself/utils/paths.py))
+([`backend/nan_itself/utils/paths.py`](../../backend/nan_itself/utils/paths.py))
 and are therefore independent of the process working directory.
 `HF_ENDPOINT` is honoured by the `huggingface_hub` library itself for
 download mirrors; NAN sets no environment variables of its own.

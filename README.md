@@ -18,6 +18,25 @@ skills, and an HTTP gateway with a web UI.
 
 > **NAN-itself is in early development.** Interfaces may change without notice.
 
+## Documentation
+
+The full documentation index is in [docs/README.md](docs/README.md); it is
+organized so you can go straight to the page that matches what you need.
+
+| Document | Contents |
+|---|---|
+| [First run](docs/tutorials/first-run.md) | End-to-end lesson: install, configure, start, converse |
+| [Develop](docs/how-to/develop.md) | Setup, tests, conventions, pull requests |
+| [Add a tool](docs/how-to/add-a-tool.md) | Create an MCP or local Python tool provider |
+| [Add a module](docs/how-to/add-a-module.md) | Create an ambient or reactive module |
+| [Add a skill](docs/how-to/add-a-skill.md) | Create a skill package |
+| [Core principles](docs/explanation/principles.md) | The load-bearing principles behind every design decision |
+| [Architecture](docs/explanation/architecture.md) | How the system is shaped, and why |
+| [Configuration](docs/reference/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
+| [Tools](docs/reference/tools.md) | Tool subsystem reference: provider kinds, reload, verbs |
+| [Skills](docs/reference/skills.md) | Skill subsystem reference: format, discovery, resources |
+| [Modules](docs/reference/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
+
 ## Features
 
 - **Turn-based agent core** — every round is captured in a single
@@ -60,68 +79,8 @@ flowchart LR
     MD -. "ask() ambient + events" .-> C
 ```
 
-See [docs/architecture.md](docs/architecture.md) for the full picture.
-
-### The turn loop
-
-Each round is one LLM round-trip. The model sees a derived snapshot of
-previous rounds plus the newest observation; the engine renders each
-completed round and appends it to the next round's snapshot. There is no
-separate history store.
-
-```mermaid
-flowchart TB
-    subgraph turn["Turn N"]
-        A["snapshot<br/>= Turn N-1 history + rendering"] --> B[LLM round-trip]
-        B --> C["reply / tool calls<br/>+ results"]
-        C --> D["Turn record<br/>history / ambient / reports / reply / calls / results"]
-    end
-    D -->|"history + render_turn(Turn N)"| E["Turn N+1 snapshot"]
-    E --> A2["..."]
-
-    style turn fill:#f6f8fa,stroke:#d0d7de,color:#24292f
-```
-
-### Modules and channels
-
-Modules are background daemons: heavy work runs in `start()` loops and
-`tell()`, while `ask()` stays a cheap projection the engine reads every
-turn. Modules that opt in also declare **channels** — downlink endpoints
-the model feeds payloads into; the module consumes them at its own
-tick. Data flows down, state flows up, and neither side blocks the other.
-
-```mermaid
-flowchart LR
-    subgraph agent["Agent (LLM)"]
-        V["invoke_channels<br/>schema check → deep copy"]
-    end
-    V -->|"written / rejected"| S["Module channel<br/>feed() stores the payload"]
-    S --> C2["Module tick loop<br/>consumes at its own pace"]
-    C2 --> Q["DataSpace / ask()<br/>progress flows back up"]
-
-    style agent fill:#f6f8fa,stroke:#d0d7de,color:#24292f
-```
-
-### Hot reload as a transaction
-
-Sources (tools, modules, skills) reload live. A replacement is started
-as an unregistered candidate and only committed after it is fully
-connected — the old generation keeps serving until that moment, so a
-broken edit never takes the runtime down.
-
-```mermaid
-sequenceDiagram
-    participant F as Filesystem
-    participant R as Runtime
-    participant Old as Live generation
-    participant New as Candidate
-    F->>R: source changed
-    R->>New: start (unregistered)
-    New-->>R: connected + validated
-    R->>R: commit candidate into live tables
-    R->>Old: stop (graceful)
-    Note over Old,New: both generations coexist during handoff
-```
+See [docs/explanation/architecture.md](docs/explanation/architecture.md) for the
+turn loop, module channels, and hot reload explained in full.
 
 ## Quick start
 
@@ -155,8 +114,8 @@ CI runs the framework/contract suite; tests that need local model
 weights or the audio/vision backends are excluded there.
 
 Contributor conventions (path anchoring, one-file-one-provider, hot-reload
-contracts) are documented in [docs/development.md](docs/development.md)
-and [CONTRIBUTING.md](CONTRIBUTING.md).
+contracts) are documented in
+[docs/how-to/develop.md](docs/how-to/develop.md).
 
 ## Project layout
 
@@ -182,28 +141,6 @@ NAN-itself/
 ├── docs/                 # Documentation
 └── tests/                # Pytest suite
 ```
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [Core principles](docs/principles.md) | The load-bearing principles behind every design decision |
-| [Architecture](docs/architecture.md) | Repo-mirrored tour: agent core, tool runtime, modules, skills, security model |
-| [Configuration](docs/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
-| [Development](docs/development.md) | Setup, conventions, adding tools and modules |
-| [Tools](docs/tools.md) | Built-in tool reference *(placeholder)* |
-| [Modules](docs/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
-
-## Built-in tools
-
-> The tool surface is still evolving, so a detailed catalog is intentionally
-> deferred. See [`builtin/tools/`](builtin/tools/) for the live sources:
-> YAML MCP configs in `mcps/` and Python providers in `local/`.
-
-## Built-in modules
-
-> Same as above — the module set is still moving. See
-> [`builtin/modules/`](builtin/modules/) for the live sources.
 
 ## License
 

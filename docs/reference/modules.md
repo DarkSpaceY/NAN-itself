@@ -4,9 +4,9 @@ A Module is a long-lived, autonomous service that senses, computes and
 acts at its own rhythm while the agent runs its turn loop — a sensor
 stack, an inbox, a realtime controller. This document is the reference
 for the modules subsystem in
-[`backend/nan_itself/modules/`](../backend/nan_itself/modules/) and the
-contract every module implements. For how modules fit into the whole,
-see [architecture.md](architecture.md).
+[`backend/nan_itself/modules/`](../../backend/nan_itself/modules/) and
+the contract every module implements. For how modules fit into the
+whole, see [architecture.md](../explanation/architecture.md).
 
 ## Where modules live
 

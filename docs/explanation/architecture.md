@@ -1,8 +1,13 @@
 # Architecture
 
-This document describes how NAN-itself is put together, section by
-section, following the repository layout. It mirrors the code as of the
-current development state; interfaces may still change.
+This document explains how NAN-itself is put together and why it is
+shaped the way it is, section by section, following the repository
+layout. It mirrors the code as of the current development state;
+interfaces may still change.
+
+For the design principles that constrain these decisions, see
+[principles.md](principles.md). For exact interfaces and contracts, see
+the [reference](../reference/) documents.
 
 ## Repository layout
 
@@ -27,14 +32,15 @@ subsystem. Import discipline: everything anchors to the package location
 
 ### app.py — composition root
 
-On startup it:
-
-1. loads `config/settings.yaml` (`config.py`),
-2. anchors all repo-relative directories through
-   [`utils/paths.py`](../backend/nan_itself/utils/paths.py),
-3. starts the tool provider runtime,
-4. wires the builtin modules and skills,
-5. starts the gateway (FastAPI/uvicorn) which serves the API and the web UI.
+`app.py` is the composition root. It loads `config/settings.yaml`
+(`config.py`), anchors all repo-relative directories through
+[`utils/paths.py`](../../backend/nan_itself/utils/paths.py), and
+constructs the `ProviderRuntime`, the module `Facade`, the
+`SkillRuntime`, the `StepEngine` and the root `Agent`. It then starts the
+tool provider runtime and the module facade before launching the agent
+loop and the gateway (FastAPI/uvicorn) as two long-lived tasks. Shutdown
+reverses that order — modules stop before providers, because modules may
+still reference tool providers.
 
 ### agent/ — the turn loop
 
@@ -64,9 +70,27 @@ On startup it:
   module channels all follow the same mental model — list enumerates,
   show inspects, invoke acts.
 
+Each round is one LLM round-trip. The model sees a derived snapshot of
+previous rounds plus the newest observation; the engine renders each
+completed round and appends it to the next round's snapshot. There is no
+separate history store.
+
+```mermaid
+flowchart TB
+    subgraph turn["Turn N"]
+        A["snapshot<br/>= Turn N-1 history + rendering"] --> B[LLM round-trip]
+        B --> C["reply / tool calls<br/>+ results"]
+        C --> D["Turn record<br/>history / ambient / reports / reply / calls / results"]
+    end
+    D -->|"history + render_turn(Turn N)"| E["Turn N+1 snapshot"]
+    E --> A2["..."]
+
+    style turn fill:#f6f8fa,stroke:#d0d7de,color:#24292f
+```
+
 ### tools/ — provider runtime
 
-[`runtime.py`](../backend/nan_itself/tools/runtime.py)
+[`runtime.py`](../../backend/nan_itself/tools/runtime.py)
 (`ProviderRuntime`) reconciles sources across two parallel directory
 layouts — builtin (`builtin/tools/`) and workspace
 (`workspace/tools/`) — with identical hot-reload semantics:
@@ -91,6 +115,27 @@ layouts — builtin (`builtin/tools/`) and workspace
   their sources with backoff; a degraded provider never kills the
   runtime.
 
+Sources (tools, modules, skills) reload live. A replacement is started
+as an unregistered candidate and only committed after it is fully
+connected — the old generation keeps serving until that moment, so a
+broken edit never takes the runtime down.
+
+```mermaid
+sequenceDiagram
+    participant F as Filesystem
+    participant R as Runtime
+    participant Old as Live generation
+    participant New as Candidate
+    F->>R: source changed
+    R->>New: start (unregistered)
+    New-->>R: connected + validated
+    R->>R: commit candidate into live tables
+    R->>Old: stop (graceful)
+    Note over Old,New: both generations coexist during handoff
+```
+
+See [tools.md](../reference/tools.md) for the full contract.
+
 ### modules/ — ambient state and channels
 
 Builtin modules (`builtin/modules/`) provide ambient context the
@@ -107,20 +152,38 @@ engine asks for at every turn start. The machinery here
 - **channels** (`model.py`): modules that declare a `channels` mapping
   on the class expose downlink endpoints the model reaches through the
   `list_channels` / `show_channels` / `invoke_channels` verbs; see
-  [modules.md](modules.md) for the channel contract.
+  [modules.md](../reference/modules.md) for the channel contract.
 
 Module-side contracts: capture/inference work runs on daemon threads
 with interval gating; the per-turn surface is a pure `ask()`
 projection; provisioning failures (e.g. missing model weights) raise
-out of `start()` -- the Facade marks the module DOWN with the error
-and restarts it with backoff, so a module with missing weights comes
-up loudly failed and revives once the weights land (all weights are
+out of `start()` — the Facade marks the module DOWN with the error and
+restarts it with backoff, so a module with missing weights comes up
+loudly failed and revives once the weights land (all weights are
 provisioned in `start()`, before any loop runs). One event loop runs
 every coroutine: `tell()` may await long operations, but synchronous
 CPU-heavy or blocking calls go to a thread, `DataSpace` publishes stay
 small JSON facts (publish/snapshot deepcopy the full state on the loop
 every round), and provisioning-length work (weight loading, device
 probing) happens on `start()`'s background threads.
+
+Modules are background daemons: heavy work runs in `start()` loops and
+`tell()`, while `ask()` stays a cheap projection the engine reads every
+turn. Modules that opt in also declare **channels** — downlink endpoints
+the model feeds payloads into; the module consumes them at its own
+tick. Data flows down, state flows up, and neither side blocks the other.
+
+```mermaid
+flowchart LR
+    subgraph agent["Agent (LLM)"]
+        V["invoke_channels<br/>schema check → deep copy"]
+    end
+    V -->|"written / rejected"| S["Module channel<br/>feed() stores the payload"]
+    S --> C2["Module tick loop<br/>consumes at its own pace"]
+    C2 --> Q["DataSpace / ask()<br/>progress flows back up"]
+
+    style agent fill:#f6f8fa,stroke:#d0d7de,color:#24292f
+```
 
 ### skills/ — capability packages
 
@@ -130,7 +193,8 @@ The runtime (`runtime.py`) discovers skills from the same parallel
 builtin/workspace roots at boot, re-scans at every turn start (shared
 hot-reload logic), and applies progressive disclosure: metadata lookups
 never load bodies; invoking a script executes it, other resources
-return as text.
+return as text. See [skills.md](../reference/skills.md) for the skill
+format and runtime surface.
 
 ### gateway and events
 
@@ -162,7 +226,7 @@ Core configuration lives in `config/settings.yaml` (loaded by
 and loads and validates it itself, keeping modules independent of
 any shared config machinery; `searxng.yml` configures the bundled
 SearxNG instance used by the search tool. There are no
-environment variables. See [configuration.md](configuration.md).
+environment variables. See [configuration.md](../reference/configuration.md).
 
 ## tests/
 
@@ -171,13 +235,8 @@ Contract tests mirror the reload/consistency guarantees
 plus integration tests that run the real agent loop against isolated
 module/tool directories.
 
-## Security model
+## Security
 
-- The only inbound listener is the gateway, bound to the loopback
-  interface by default (verified by the test suite).
-- All repo-relative paths (`data/`, `models/`, `config/`, `builtin/`)
-  resolve through `utils/paths.py`; the process never depends on its
-  working directory and writes no state outside the repo directories.
-- Trusted subprocesses (MCP servers, skill scripts) inherit the user
-  environment and are unrestricted by design; review a tool config
-  before adding it.
+The security model and the trust boundaries are documented in
+[SECURITY.md](../../SECURITY.md); that file is the authoritative
+reference for what NAN-itself trusts and what it does not.

@@ -33,3 +33,5 @@ once a stable release line starts.
 
 - `memory` and `plan` builtin modules (superseded by the channels
   design and upcoming reactive flows).
+- Root `CONTRIBUTING.md`, merged into
+  [`docs/how-to/develop.md`](docs/how-to/develop.md).
