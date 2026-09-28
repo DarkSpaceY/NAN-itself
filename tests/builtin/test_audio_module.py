@@ -25,7 +25,7 @@ import pytest
 from nan_itself.modules.model import DataSpace
 
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 FRAME_BYTES = 16000 * 30 // 1000 * 2  # 30 ms @ 16 kHz s16le
 

@@ -18,11 +18,13 @@ cd NAN-itself
 
 ## 2. Install the framework
 
-NAN-itself is managed with [uv](https://docs.astral.sh/uv/). One command
-installs the runtime and the dev group:
+NAN-itself is managed with [uv](https://docs.astral.sh/uv/). `uv sync`
+installs the framework and the dev group; `--all-extras` adds what the
+builtin plugins need — the perception stack behind the audio, voice and
+vision modules:
 
 ```bash
-uv sync
+uv sync --all-extras
 ```
 
 ## 3. Point it at an LLM

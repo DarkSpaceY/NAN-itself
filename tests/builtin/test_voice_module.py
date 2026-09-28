@@ -33,7 +33,7 @@ import pytest
 from nan_itself.modules.model import DataSpace
 
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 def _load_voice_module():

@@ -13,13 +13,38 @@ approach before writing code, so the change lands in one pass.
 Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync          # installs runtime + the dev group (pytest) by default
+uv sync --all-extras
 ```
+
+The project has two dependency sets:
+
+- the **framework** (`dependencies`) — the agent core, the gateway and
+  the tool runtime. `uv sync` alone installs these.
+- the **builtin plugins** (the `perception` extra) — what the shipped
+  modules and tools under `builtin/` import. Without them those plugins
+  come up loudly failed; `--all-extras` installs them.
+
+CI installs the framework only.
 
 ## Run the test suite
 
 ```bash
-uv run pytest -q # run the full suite
+uv run pytest -q # run everything
+```
+
+The suite has two parts:
+
+- `tests/` — the framework and contract suite. Hermetic: it fakes
+  subprocesses, network and hardware, so it runs anywhere, including CI.
+- `tests/builtin/` — tests for the builtin content: the modules and
+  tools that ship as plugins (`audio`, `voice`, `vision`, `search`).
+  These import the real builtin sources and therefore need the full
+  local-inference stack. **CI excludes them**; run them locally when you
+  have the dependencies installed:
+
+```bash
+uv run pytest -q tests/builtin        # builtin content only
+uv run pytest -q --ignore=tests/builtin   # framework suite only
 ```
 
 - The suite must stay green before every commit.
@@ -28,9 +53,8 @@ uv run pytest -q # run the full suite
 - Tool-level tests fake their backends (subprocesses, network); keep the
   suite hermetic.
 - Path-anchoring rules are enforced by `tests/test_paths_anchoring.py`,
-  including foreign-cwd process-level checks.
-- CI runs the framework/contract suite; tests that need local model
-  weights or the audio/vision backends are excluded there.
+  including foreign-cwd process-level checks. The one test that must
+  boot the real builtin modules is deselected in CI.
 
 ## Follow the conventions
 

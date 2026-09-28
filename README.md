@@ -89,7 +89,7 @@ Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/DarkSpaceY/NAN-itself.git
 cd NAN-itself
-uv sync
+uv sync --all-extras
 
 # Point the LLM settings at your provider, then start the agent:
 # config/settings.yaml -> llm.api_key / llm.base_url / llm.model
@@ -106,12 +106,13 @@ land. Nothing runs silently at half capacity.
 ## Development
 
 ```bash
-uv sync              # installs the dev group (pytest) by default
+uv sync --all-extras # framework + dev group + the builtin plugins' deps
 uv run pytest -q     # full test suite
 ```
 
-CI runs the framework/contract suite; tests that need local model
-weights or the audio/vision backends are excluded there.
+CI runs the framework/contract suite. Tests for the builtin content —
+the shipped modules and tools that pull in the full local-inference
+stack — live in `tests/builtin/` and are excluded there.
 
 Contributor conventions (path anchoring, one-file-one-provider, hot-reload
 contracts) are documented in

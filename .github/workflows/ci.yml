@@ -16,28 +16,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The lockfile is synced minus the heavy local-inference stack
-      # (torch, dlib, whisper, ...). CI runs the framework/contract
-      # test suite; tests that import the builtin audio/vision modules
-      # (and therefore the full ML stack) are excluded.
+      # `uv sync` installs the framework alone: the builtin plugins'
+      # dependencies live in the `perception` extra, which CI does not
+      # install. Their tests live in tests/builtin/ and are excluded
+      # from the run below.
       - name: Install dependencies
-        run: |
-          uv sync \
-            --no-install-package easyocr \
-            --no-install-package face-recognition \
-            --no-install-package face-recognition-models \
-            --no-install-package faster-whisper \
-            --no-install-package pywhispercpp \
-            --no-install-package sherpa-onnx \
-            --no-install-package sounddevice \
-            --no-install-package torch \
-            --no-install-package torchvision \
-            --no-install-package transformers \
-            --no-install-package webrtcvad-wheels \
-            --no-install-package opencv-python-headless
+        run: uv sync
 
       - name: Run tests
         run: |
           uv run pytest -q \
-            --ignore=tests/test_vision.py \
+            --ignore=tests/builtin \
             --deselect "tests/test_paths_anchoring.py::test_builtin_modules_anchor_from_foreign_cwd"

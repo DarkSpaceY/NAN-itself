@@ -19,7 +19,7 @@ import pytest
 from nan_itself.tools import local
 from nan_itself.tools.provider import Provider
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SEARCH_FILE = (
     PROJECT_ROOT / "builtin" / "tools" / "local" / "search.py"

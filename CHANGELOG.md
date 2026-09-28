@@ -28,6 +28,16 @@ once a stable release line starts.
 - Dependency alignment: `webrtcvad-wheels` replaces `webrtcvad`;
   `setuptools` pinned `<81` for `face_recognition`; vision VLM loader
   migrated to the transformers v5 API.
+- Test suite split: the tests for the builtin content — the modules and
+  tools that ship as plugins and need the full local-inference stack —
+  moved to `tests/builtin/`, which CI excludes.
+- Dependencies split: what the builtin plugins import moved out of
+  `dependencies` into the `perception` extra. `uv sync` now installs the
+  framework alone and `uv sync --all-extras` adds the plugins, so CI no
+  longer needs a dozen per-package exclusions. `pyyaml`, imported
+  directly by the config loader and the MCP backend, and `soundfile`,
+  imported by the voice module, are now declared instead of relying on
+  transitively installed copies.
 
 ### Removed
 
