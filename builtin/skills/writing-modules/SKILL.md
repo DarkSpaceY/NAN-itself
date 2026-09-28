@@ -97,10 +97,16 @@ class SetGoal(Module):
     }
 ```
 
-- The model feeds a payload via `invoke_channels` (`module:<id>/<channel>`
-  composite name). The runtime validates the channel and its schema, then
-  calls `feed(channel, payload)` on your instance; return `"written"` or
-  `"rejected"` (the base-class default accepts and returns `"written"`).
+- The model feeds a payload via `invoke_channels`, which takes three
+  separate arguments: `module` (the module id, e.g. `"goal-setter"`),
+  `channel` (the channel name, e.g. `"goal"`) and `payload` (an object
+  shaped by the channel schema). The runtime validates the channel and
+  its schema, then calls `feed(channel, payload)` on your instance;
+  return `"written"` or `"rejected"` (the base-class default accepts and
+  returns `"written"`).
+- `list_channels` enumerates each exposed channel as a bare
+  `<module_id>/<channel>` line (for example `goal-setter/goal`), with no
+  `module:` prefix.
 - Consumption policy is module-private: store fed payloads in your own
   queue/state and consume them from your `start()` loop at your own
   rhythm.

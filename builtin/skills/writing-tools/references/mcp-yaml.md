@@ -8,7 +8,7 @@ declares exactly one stdio MCP server. Canonical source:
 
 | Field    | Required | Meaning |
 |---|---|---|
-| `name`   | yes | Provider name; must be unique across builtin + workspace sources. The file name should match. |
+| `name`   | no  | Provider name; defaults to the YAML file stem. Must be unique across builtin + workspace sources. |
 | `command`| yes | Executable to spawn: `uvx`, `npx`, or an absolute path. |
 | `args`   | no  | Argument list passed to `command`. |
 | `env`    | no  | Extra environment variables merged over the inherited user environment. |
@@ -54,8 +54,12 @@ args: ["-y", "some-mcp-server"]
 - Servers are spawned as stdio MCP subprocesses and inherit the user
   environment; they are trusted, unrestricted subprocesses by design —
   review a config before adding it.
-- A dedicated supervisor reaps dead workers and reschedules their
-  sources with exponential backoff; a crashing server degrades its own
+- A dedicated supervisor reaps dead workers. A worker that dies on
+  its own has its source bookkeeping cleared, so the next scan
+  reconnects it — there is no backoff for a crashed live worker.
+  Exponential backoff applies to *load failures* instead: a source
+  that fails to load is retried on a 30 s → 60 s → 120 s → 240 s →
+  300 s schedule. Either way a crashing server degrades its own
   provider and never kills the runtime.
 - Editing the YAML hot-reloads the provider transactionally: the new
   worker is started first, committed only after connecting, then the old

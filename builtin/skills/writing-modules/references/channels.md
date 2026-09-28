@@ -19,12 +19,18 @@ ChannelSpec(model, *, description="")
 
 ## Feed path (framework side)
 
-The model calls `invoke_channels` with composite name
-`module:<module_id>/<channel>`. The Facade routes the payload through:
+The model calls `invoke_channels` with three separate arguments:
+`module` (the module id), `channel` (the channel name) and `payload`
+(the value to feed). There is no composite `module:<id>/<channel>`
+name. The Facade routes the payload through:
 
 1. schema check against the ChannelSpec,
 2. deep copy,
 3. `feed(channel, payload)` on the module instance.
+
+`list_channels` reports each exposed channel as a bare
+`<module_id>/<channel>` line (for example `notifier/send`), which is
+also the `name` field `show_channels` prints per channel.
 
 Return values the model sees: `written` or `rejected` (with reason for
 schema failures). Feeding is synchronous for the model and never

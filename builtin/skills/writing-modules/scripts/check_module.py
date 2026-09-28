@@ -9,7 +9,7 @@ Checks the loadable-file contract enforced by the module loader:
   - exactly one concrete Module subclass
   - a non-empty `id` assignment on the class
   - `async def start(self)` and `async def ask(self, turn)` present
-  - `requires` (if present) is a tuple/list of unique identifier strings
+  - `requires` (if present) is a tuple of unique identifier strings
 
 Pure AST + text checks; the file is never imported or executed.
 Exits 0 when every file passes, 1 otherwise.
@@ -135,9 +135,16 @@ def check(path: Path) -> Report:
     requires = assignments.get("requires")
 
     if requires is not None:
-        names = []
+        if not isinstance(requires, ast.Tuple):
+            report.error(
+                "`requires` must be a tuple of identifier strings "
+                "(tuple[str, ...]), not "
+                f"{type(requires).__name__}"
+            )
 
-        if isinstance(requires, (ast.Tuple, ast.List)):
+        else:
+            names = []
+
             for element in requires.elts:
                 if isinstance(element, ast.Constant) and isinstance(
                     element.value, str
@@ -146,12 +153,14 @@ def check(path: Path) -> Report:
                 else:
                     report.error("`requires` entries must be string literals")
 
-        duplicates = {
-            name for name in names if names.count(name) > 1
-        }
+            duplicates = {
+                name for name in names if names.count(name) > 1
+            }
 
-        if duplicates:
-            report.error(f"duplicate requires entries: {sorted(duplicates)}")
+            if duplicates:
+                report.error(
+                    f"duplicate requires entries: {sorted(duplicates)}"
+                )
 
     methods = {
         node.name: node

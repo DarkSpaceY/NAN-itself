@@ -36,7 +36,13 @@ this skill. Keep the body lean; push details into references/.
 - Frontmatter must start at the very first line with `---` and be
   terminated by a second `---` line.
 
-## Resource folders (all optional)
+## Resources (the whole directory)
+
+Every file under the skill root belongs to the skill: the registry
+enumerates the entire directory, not a fixed set of folders. The
+three folders below are **conventions**; any other folder, or a
+root-level file, forms its own resource group. Hidden entries
+(dot-prefixed path segments) and `__pycache__` are excluded.
 
 | Folder        | Semantics |
 |---|---|
@@ -46,8 +52,11 @@ this skill. Keep the body lean; push details into references/.
 
 Progressive disclosure: metadata lookups (`list_skills` /
 `show_skill`) never load the body; invoking a script executes it,
-any other resource is returned as text. Hidden files (dot-prefixed)
-are excluded from resources.
+any other resource is returned as text.
+
+Hot reload keys on the whole directory: the change fingerprint folds
+in every bundled file, so editing any one of them (not just
+`SKILL.md`) bumps the generation and reloads the skill.
 
 Skill scripts are trusted subprocesses (inherited environment,
 unrestricted). Keep them stdlib-only where possible so they run

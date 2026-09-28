@@ -11,7 +11,9 @@ Checks the loadable-file contract enforced by the local tool loader:
   - at least one @tool-decorated method
   - every @tool method has a docstring and fully annotated parameters
     (the JSON schema derives from the annotations)
-  - @tool methods are async (recommended contract; reported as error)
+  - @tool methods take no *args / **kwargs (var args are rejected by
+    the loader)
+  - @tool methods are async (recommended contract; reported as a warning)
 
 Pure AST + text checks; the file is never imported or executed.
 Exits 0 when every file passes, 1 otherwise.
@@ -157,6 +159,18 @@ def check(path: Path) -> Report:
 
         if not ast.get_docstring(tool):
             report.error(f"`{name}` is missing a docstring")
+
+        if tool.args.vararg is not None:
+            report.error(
+                f"`{name}` takes *{tool.args.vararg.arg}; "
+                "var args are not supported by the tool loader"
+            )
+
+        if tool.args.kwarg is not None:
+            report.error(
+                f"`{name}` takes **{tool.args.kwarg.arg}; "
+                "var args are not supported by the tool loader"
+            )
 
         positional = [
             arg
