@@ -92,6 +92,20 @@ module's contribution. Provisioning failures (missing model weights,
 absent hardware) come up loudly failed and revive once the resource
 appears.
 
+Registration is checked before it is applied. A module whose `requires`
+would close a dependency cycle is rejected before anything is written:
+it does not start, it leaves the registry untouched, and it does not
+disturb the modules already running — the source file is retried only
+once it changes. A *missing* dependency is not an error, though: a
+module may start while something it requires is absent.
+
+Deleting a source file removes its module. The Facade stops it,
+persists its state, releases its `DataSpace`, and detaches it from every
+module that required it — so a dependent stops seeing a removed module
+rather than reading its last published values. Adding the file back
+registers a fresh instance, restores the persisted state, and
+re-attaches those dependents.
+
 ### Performance rule
 
 The module's one hard obligation: `ask()` stays a cheap, read-only
@@ -119,6 +133,13 @@ readers — dependents and the per-turn snapshot — receive completely
 detached deep copies. Dependents hold a `DataSpaceReader`, which
 deliberately does not expose `publish()`.
 
+A `DataSpace` outlives the instance that publishes to it. A hot reload
+hands the *same* object to the replacement generation, so published
+facts survive an edit of the source file. Removing the source releases
+it, and a later re-add recreates it from the persisted snapshot.
+Nothing else keeps it alive: a dependent's reader is detached when the
+module it required goes away.
+
 ## Turn coupling
 
 - **`ask(turn)`** is called on every RUNNING module at turn start; the
@@ -133,7 +154,10 @@ deliberately does not expose `publish()`.
 Private state is persisted as JSON under `data/modules/private/<id>.json`
 (`serialize_state()` payload) alongside the published DataSpace snapshot
 under `data/modules/dataspace/<id>.json`; both are restored when the
-instance is (re)created. A corrupt file blocks only its own module.
+instance is (re)created. They are written when the Facade shuts down and
+again when it removes a module — that second write is what lets a
+deleted module come back with the state it had at the moment it went
+away. A corrupt file blocks only its own module.
 
 ## Channels — the model downlink
 
@@ -268,9 +292,12 @@ through its own `DataSpace` — the perception face already covers it.
   rendered by each module's own `ask()` from its private state (one-shot
   events are drained on render); the engine needs no changes, and the
   model does not re-send payloads it already sent.
-- **Hot reload.** The core persists nothing about channels: fed payloads
-  are transient and are dropped when a reload rebuilds the instance;
-  whether any derived state survives is the module's own
-  `serialize_state()` decision.
+- **Hot reload.** The core keeps nothing channel-specific: it hands a
+  payload down and forgets it. A reload replaces the *instance* but
+  keeps the same `DataSpace` object, so facts the module published
+  there survive the swap. Payloads a module consumed usually live in
+  its private state, and that survives only if the module implements
+  `serialize_state()` / `restore_state()` — both default to `None` and
+  a no-op, so by default consumed payloads are dropped.
 - **One file = one module** is untouched; channels live in the module
   file alongside the rest of the class.

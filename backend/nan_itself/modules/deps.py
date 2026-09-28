@@ -86,6 +86,74 @@ def bind_instance(
     record.instance.dependencies = dependencies
 
 
+def attach_dependency(
+    record,
+    dependency_id: str,
+    *,
+    dataspaces: Mapping[str, "DataSpace"],
+) -> None:
+    """
+    Attach one dependency edge to an already-bound instance.
+
+    Targeted single-edge operation: only the given record may be
+    touched, and only when it declares the dependency and does
+    not already hold a reader for it. Existing readers are left
+    untouched.
+    """
+    if dependency_id not in record.cls.requires:
+        return
+
+    space = dataspaces.get(
+        dependency_id
+    )
+
+    if space is None:
+        return
+
+    dependencies = getattr(
+        record.instance,
+        "dependencies",
+        None,
+    )
+
+    if dependencies is None:
+        return
+
+    if dependency_id in dependencies:
+        return
+
+    dependencies[
+        dependency_id
+    ] = DataSpaceReader(
+        space
+    )
+
+
+def detach_dependency(
+    record,
+    dependency_id: str,
+) -> None:
+    """
+    Detach one dependency edge from an already-bound instance.
+
+    Targeted single-edge operation: only the given record is
+    touched. An absent reader is ignored.
+    """
+    dependencies = getattr(
+        record.instance,
+        "dependencies",
+        None,
+    )
+
+    if dependencies is None:
+        return
+
+    dependencies.pop(
+        dependency_id,
+        None,
+    )
+
+
 def topological_order(
     modules: Mapping[str, Any],
     dependencies: Mapping[str, set[str]],
@@ -165,3 +233,38 @@ def topological_order(
         )
 
     return result
+
+
+def validate_addition(
+    modules: Mapping[str, Any],
+    record: Any,
+) -> None:
+    """
+    Reject a record whose arrival would close a dependency cycle.
+
+    Pure pre-check: the graph is recomputed on a copy, so this never
+    mutates the live mapping. Callers can therefore validate first and
+    install second, and a rejected Module simply never reaches the
+    live tables -- there is no half-installed state to undo.
+
+    A record that replaces an existing id is validated as a
+    replacement, since the trial copy overwrites that entry.
+    """
+    trial = dict(
+        modules
+    )
+
+    trial[record.id] = record
+
+    (
+        dependencies,
+        dependents,
+    ) = build_dependency_maps(
+        trial
+    )
+
+    topological_order(
+        trial,
+        dependencies,
+        dependents,
+    )

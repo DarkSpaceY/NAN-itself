@@ -28,6 +28,13 @@ from .reload import (
 )
 
 
+# Grace period for one Module to honour a stop. A Module's stop()
+# and its start() task are user code: a blocking implementation, or
+# one that swallows cancellation, must not stall the supervisor
+# forever.
+_MODULE_STOP_TIMEOUT = 10.0
+
+
 # ============================================================================
 # Facade
 # ============================================================================
@@ -65,6 +72,17 @@ class Facade:
 
         Reloading Module A must not re-bind Module B, C, ...
         even when A declares them in `requires`.
+
+        The only exception is a pair of targeted single-edge
+        operations, each triggered by an actual registration or
+        removal:
+
+            - registering a Module attaches the missing reader to
+              existing dependents that declare it
+            - removing a Module detaches that edge from every
+              remaining dependent
+
+        Neither operation re-binds unrelated Modules.
     """
 
     def __init__(
@@ -917,7 +935,18 @@ class Facade:
         )
 
         try:
-            await record.instance.stop()
+            await asyncio.wait_for(
+                record.instance.stop(),
+                timeout=_MODULE_STOP_TIMEOUT,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Module stop timed out after "
+                f"{_MODULE_STOP_TIMEOUT:g}s: "
+                f"{record.id}"
+                f"[generation={record.generation}]"
+            )
 
         except Exception as exc:
             record.error = exc
@@ -937,7 +966,18 @@ class Facade:
             task.cancel()
 
             try:
-                await task
+                await asyncio.wait_for(
+                    task,
+                    timeout=_MODULE_STOP_TIMEOUT,
+                )
+
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Module task did not exit after "
+                    f"cancellation: "
+                    f"{record.id}"
+                    f"[generation={record.generation}]"
+                )
 
             except asyncio.CancelledError:
                 pass
@@ -984,10 +1024,15 @@ class Facade:
         self,
         root: Path,
     ) -> None:
-        root.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        # One resolved-source index for the whole scan. Both the
+        # removal lookup and the already-loaded lookup below would
+        # otherwise walk every record once per file.
+        by_source = {
+            Path(
+                record.source
+            ).resolve(): record
+            for record in self.modules.values()
+        }
 
         current_files = {
             path.resolve()
@@ -1006,11 +1051,9 @@ class Facade:
         }
 
         known_files = {
-            Path(record.source).resolve()
-            for record in self.modules.values()
-            if Path(
-                record.source
-            ).resolve().is_relative_to(
+            source
+            for source in by_source
+            if source.is_relative_to(
                 root
             )
         }
@@ -1022,18 +1065,8 @@ class Facade:
         for removed in (
             known_files - current_files
         ):
-            record = next(
-                (
-                    item
-                    for item in self.modules.values()
-                    if (
-                        Path(
-                            item.source
-                        ).resolve()
-                        == removed
-                    )
-                ),
-                None,
+            record = by_source.get(
+                removed
             )
 
             if record is not None:
@@ -1078,10 +1111,8 @@ class Facade:
             ):
                 continue
 
-            existing = (
-                self._find_record_by_source(
-                    path
-                )
+            existing = by_source.get(
+                path
             )
 
             if (
@@ -1139,22 +1170,33 @@ class Facade:
         )
 
         if old is None:
-            self._register_module_class(
-                cls,
-                source=str(path),
-                source_fingerprint=(
-                    fingerprint
-                ),
-                imported_module_name=(
-                    imported_name
-                ),
-            )
+            try:
+                # Validate-then-install: a Module rejected by graph
+                # validation never reaches the live tables, so the
+                # cycle error cannot leave the graph cyclic for
+                # start(), stop() or _reconcile().
+                self._register_module_class(
+                    cls,
+                    source=str(path),
+                    source_fingerprint=(
+                        fingerprint
+                    ),
+                    imported_module_name=(
+                        imported_name
+                    ),
+                )
 
-            # The new instance was already bound by
-            # _register_module_class().
-            #
-            # Only rebuild pure graph bookkeeping here.
-            self._refresh_dependency_graph()
+            except Exception:
+                # The file was imported before the Facade was
+                # involved; drop that synthetic import so a rejected
+                # file leaves nothing behind.
+                if imported_name:
+                    sys.modules.pop(
+                        imported_name,
+                        None,
+                    )
+
+                raise
 
             self._wake.set()
 
@@ -1189,6 +1231,54 @@ class Facade:
             | None
         ) = None,
     ) -> ModuleRecord:
+        """
+        Validate one new Module, then install it.
+
+        The dependency graph is checked BEFORE the record reaches any
+        live table, so a Module whose arrival would close a cycle is
+        rejected while nothing has been written. Rejection therefore
+        needs no undo step, and it cannot leave the graph cyclic for
+        start(), stop() or _reconcile().
+        """
+        record = self._build_module_record(
+            cls,
+            source=source,
+            imported_module_name=imported_module_name,
+        )
+
+        _deps.validate_addition(
+            self.modules,
+            record,
+        )
+
+        self._install_module_record(
+            record,
+            source_fingerprint=source_fingerprint,
+        )
+
+        # Validation already proved the graph acyclic, so this is
+        # pure bookkeeping and cannot fail.
+        self._rebuild_dependency_graph()
+
+        return record
+
+    def _build_module_record(
+        self,
+        cls: type[Module],
+        *,
+        source: str,
+        imported_module_name: (
+            str
+            | None
+        ) = None,
+    ) -> ModuleRecord:
+        """
+        Build one ModuleRecord without touching the live tables.
+
+        The instance is constructed and bound to its own `data` and
+        readers; nothing shared is written. A record built here can
+        therefore still be discarded once validation rejects it.
+        """
         _loading.validate_module_class(
             cls
         )
@@ -1216,10 +1306,6 @@ class Facade:
                 owner=module_id
             )
 
-            self.dataspaces[
-                module_id
-            ] = data
-
         instance = cls()
 
         instance.llm = self.llm
@@ -1236,10 +1322,35 @@ class Facade:
             ),
         )
 
-        # Only the new instance is bound.
+        # Bind the new instance: it receives its own `data` and
+        # one reader per declared dependency.
         self._bind_instance(
             record
         )
+
+        return record
+
+    def _install_module_record(
+        self,
+        record: ModuleRecord,
+        *,
+        source_fingerprint: (
+            tuple[int, int]
+            | None
+        ) = None,
+    ) -> None:
+        """
+        Commit a validated record into the live tables.
+
+        Installs the DataSpace, registers the record, restores its
+        persisted state, and attaches it to already-registered
+        dependents that declare it.
+        """
+        module_id = record.id
+
+        self.dataspaces[
+            module_id
+        ] = record.data
 
         self.modules[
             module_id
@@ -1249,14 +1360,29 @@ class Facade:
             record
         )
 
+        # Attach this Module to already-registered dependents
+        # that declare it and currently lack the reader. This is
+        # a targeted single-edge operation: only the missing
+        # edge is added, nothing else is re-bound.
+        #
+        # The new record itself is skipped: a Module never
+        # depends on its own id.
+        for dependent in self.modules.values():
+            if dependent is record:
+                continue
+
+            _deps.attach_dependency(
+                dependent,
+                module_id,
+                dataspaces=self.dataspaces,
+            )
+
         if source_fingerprint is not None:
             self._source_fingerprints[
                 Path(
-                    source
+                    record.source
                 ).resolve()
             ] = source_fingerprint
-
-        return record
 
     def _bind_instance(
         self,
@@ -1351,6 +1477,42 @@ class Facade:
             record
         )
 
+        # Persist this record's state before releasing it, so a
+        # later re-add restores the state as of this moment.
+        # Best effort: a serialization failure must not abort
+        # removal.
+        try:
+            self._save_record_state(
+                record
+            )
+
+        except Exception:
+            logger.exception(
+                f"Failed to persist Module state: "
+                f"{record.id}"
+            )
+
+        # The destructive part follows awaits, during which a hot
+        # reload may have installed a new generation for this id.
+        # Tearing the new generation down would destroy the
+        # DataSpace it shares with the old one, so only proceed
+        # while this exact record is still the installed one.
+        if self.modules.get(record.id) is not record:
+            logger.warning(
+                "Ignoring stale removal of Module {} "
+                "(generation={})",
+                record.id,
+                record.generation,
+            )
+
+            if record.imported_module_name:
+                sys.modules.pop(
+                    record.imported_module_name,
+                    None,
+                )
+
+            return
+
         self.modules.pop(
             record.id,
             None,
@@ -1376,8 +1538,23 @@ class Facade:
             None,
         )
 
-        # DataSpace intentionally survives
-        # Module removal.
+        # Release the removed Module's in-memory DataSpace. Its
+        # state files under data/ are kept on purpose: they are
+        # what lets a later re-add restore the state as of this
+        # removal.
+        self.dataspaces.pop(
+            record.id,
+            None,
+        )
+
+        # Detach the removed Module from every remaining
+        # dependent's reader map. Targeted single-edge operation:
+        # nothing else is re-bound.
+        for remaining in self.modules.values():
+            _deps.detach_dependency(
+                remaining,
+                record.id,
+            )
 
         # Pure dependency graph update.
         # Do NOT re-bind remaining Modules.

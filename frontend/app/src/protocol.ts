@@ -1,12 +1,13 @@
-// 与 frontend/PROTOCOL.md 一一对应的事件契约
+// Mirror of frontend/PROTOCOL.md v2 — the backend sends typed data, the frontend renders.
 export type StatusState = 'idle' | 'working' | 'error';
 
 export interface Status {
   state: StatusState;
 }
 
-// 信封:EventBus/sink 统一加盖的传输层字段。seq/ts 由 EventBus 填,
-// id 由 sink 生成,boot_id 在 attach 时记录——未设置则不出现该键。
+// Envelope: transport-layer fields stamped by the EventBus / sink. seq/ts are
+// filled by the EventBus, id by the sink; boot_id is recorded at attach and the
+// key is absent when unset.
 export interface Envelope {
   seq?: number;
   ts?: number;
@@ -14,22 +15,60 @@ export interface Envelope {
   boot_id?: string;
 }
 
-// 身份三键:由发出方在 content 中携带;未携带即无 agent 上下文
-// (此时这三个键不存在,不是 null)。
+// Identity keys: carried inside `content` by the emitting side; absent when the
+// event has no agent context (the keys do not exist, they are not null).
 export interface Identity {
   agent_hash?: string;
   parent_hash?: string | null;
   depth?: number;
 }
 
-// 载荷事件的公共外壳:t 为唯一判别字段,id 恒在(UI 行关联键)。
+// Payload event shell: `t` is the single discriminant, `id` is always present
+// (the UI row key).
 interface Payload<T extends string, C> extends Envelope {
   t: T;
   id: string;
   content: C & Identity;
 }
 
-// hello 是基线握手:不经 sink,无 id;seq 由网关显式给出。
+// --- record categories -----------------------------------------------------
+
+export type RecordCategory =
+  | 'tool_call'
+  | 'skill_invoke'
+  | 'channel_write'
+  | 'subagent_spawn'
+  | 'subagent_report'
+  | 'module_query'
+  | 'sleep'
+  | 'finish'
+  | 'unknown';
+
+// The `payload` union is discriminated on `category`: narrowing `category`
+// narrows `payload` with it.
+export type RecordStarted =
+  | { category: 'tool_call';       payload: { provider: string; tool: string; arguments: Record<string, unknown> } }
+  | { category: 'skill_invoke';    payload: { skill: string; resource?: string } }
+  | { category: 'channel_write';   payload: { module: string; channel: string; payload?: unknown } }
+  | { category: 'subagent_spawn';  payload: { agent_id: string; depth: number; task: string } }
+  | { category: 'subagent_report'; payload: { agent_id: string; task: string; status: string; body: string } }
+  | { category: 'module_query';    payload: Record<string, never> }
+  | { category: 'sleep';           payload: { seconds: number } }
+  | { category: 'finish';          payload: Record<string, never> }
+  | { category: 'unknown';         payload: { verb: string } };
+
+// --- detail entries --------------------------------------------------------
+
+export type RecordEntry =
+  | { kind: 'text';  text: string }
+  | { kind: 'item';  text: string }
+  | { kind: 'field'; label: string; value: string }
+  | { kind: 'code';  text: string };
+
+// --- events ----------------------------------------------------------------
+
+// hello is the baseline handshake: it does not go through the sink (no `id`),
+// and `seq` is mandatory.
 export interface HelloEvent extends Envelope {
   t: 'hello';
   seq: number;
@@ -45,43 +84,16 @@ export type ServerEvent =
   | HelloEvent
   | Payload<'status', { state: StatusState }>
   | Payload<'user_input', { text: string; mid?: string }>
-  | Payload<
-      'record_started',
-      {
-        kind:
-          | 'tool'
-          | 'skill'
-          | 'spawn'
-          | 'sleep'
-          | 'finish'
-          | 'module'
-          | 'agent'
-          | 'target'
-          | 'error';
-        name: string;
-        summary?: string;
-      }
-    >
-  | Payload<'record_detail', { line: string }>
-  | Payload<'record_done', { summary?: string; note?: string }>
-  | Payload<'record_failed', { summary?: string }>
+  | Payload<'record_started', RecordStarted>
+  | Payload<'record_detail', { entries: RecordEntry[] }>
+  | Payload<'record_done', { result?: Record<string, unknown>; duration_s?: number }>
+  | Payload<'record_failed', { error: { type: string; message: string } }>
   | Payload<'record_void', Identity>
   | Payload<'output_started', Identity>
   | Payload<'output_delta', { text: string }>
-  | Payload<'output_done', { duration: string }>
+  | Payload<'output_done', { duration: number }>
   | Payload<'output_cancelled', Identity>;
 
-// mid: 客户端消息 id,用于回执匹配与服务端去重(防断线重发导致重复投递)
+// mid: the client message id, used for ack matching and server-side dedup
+// (exactly-once under reconnect re-send).
 export type ClientEvent = { t: 'input'; text: string; mid?: string } | { t: 'ping' };
-
-export const GLYPH_BY_KIND: Record<string, string> = {
-  tool: '▸',
-  skill: '✦',
-  spawn: '⧉',
-  sleep: '⏾',
-  finish: '⏻',
-  module: '◈',
-  agent: '◈',
-  target: '⌖',
-  error: '✗',
-};

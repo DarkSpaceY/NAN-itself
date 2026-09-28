@@ -176,9 +176,12 @@ class SpawnVerb:
         record_id = sink.emit(
             "record_started",
             content={
-                "kind": "agent",
-                "name": task,
-                "summary": "",
+                "category": "subagent_spawn",
+                "payload": {
+                    "agent_id": child.agent_hash[:8],
+                    "depth": child.depth,
+                    "task": task,
+                },
                 "agent_hash": agent.agent_hash,
                 "parent_hash": agent.parent_hash,
                 "depth": agent.depth,
@@ -187,33 +190,9 @@ class SpawnVerb:
 
         if record_id:
             sink.emit(
-                "record_detail",
-                id=record_id,
-                content={
-                    "line": f"id: {child.agent_hash[:8]}",
-                    "agent_hash": agent.agent_hash,
-                    "parent_hash": agent.parent_hash,
-                    "depth": agent.depth,
-                },
-            )
-
-            sink.emit(
-                "record_detail",
-                id=record_id,
-                content={
-                    "line": f"depth: {child.depth}",
-                    "agent_hash": agent.agent_hash,
-                    "parent_hash": agent.parent_hash,
-                    "depth": agent.depth,
-                },
-            )
-
-            sink.emit(
                 "record_done",
                 id=record_id,
                 content={
-                    "summary": "spawned",
-                    "note": "",
                     "agent_hash": agent.agent_hash,
                     "parent_hash": agent.parent_hash,
                     "depth": agent.depth,

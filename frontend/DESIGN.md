@@ -63,10 +63,11 @@ Composer 底部固定(❯ + 输入 + ⏎),右侧状态摘记
 
 ### Record(机器话,核心原语)
 ```
-[glyph] name · summary        [note] [chev]
-        ↳ detail(mono 12,faint,缩进 24px)
+[glyph] label [duration] [chev]
+        ↳ detail:类型化条目(text / item / field / code,mono 12,faint,缩进 24px)
 ```
-- glyph 字母表:`▸ 动作` `◈ 委派` `✓ 完成` `✗ 失败` `↳ 详节` `✦ 沉淀(v2)` `● 活着` `▍ 光标`
+- label 由前端从类型化 payload 派生(协议不再下发展示串);duration 是数值秒,渲染边缘才格式化
+- glyph 字母表(按 category):`▸ tool_call` `✦ skill_invoke` `⌖ channel_write` `⧉ subagent_spawn` `◈ subagent_report` `◈ module_query` `⏾ sleep` `⏻ finish`;完成 `✓`、失败 `✗`、详节 `↳`、活着 `●`、光标 `▍`
 - 状态:running(braille 转轮 ⠋⠙⠹… + accent 呼吸)→ done(✓ + 自动折叠)/ failed(✗ + 保持展开,--err)
 - 交互:点击行切换详节;hover 发丝底(raise 4.5%)
 - 使用者:工具调用、子代理派发/简报、子代理报告、错误/重试、(v2)记忆沉淀

@@ -1,16 +1,33 @@
 import { useEffect, useState } from 'react';
 import type { Item } from '../state/store';
-import { GLYPH_BY_KIND } from '../protocol';
+import type { RecordEntry, RecordStarted } from '../protocol';
 
 const BRAILLE = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 type Rec = Extract<Item, { k: 'record' }>;
 
-// 原语:Record —— 一切机器事件的统一形态
+// Render edge: durations arrive as a number of seconds from the wire.
+const fmtDuration = (s: number) => `${s.toFixed(1)}s`;
+
+// Prose carried in the typed payload (the backend never pre-renders it):
+// a subagent's delegation instruction / report body.
+function payloadProse(s: RecordStarted): string | null {
+  switch (s.category) {
+    case 'subagent_spawn':
+      return s.payload.task;
+    case 'subagent_report':
+      return s.payload.body;
+    default:
+      return null;
+  }
+}
+
+// Primitive: Record — the uniform shape of every machine event.
 export function RecordItem({ item }: { item: Rec }) {
   const [open, setOpen] = useState(item.open);
   const [spin, setSpin] = useState(0);
   const running = item.state === 'running';
+  const prose = payloadProse(item.started);
 
   useEffect(() => {
     setOpen(item.open);
@@ -26,47 +43,48 @@ export function RecordItem({ item }: { item: Rec }) {
   return (
     <div className={`rec ${item.state}${open ? ' open' : ''}`} onClick={() => setOpen(!open)}>
       <div className="rrow">
-        <span className="glyph">
-          {running 
-            ? BRAILLE[spin % BRAILLE.length] 
-            : (GLYPH_BY_KIND[item.kind] || item.glyph || '•')}
-        </span>
-        <span className="rname">{item.name}</span>
-        {/* {item.summary ? <span className="rsum">{highlight(item.summary)}</span> : null} */}
-        <span className="note">{item.note ?? ''}</span>
+        <span className="glyph">{running ? BRAILLE[spin % BRAILLE.length] : item.glyph}</span>
+        <span className="rname">{item.label}</span>
+        <span className="note">{item.duration !== undefined ? fmtDuration(item.duration) : ''}</span>
         <span className="chev">▸</span>
       </div>
-      {item.detail.length > 0 && (
+      {(item.detail.length > 0 || prose || item.error) && (
         <div className="rdetail">
-          {item.detail.map((line, i) => (
-            <div key={i}>
-              {line.startsWith('✗') ? (
-                <span className="e">{line}</span>
-              ) : line.startsWith('· ') ? (
-                <>
-                  · <span className="f">{line.slice(2)}</span>
-                </>
-              ) : (
-                highlight(line)
-              )}
-            </div>
+          {item.detail.map((entry, i) => (
+            <div key={i}>{renderEntry(entry)}</div>
           ))}
+          {prose && <div>{prose}</div>}
+          {item.error && (
+            <div>
+              <span className="e">
+                {item.error.type}: {item.error.message}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// 数字/耗时轻量着色:纯文本切分,无注入
-function highlight(text: string) {
-  const parts = text.split(/(\+\d+|\d+ files|\d+\.\d+s|\d+m\d+s|\d+s\b)/g);
-  return parts.map((p, i) =>
-    /^\+?\d/.test(p) && p.length <= 12 ? (
-      <b key={i} className="hl">
-        {p}
-      </b>
-    ) : (
-      p
-    ),
-  );
+// Entries are typed by the backend; render by `kind`, never by sniffing text.
+function renderEntry(entry: RecordEntry) {
+  switch (entry.kind) {
+    case 'text':
+      return entry.text;
+    case 'item':
+      return (
+        <>
+          · <span className="f">{entry.text}</span>
+        </>
+      );
+    case 'field':
+      return (
+        <>
+          <span className="k">{entry.label}</span> {entry.value}
+        </>
+      );
+    case 'code':
+      return <pre className="code">{entry.text}</pre>;
+  }
 }

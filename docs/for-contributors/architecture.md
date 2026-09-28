@@ -144,12 +144,19 @@ engine asks for at every turn start. The machinery here
 (`runtime.py` = the Facade) owns:
 
 - dependency graph, lifecycle supervision, retry and hot reload;
+- registration is validate-then-install: the dependency graph is
+  checked on a copy before the record reaches any live table, so a
+  cycle is rejected with nothing installed and no state to undo
+  (`deps.py`);
 - DataSpace ownership: a module publishes, dependents read detached
-  snapshots (`deps.py`);
+  snapshots (`deps.py`). The same `DataSpace` object is shared across a
+  reload, released when the source is removed, and restored from the
+  persisted snapshot when it comes back;
 - per-turn coupling: `ask()` ambient projection at turn start and
   `tell()` notification after it (`model.py` defines `Turn` and
   `Module`);
-- private state persistence via `serialize_state()` (`persistence.py`);
+- private state persistence via `serialize_state()` (`persistence.py`),
+  written on shutdown and on removal;
 - **channels** (`model.py`): modules that declare a `channels` mapping
   on the class expose downlink endpoints the model reaches through the
   `list_channels` / `show_channels` / `invoke_channels` verbs; see

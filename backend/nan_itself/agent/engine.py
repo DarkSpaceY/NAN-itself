@@ -221,8 +221,9 @@ class StepEngine:
                     "output_done",
                     id=stream_id,
                     content={
-                        "duration": (
-                            f"{time.time() - (first_text or time.time()):.1f}s"
+                        "duration_s": (
+                            time.time()
+                            - (first_text or time.time())
                         ),
                         "agent_hash": turn.agent_hash,
                         "parent_hash": turn.parent_hash,

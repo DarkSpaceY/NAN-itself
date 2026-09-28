@@ -1,96 +1,332 @@
-# NAN WS 事件协议 v1
+# NAN WS Event Protocol v2
 
-状态:冻结。前端 `useAgentStream` 与后端网关共同遵守。
-原则:**协议事件 ↔ UI 原语一一对应**,不引入 UI 用不到的字段。
+Status: **target specification**. This document describes the protocol both sides must
+converge on. It is *not* implemented yet: the current code still speaks v1, and the gap
+is enumerated under **Migration**. Where this document and the code disagree today, the
+code is the old behaviour — not a reason to keep it.
 
-## 可见性边界(黑盒原则)
+The one principle that drives v2:
 
-主流只渲染 agent 层动作:user_input / modules.ask / tool / skill / response。
-**模块内部过程(planner think、memory review…)一律不可见**——模块对 UI 是黑盒,
-只有其抽象属性(可进入非主流展示,v2)。引擎在回合开始的 ambient 询问
-(`modules.query_snapshot`)处,对每个 RUNNING 模块发一条
-`record_started(kind:"module", name:"<module_id>")`,planner 阻塞多久
-都只是这一行的转轮。
+> **The backend sends structured, typed data; the frontend owns all rendering.**
 
-## 通道
+Everything below follows from that sentence. Concretely: the backend never chooses a
+glyph, a colour, a label or a sentence. It publishes *categories*, *typed payloads* and
+*typed entries*; the mapping from category to visual vocabulary (glyph, colour, dimming,
+folding, the human label) lives entirely in the frontend. This spec therefore pins **no
+glyph at all** — v1 carried a glyph table that disagreed with both `DESIGN.md` and
+`protocol.ts`, which is exactly the drift the ownership rule removes.
 
-- 网关:`ws://127.0.0.1:8765/ws`(开发时经 Vite proxy `/ws`)
-- 消息为 JSON,每行一条;字段名全小写。
+## 1. Transport
 
-## client → server
+- A **same-origin WebSocket** at `/ws`. The client connects to
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`.
+- In production the gateway serves the static frontend and the `/ws` endpoint from the
+  same origin (`127.0.0.1:8765`); in development Vite proxies `/ws` to that port.
+- One JSON object per WebSocket message (`send_text`), no line framing.
+- Field names are lowercase.
 
-| t | 字段 | 语义 |
+## 2. client → server
+
+| `t` | fields | meaning |
 |---|---|---|
-| `input` | `text`, `mid?` | 用户输入(等价 stdin 一行);`mid` 为客户端消息 id,服务端按 mid 去重(断线重连补发同一 mid 不重复投递),回显 `user_input` 原样携带 mid |
-| `ping` | — | 心跳 |
+| `input` | `text`, `mid?` | One line of user input (equivalent to a line on stdin). `mid` is the client message id: the server dedups by it, so a `mid` re-sent after reconnect is delivered exactly once. The `user_input` echo carries the same `mid` back. |
+| `ping` | — | Heartbeat. Answered with `{"t":"pong","content":{}}`. |
 
-## 连接层约定(断线重连)
+## 3. Connection layer (heartbeat, reconnect, dedup)
 
-1. 检活只由心跳负责:client 每 15s 发 `ping`,4s 内无 `pong` 判死重连。
-2. **回执看门狗不踢线**:`input` 发出后 5s 内未收到对应 `user_input` 回显,客户端只撤销本地的 pending 状态——"回显慢"(回合繁忙/GIL 停顿)不是"消息丢失",踢线重发会导致同一条消息重复投递。
-3. 真正断线(onclose)时若回执未到 → 重连后以**同一 mid** 补发;服务端 ingest 按 mid 去重,保证恰好一次。stdin 入口 mid 为空,不参与去重。
+These rules are client- and gateway-owned and are unchanged in spirit from v1:
 
-## server → client
+1. **Liveness is the heartbeat's job.** The client sends `ping` every 15 s; if no `pong`
+   arrives within 4 s it treats the socket as dead and closes it (which triggers a
+   reconnect).
+2. **The acknowledgement watchdog never drops the line.** After sending `input` the
+   client arms a 5 s timer that only clears the local pending state. A slow echo (a busy
+   turn) is not a lost message; kicking the socket and re-sending would duplicate it.
+3. **Exactly-once on reconnect.** On a real close (`onclose`) with an input still
+   pending, the client reconnects (~1.2 s later) and re-sends that input with the **same
+   `mid`**. The gateway dedups by `mid` against a bounded cache (`dedup_cache_size`), so
+   the message is delivered once. A `mid`-less input (the stdin entry) is not deduped.
+4. **`seq` dedup.** Any event whose `seq` is `<=` the highest seen is dropped as replay.
+   `hello` is exempt: it is always let through.
+5. **`hello` starts the session.** On connect the gateway sends `hello` first, then
+   replays the bus **history ring** (up to `HISTORY_LIMIT` = 500 raw events) and the
+   client folds it. If `hello.content.boot` differs from the previous boot, the client
+   resets its `seq` baseline and clears the stream (the process was replaced).
 
-每条事件 = **信封字段**(顶层,由传输层/`sink` 填)+ `t`(类型判别)+ `content`(业务载荷)。
+> v1 claimed a 200-event *folded projection*. The code replays the raw 500-event ring
+> (`HISTORY_LIMIT` in `backend/nan_itself/events.py`) and the client folds it; v2 states
+> the real behaviour.
 
-信封字段:
+## 4. server → client
 
-| 字段 | 由谁填 | 语义 |
+Every event is the **envelope** (top-level, stamped by the transport / `sink`) plus `t`
+(the type discriminant) and `content` (the business payload):
+
+| field | filled by | meaning |
 |---|---|---|
-| `seq` | EventBus | 单调递增序号;前端按此去重历史重放 |
-| `ts` | EventBus | wall-clock 数值 epoch;前端在渲染/折叠边缘转成日期或时间(数值形式由 bus 统一加盖) |
-| `t` | 调用方 | **唯一**事件类型判别字段(扁平字符串) |
-| `id` | sink | 事件 id,UI 行关联键;调用方可显式提供以复用既有行,否则由 sink 生成 |
-| `boot_id` | sink | 进程唯一 id,`attach` 时记录;已设置则每条事件都带,未设置则不带该键 |
+| `seq` | `EventBus` | Monotonic counter. The client dedups history replay by it. |
+| `ts` | `EventBus` | Wall-clock epoch **seconds, numeric** (`time.time()`). The frontend turns it into a date or time only at the render/fold edge. |
+| `t` | caller | The **single** event-type discriminant (a flat string). |
+| `id` | `sink` | Event id — the UI row key. A caller may pass one to reuse an existing row; otherwise the sink generates it. |
+| `boot_id` | `sink` | Process-unique id recorded at `attach`. Present on every event once set; the key is absent otherwise. |
 
-`content` 规则:
+`content` rules:
 
-- 恒为一个对象;无载荷的事件也必须为 `{}`,绝不省略。
-- 承载该 `t` 的全部业务字段(不再是散落在顶层的 kwargs)。
-- 身份三键(见下)仅在 agent 上下文中出现。
+- It is **always an object**. An event with no payload still carries `{}` — never omitted.
+- It carries **all** of the `t`'s business fields (no kwargs scattered at the top level).
+- The identity keys (§5) appear only when the event has agent context.
 
-各 `t` 的 `content` 形状:
+### Events by `t`
 
-| t | 对应原语 | content | 语义 |
+| `t` | `content` | notes |
+|---|---|---|
+| `hello` | `{ boot, model, base_url, status: { state } }` | Handshake. `boot` is the process-unique id; a client seeing it change clears its stream and resets the `seq` baseline. **No `id`** (it does not go through the sink); `seq` is mandatory. |
+| `status` | `{ state: "idle" \| "working" \| "error" }` | Loop state-machine change. |
+| `user_input` | `{ text, mid? }` | Echo of accepted input (emitted only once it is in the Inbox). `mid` is returned verbatim. |
+| `output_started` | `{}` | A NAN text stream begins. |
+| `output_delta` | `{ text }` | Streaming increment (concatenate directly). |
+| `output_done` | `{ duration_s }` | Typing stopped. `duration_s` is a **number of seconds** (§8). |
+| `output_cancelled` | `{}` | The text stream turned out to be tool calls; retract that segment. |
+| `record_started` | `{ category, payload }` | A machine process begins (spinner). See §6. |
+| `record_detail` | `{ entries }` | Typed detail entries appended. See §7. |
+| `record_done` | `{ result?, duration_s? }` | Auto-fold. `duration_s` is a **number of seconds**. |
+| `record_failed` | `{ error: { type, message } }` | Stays expanded. `message` is prose (§9). |
+| `record_void` | `{}` | The record produced nothing user-visible; retract its row. |
+
+`pong` is the heartbeat reply, `{"t":"pong","content":{}}`; it takes no part in stream
+folding.
+
+### `id` association
+
+`record_started` returns a fresh (or caller-supplied) `id`; the same record's subsequent
+`record_detail` / `record_done` / `record_failed` / `record_void` reuse it.
+`output_started` works the same way for `output_delta` / `output_done` / `output_cancelled`.
+`record_void` and `output_cancelled` retract only the **most recent** same-`id` row: a
+same-`id` row from an older turn is untouched.
+
+**Dividers are not protocol events.** The frontend derives date separators itself from
+each event's numeric `ts` (inserting one when the local date changes).
+
+## 5. Identity keys (inside `content`)
+
+The three identity keys are placed in `content` by whichever side emits the event. When
+absent there is **no** agent context (module lifecycle, the gateway's `user_input` echo);
+the keys do not exist — they are not `null` (except `parent_hash`, which is explicitly
+`null` for the root).
+
+- `agent_hash` — the emitting agent's stable id.
+- `parent_hash` — the parent agent's `agent_hash`; `null` for the root.
+- `depth` — depth in the agent tree; `0` for the root.
+
+## 6. Record phases and categories
+
+A record is a four/five-event family keyed by `id`:
+
+```
+record_started  { category, payload: { ... } }
+record_detail   { entries: [ ... ] }
+record_done     { result?: {...}, duration_s?: number }
+record_failed   { error: { type, message } }
+record_void     { }
+```
+
+`category` is the semantic type of the record; `payload` is a **union discriminated on
+`category`**, so each category has its own typed fields (there is no shared `name` /
+`summary` display string any more).
+
+| old kind (v1) | category (v2) | emission site | `payload` fields |
 |---|---|---|---|
-| `hello` | — | `boot, model, base_url, status:{state}` | 握手;`boot` 为进程唯一 id,客户端检测到变化即清空本地流并重置 seq 基线。此事件无 `id`(不经 sink) |
-| `status` | Pulse | `state:"idle"\|"working"\|"error"` | 循环状态机变化 |
-| `user_input` | Message | `text`, `mid?` | 用户输入回显(进了 Inbox 才发);`mid` 原样回带 |
-| `record_started` | Record | `kind:"tool"\|"skill"\|"spawn"\|"sleep"\|"finish"\|"module"\|"agent"\|"target"\|"error"`, `name`, `summary?` | 机器过程开始(braille 转轮) |
-| `record_detail` | Record | `line`(html-free 纯文本) | 详节逐行追加 |
-| `record_done` | Record | `summary?`, `note?` | ✓ 自动折叠 |
-| `record_failed` | Record | `summary?` | ✗ 保持展开 |
-| `record_void` | Record | `{}` | 该记录无用户可见产出,撤回行 |
-| `output_started` | Message | `{}` | NAN 文本开始 |
-| `output_delta` | Message | `text` | 流式增量(直接拼接) |
-| `output_done` | Message | `duration` | 停止打字;信封 `ts` 为数值 epoch,前端渲染为人类可读;尾部 Note `✓ ts · duration` |
-| `output_cancelled` | Message | `{}` | 文本流中途出现 tool_call,撤回该段(非最终输出) |
+| `tool` | `tool_call` | `agent/core.py` (tool verbs) | `provider`, `tool`, `arguments` — the **raw argument object**, not pretty-printed text |
+| `skill` | `skill_invoke` | `agent/core.py` (skill verbs) | `skill`, optional `resource` |
+| `target` | `channel_write` | `agent/core.py` (channel verbs) | `module`, `channel`, optional `payload` |
+| `spawn`, and `agent` from `agent/verbs.py` | `subagent_spawn` | `agent/verbs.py` | `agent_id`, `depth`, `task` (prose) |
+| `agent` from `agent/core.py` | `subagent_report` | `agent/core.py` (report harvest) | `agent_id`, `task`, `status`, `body` (prose) |
+| `module` | `module_query` | `agent/core.py` (ambient module query) | — (no category-specific fields) |
+| `sleep` | `sleep` | `agent/core.py` (from the `sleep` verb) | `seconds` — a **number**, not a formatted string |
+| `finish` | `finish` | `agent/core.py` (from the `finish` verb) | — (no category-specific fields) |
+| anything else (v1 fallback `verb`) | `unknown` | `agent/core.py` (verb dispatch fallback) | `verb` — the original verb tool-name |
 
-`id` 的关联规则:`record_started` 返回新生成/指定的 id,后续同一记录的 `record_detail` /
-`record_done` / `record_failed` / `record_void` 复用该 id;`output_started` 同理,后接
-`output_delta` / `output_done` / `output_cancelled`。`record_void` 与 `output_cancelled` 只撤回
-最近一条同 id 的行,旧回合的同 id 行不受影响。
+> The old `agent` kind was overloaded: `agent/verbs.py` used it for a **subagent spawn**
+> while `agent/core.py` used it for a **harvested subagent report**. v2 splits them into
+> `subagent_spawn` and `subagent_report`.
 
-divider 不是协议事件:前端按每个事件的数值 `ts` 自行派生日期分隔(本地日期变化时插入)。
+## 7. Detail entries
 
-`pong` 是心跳应答,形状为 `{"t":"pong","content":{}}`,不参与上述流折叠。
+`record_detail.content.entries` is an array of typed entries. The four kinds replace the
+v1 free-text `line`:
 
-## 公共身份字段(content 携带)
+| entry | shape | replaces (v1) |
+|---|---|---|
+| text | `{ kind: "text", text }` | a plain line |
+| item | `{ kind: "item", text }` | the `· `-prefix convention: the frontend stripped the prefix (`frontend/app/src/design/RecordItem.tsx`) and dimmed the remainder. No backend site ever emitted that prefix, so the marker was dead defensive code; the typed entry retires it. |
+| field | `{ kind: "field", label, value }` | the `"id: x"` / `"task: y"` / `"status: z"` strings |
+| code | `{ kind: "code", text }` | the multi-line pretty-printed JSON block (today `json.dumps(..., indent=2)`) |
 
-身份三键由发出该事件的一方在 `content` 中携带;未携带即表示该事件无 agent 上下文
-(module 生命周期、gateway 的 `user_input` 回显)。未携带时,这三个键**不存在**(不是 `null`)。
+The frontend renders by entry `kind`; it never sniffs the text for `· `, `✓` or `✗`.
 
-- `agent_hash`:发出该事件的 agent 的稳定标识。
-- `parent_hash`:其父 agent 的 `agent_hash`;root agent 为 `null`。
-- `depth`:该 agent 在树上的深度;root 为 `0`。
+## 8. Numbers are numbers
 
-非 agent 事件(module 生命周期、gateway 的 `user_input` 回显)无 agent 上下文,不携带这三个键。
+Every duration on the wire is a **number of seconds**, never a pre-formatted string:
 
-## 约定
+- `output_done.content.duration_s`
+- `record_done.content.duration_s`
+- `sleep.payload.seconds`
 
-1. `id` 由 server 生成,单调递增;前端不生成 id。调用方也可显式提供 id 以关联既有行(如 `record_detail` 复用 `record_started` 的 id)。
-2. `record_detail.line` 为纯文本;前端可对 `·`、`✓`、`✗` 做轻量着色,不做 HTML 注入。
-3. verb 的 kind 映射:invoke_tool/list_tools/show_tool → `tool`,invoke_skill/list_skills/show_skill → `skill`,invoke_channels/list_channels/show_channels → `target`(glyph ⌖),spawn → `spawn`,sleep → `sleep`,finish → `finish`(glyph ⏻);未知 verb 落 `verb` 兜底(前端 glyph '•')。
-4. 子代理简报 = `record_started(kind:"spawn")` 的 detail;报告 = 独立 `record_started(kind:"agent", name:"report · <task>")`。
-5. 断线重连:client 重连后收到 `hello`,随后 server 重放最近 200 条事件的**折叠投影**(当前流快照),前端以快照重建流。
+The frontend formats them (units, decimals) at the render edge. The v1 formatted strings
+— `note` (`f"{…:.1f}s"` in `agent/core.py`) and `duration` (`f"{…:.1f}s"` in
+`agent/engine.py`) — are gone.
+
+## 9. The prose boundary — what stays a string
+
+Strings remain legitimate only for genuine prose: model output, user language, error
+messages, delegation instructions and report bodies. Concretely, the following are
+strings and **must not** be turned into display-formatted structures by the backend:
+
+- `output_delta.content.text` — model output.
+- `user_input.content.text` — user language.
+- `subagent_spawn.payload.task` — the model's delegation instruction.
+- `subagent_report.payload.body` — the child agent's report body.
+- `record_failed.content.error.message` — an error message (`error.type` is a machine
+  token, e.g. an exception class name; `message` is prose).
+- tool / skill result payloads — the callee's own text or data.
+
+Outside this list, if the backend finds itself choosing a label, a separator or a
+sentence, that is a design error: it belongs to the frontend.
+
+## 10. TypeScript contract
+
+The frontend-side mirror of this protocol (documentation only — the real file is
+`frontend/app/src/protocol.ts`):
+
+```ts
+export type StatusState = 'idle' | 'working' | 'error';
+
+export interface Status {
+  state: StatusState;
+}
+
+// Envelope: transport-layer fields stamped by the EventBus / sink.
+export interface Envelope {
+  seq?: number;
+  ts?: number;
+  id?: string;
+  boot_id?: string;
+}
+
+// Identity keys: carried inside `content` by the emitting side; absent when the
+// event has no agent context (the keys do not exist, they are not null).
+export interface Identity {
+  agent_hash?: string;
+  parent_hash?: string | null;
+  depth?: number;
+}
+
+interface Payload<T extends string, C> extends Envelope {
+  t: T;
+  id: string;
+  content: C & Identity;
+}
+
+// --- record categories -----------------------------------------------------
+
+export type RecordCategory =
+  | 'tool_call'
+  | 'skill_invoke'
+  | 'channel_write'
+  | 'subagent_spawn'
+  | 'subagent_report'
+  | 'module_query'
+  | 'sleep'
+  | 'finish'
+  | 'unknown';
+
+// The `payload` union is discriminated on `category`: narrowing `category`
+// narrows `payload` with it.
+export type RecordStarted =
+  | { category: 'tool_call';       payload: { provider: string; tool: string; arguments: Record<string, unknown> } }
+  | { category: 'skill_invoke';    payload: { skill: string; resource?: string } }
+  | { category: 'channel_write';   payload: { module: string; channel: string; payload?: unknown } }
+  | { category: 'subagent_spawn';  payload: { agent_id: string; depth: number; task: string } }
+  | { category: 'subagent_report'; payload: { agent_id: string; task: string; status: string; body: string } }
+  | { category: 'module_query';    payload: Record<string, never> }
+  | { category: 'sleep';           payload: { seconds: number } }
+  | { category: 'finish';          payload: Record<string, never> }
+  | { category: 'unknown';         payload: { verb: string } };
+
+// --- detail entries --------------------------------------------------------
+
+export type RecordEntry =
+  | { kind: 'text';  text: string }
+  | { kind: 'item';  text: string }
+  | { kind: 'field'; label: string; value: string }
+  | { kind: 'code';  text: string };
+
+// --- events ----------------------------------------------------------------
+
+// hello is the baseline handshake: it does not go through the sink (no `id`),
+// and `seq` is mandatory.
+export interface HelloEvent extends Envelope {
+  t: 'hello';
+  seq: number;
+  content: {
+    boot: string;
+    model: string;
+    base_url: string;
+    status: Status;
+  } & Identity;
+}
+
+export type ServerEvent =
+  | HelloEvent
+  | Payload<'status', { state: StatusState }>
+  | Payload<'user_input', { text: string; mid?: string }>
+  | Payload<'record_started', RecordStarted>
+  | Payload<'record_detail', { entries: RecordEntry[] }>
+  | Payload<'record_done', { result?: Record<string, unknown>; duration_s?: number }>
+  | Payload<'record_failed', { error: { type: string; message: string } }>
+  | Payload<'record_void', Identity>
+  | Payload<'output_started', Identity>
+  | Payload<'output_delta', { text: string }>
+  | Payload<'output_done', { duration_s: number }>
+  | Payload<'output_cancelled', Identity>;
+
+// mid: the client message id, used for ack matching and server-side dedup
+// (exactly-once under reconnect re-send).
+export type ClientEvent = { t: 'input'; text: string; mid?: string } | { t: 'ping' };
+```
+
+## 11. Migration
+
+What changes when this spec is implemented (no code is changed by this document):
+
+**Backend — keeps emitting, stops formatting.** The emission API and envelope are
+unchanged (`Sink.emit(t, content=…)` in `backend/nan_itself/events.py`); only the
+`content` shape changes:
+
+- `kind` + `name` + `summary` → `category` + typed `payload` (§6). `_RECORD_KINDS` in
+  `agent/core.py` becomes a verb → category table; the fallback becomes `unknown` with
+  `verb`.
+- `record_detail.line` (a string) → `entries[]` typed entries (§7). The `_pretty_args`
+  JSON block becomes a `code` entry; harvested `id: …` / `task: …` / `status: …` lines
+  become `field` entries.
+- Formatted durations (`note` in `agent/core.py`, `duration` in `agent/engine.py`) →
+  numbers (§8).
+- `_compact_result` — which today rewrites an MCP tool result into a display sentence —
+  stops reformatting; the raw result travels as prose/`code`.
+
+**Frontend — drops its string parsing.**
+
+- `frontend/app/src/design/RecordItem.tsx` loses its `line.startsWith('· ')` prefix
+  stripping and its numeric-highlight regex; both become unnecessary once entries are
+  typed and durations are numbers. Rendering switches to `entry.kind` + `category`.
+- The record `Item` in `frontend/app/src/state/store.ts` carries `category`/typed
+  entries instead of a `kind` string and a `detail: string[]`; `duration` changes type
+  from `string` to `number`.
+- `frontend/app/src/protocol.ts` adopts §10 and drops the v1 `error` kind (the backend
+  never emitted it) and the `verb` glyph fallback.
+
+**v1 corrections folded in above.** The rewritten spec does not carry forward: v1's
+`verb` kind with glyph `•` (not implemented), v1's 200-event folded replay claim (the
+code replays the raw 500-event ring), or any glyph table (glyphs/colours are
+frontend-owned). The `frontend/app/README.md` mock-replay description is out of scope
+for this document and is left for a separate fix.

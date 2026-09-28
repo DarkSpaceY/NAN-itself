@@ -1,25 +1,28 @@
-import type { ServerEvent, Status } from '../protocol';
+import type { RecordCategory, RecordEntry, RecordStarted, ServerEvent, Status } from '../protocol';
 
-// 流内条目 = 原语的运行时形态
-// key: 客户端自分配的唯一标识(React key 用它)。服务端 id 只保证
-//      单回合内唯一,不可直接作 React key——跨回合重复会引发
-//      复用错位/历史行被改写。
+// A stream row = the runtime shape of a primitive.
+// key: client-assigned unique id (used as the React key). The server `id` is
+//      only unique within a turn and must not be a React key directly — a
+//      reused id across turns would cause a mis-keyed remount.
 export type Item =
   | { k: 'divider'; id: string; key: string; label: string }
   | { k: 'user'; id: string; key: string; text: string; queued?: boolean }
-  | { k: 'nano'; id: string; key: string; text: string; ts?: number; duration?: string }
+  | { k: 'nano'; id: string; key: string; text: string; ts?: number; duration?: number }
   | {
       k: 'record';
       id: string;
       key: string;
-      kind: string;
+      // The typed record payload, discriminated on `category`; the renderer
+      // narrows `category` to reach the category-specific fields.
+      started: RecordStarted;
       glyph: string;
-      name: string;
-      summary?: string;
-      note?: string;
+      label: string;
       state: 'running' | 'done' | 'failed';
+      // seconds (from record_done.duration_s); formatted only at the render edge
+      duration?: number;
+      error?: { type: string; message: string };
       open: boolean;
-      detail: string[];
+      detail: RecordEntry[];
     };
 
 export interface Snapshot {
@@ -28,7 +31,7 @@ export interface Snapshot {
   model: string;
   baseUrl: string;
   seq: number;
-  // 前端自行派生 divider 的依据:上一个事件所属的本地日期标签
+  // Frontend-derived divider basis: the local date label of the last event
   lastDate: string | null;
 }
 
@@ -44,8 +47,45 @@ export const initialSnapshot: Snapshot = {
 let counter = 0;
 export const nextId = () => `c${++counter}`;
 
-// 渲染/折叠边缘才把数值时间戳变成日期标签(协议契约:传输层一律 epoch,
-// 后端不产生 divider 事件,前端按事件 ts 自行插入)
+// Presentation vocabulary owned by the frontend: category -> glyph.
+const GLYPH_BY_CATEGORY: Record<RecordCategory, string> = {
+  tool_call: '▸',
+  skill_invoke: '✦',
+  channel_write: '⌖',
+  subagent_spawn: '⧉',
+  subagent_report: '◈',
+  module_query: '◈',
+  sleep: '⏾',
+  finish: '⏻',
+  unknown: '▸',
+};
+
+// Human label derived from the typed payload (there is no backend `name` string).
+function recordLabel(s: RecordStarted): string {
+  switch (s.category) {
+    case 'tool_call':
+      return s.payload.tool;
+    case 'skill_invoke':
+      return s.payload.skill;
+    case 'channel_write':
+      return `${s.payload.module} · ${s.payload.channel}`;
+    case 'subagent_spawn':
+    case 'subagent_report':
+      return s.payload.agent_id;
+    case 'module_query':
+      return 'module';
+    case 'sleep':
+      return 'sleep';
+    case 'finish':
+      return 'finish';
+    case 'unknown':
+      return s.payload.verb;
+  }
+}
+
+// Render/fold edge only: turn a numeric timestamp into a date label (transport
+// stays epoch; the backend emits no divider event, the frontend derives them
+// from each event's numeric ts).
 const dateLabel = (ts: number) =>
   new Date(ts * 1000).toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -54,7 +94,8 @@ const dateLabel = (ts: number) =>
   });
 
 export function fold(s: Snapshot, e: ServerEvent): Snapshot {
-  // 日期分隔:任何带时间戳的事件跨天时先插一条 divider
+  // Date separator: insert a divider whenever an event with a timestamp crosses
+  // into a new local day.
   const ts = (e as { ts?: number }).ts;
 
   if (ts != null) {
@@ -86,15 +127,14 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
       return { ...s, items: [...s.items, { k: 'user', id: e.id, key: nextId(), text: e.content.text }] };
 
     case 'record_started': {
-      const kind = e.content.kind;
+      const started = { category: e.content.category, payload: e.content.payload } as RecordStarted;
       const item: Item = {
         k: 'record',
         id: e.id,
         key: nextId(),
-        kind,
-        glyph: kind === 'error' ? '✗' : kind === 'module' ? '◈' : kind === 'skill' ? '✦' : '▸',
-        name: e.content.name,
-        summary: e.content.summary,
+        started,
+        glyph: GLYPH_BY_CATEGORY[started.category],
+        label: recordLabel(started),
         state: 'running',
         open: false,
         detail: [],
@@ -103,13 +143,15 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
     }
 
     case 'record_detail':
+      // Entries arrive already typed; append them as-is.
       return mapRecord(s, e.id, (r) => ({
         ...r,
-        detail: [...r.detail, ...e.content.line.split('\n')],
+        detail: [...r.detail, ...e.content.entries],
       }));
 
     case 'record_void': {
-      // 只撤回最近一条同 id 记录:旧回合的同 id 行不许被动
+      // Retract only the most recent same-id record: an older turn's same-id row
+      // must stay untouched.
       const idx = findLastIndex(s.items, (it) => it.id === e.id && it.k === 'record');
       if (idx === -1) return s;
       return { ...s, items: [...s.items.slice(0, idx), ...s.items.slice(idx + 1)] };
@@ -120,8 +162,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
         ...r,
         state: 'done',
         glyph: '✓',
-        summary: e.content.summary ?? r.summary,
-        note: e.content.note ?? r.note,
+        duration: e.content.duration_s ?? r.duration,
         open: false,
       }));
 
@@ -130,7 +171,7 @@ export function fold(s: Snapshot, e: ServerEvent): Snapshot {
         ...r,
         state: 'failed',
         glyph: '✗',
-        summary: e.content.summary ?? r.summary,
+        error: e.content.error,
         open: true,
       }));
 
@@ -161,8 +202,9 @@ function findLastIndex(items: Item[], pred: (it: Item) => boolean): number {
   return -1;
 }
 
-// 只匹配"最近一条"同 id 条目:同一回合内 id 唯一,最近的必然是
-// 当前事件的目标;跨回合重复 id 时也不会误伤历史行。
+// Patch only the *most recent* same-id row: within a turn an id is unique, so
+// the last match is necessarily this event's target; a repeated id across turns
+// never touches a historical row.
 function patchLast(s: Snapshot, id: string, pred: (it: Item) => boolean, f: (it: Item) => Item): Snapshot {
   const idx = findLastIndex(s.items, (it) => it.id === id && pred(it));
   if (idx === -1) return s;

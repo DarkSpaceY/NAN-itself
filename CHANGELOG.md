@@ -43,6 +43,27 @@ once a stable release line starts.
   documentation writing standard was dropped, with its terminology
   glossary folded into
   [`docs/for-contributors/develop.md`](docs/for-contributors/develop.md).
+- Record stream (protocol v2): the backend no longer emits pre-rendered
+  display text. Records carry a semantic `category` with a typed
+  `payload`, details are typed entries (`text` / `item` / `field` /
+  `code`), and durations are numbers of seconds instead of formatted
+  strings; the frontend owns all rendering. See
+  [`frontend/PROTOCOL.md`](frontend/PROTOCOL.md).
+- Module registration is validate-then-install: the dependency graph is
+  checked on a copy before the record reaches any live table, so a
+  dependency cycle is rejected with nothing installed. Previously the
+  record was installed first and rolled back on failure, which left the
+  graph cyclic and stalled `start()`, `stop()` and reconciliation for
+  every module.
+- Module removal now releases the module: its state is persisted, its
+  `DataSpace` is dropped, and it is detached from every dependent, so a
+  dependent stops reading a removed module's last published values. A
+  later re-add restores the persisted state and re-attaches those
+  dependents. Previously the `DataSpace` lived on as a tombstone for the
+  rest of the process.
+- A module stop is bounded by a timeout, so a module whose `stop()`
+  blocks — or whose task swallows cancellation — can no longer stall the
+  module supervisor.
 
 ### Removed
 

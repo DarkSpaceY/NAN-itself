@@ -9,8 +9,12 @@ with another, keeping the DataSpace alive throughout:
     3 restore candidate private state   (fail -> reject)
     4 start candidate                  (fail -> reject)
     5 health-check candidate state     (fail -> reject)
-    6 swap pointer + rebuild graph     (fail -> roll back)
+    6 validate graph, then swap pointer (fail -> reject)
     7 commit: stop old, evict import, update books
+
+Every step that can fail does so BEFORE the pointer swap, so a
+rejected reload leaves the running generation untouched and
+nothing has to be rolled back.
 
 The candidate starts BEFORE the old generation stops, so there
 is a brief overlap window; single-writer ownership of the
@@ -65,6 +69,7 @@ from typing import Any
 
 from loguru import logger
 
+from . import deps as _deps
 from .model import (
     Module,
     ModuleRecord,
@@ -458,27 +463,22 @@ async def _hot_reload_locked(
         return
 
     # --------------------------------------------------------------
-    # Validate new dependency graph.
+    # Validate the new dependency graph BEFORE the swap.
     #
-    # Pure graph bookkeeping only.
+    # The trial graph is a copy, so a candidate that would close a
+    # cycle is rejected while the old generation is still installed
+    # and nothing has been written. No rollback is needed.
+    #
     # Existing Modules are NOT re-bound.
     # --------------------------------------------------------------
 
-    facade.modules[
-        old.id
-    ] = candidate
-
     try:
-        facade._refresh_dependency_graph()
+        _deps.validate_addition(
+            facade.modules,
+            candidate,
+        )
 
     except Exception as exc:
-        # Roll back pointer and graph metadata.
-        facade.modules[
-            old.id
-        ] = old
-
-        facade._rebuild_dependency_graph()
-
         await _stop_candidate(
             candidate
         )
@@ -500,6 +500,14 @@ async def _hot_reload_locked(
         )
 
         return
+
+    facade.modules[
+        old.id
+    ] = candidate
+
+    # Validation already proved the graph acyclic, so this is pure
+    # graph bookkeeping and cannot fail.
+    facade._rebuild_dependency_graph()
 
     # --------------------------------------------------------------
     # Commit.

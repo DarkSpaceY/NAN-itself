@@ -62,8 +62,11 @@ def test_caller_supplied_identity_lands_in_content():
     record_id = sink.emit(
         "record_started",
         content={
-            "kind": "agent",
-            "name": "some task",
+            "category": "subagent_report",
+            "payload": {
+                "agent_id": "abc12345",
+                "task": "some task",
+            },
             "agent_hash": "hash-a",
             "parent_hash": "hash-parent",
             "depth": 2,
@@ -92,7 +95,15 @@ def test_caller_supplied_identity_lands_in_content():
 
     assert event["content"]["depth"] == 2
 
-    assert event["content"]["kind"] == "agent"
+    assert (
+        event["content"]["category"]
+        == "subagent_report"
+    )
+
+    assert (
+        event["content"]["payload"]["agent_id"]
+        == "abc12345"
+    )
 
 
 def test_emission_without_identity_omits_the_keys():
@@ -128,16 +139,16 @@ def test_ids_stay_unique_across_emissions():
     first = sink.emit(
         "record_started",
         content={
-            "kind": "agent",
-            "name": "one",
+            "category": "sleep",
+            "payload": {"seconds": 1.0},
         },
     )
 
     second = sink.emit(
         "record_started",
         content={
-            "kind": "agent",
-            "name": "two",
+            "category": "sleep",
+            "payload": {"seconds": 2.0},
         },
     )
 
@@ -160,8 +171,8 @@ def test_unattached_sink_is_a_noop():
         sink.emit(
             "record_started",
             content={
-                "kind": "agent",
-                "name": "x",
+                "category": "finish",
+                "payload": {},
             },
         )
         == ""

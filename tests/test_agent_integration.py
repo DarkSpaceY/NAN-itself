@@ -492,26 +492,47 @@ def test_harvest_children_collects_and_mirrors_finished_reports():
 
     started = events[0]
 
-    assert started["content"]["kind"] == "agent"
-
     assert (
-        started["content"]["name"]
-        == "report · child task"
+        started["content"]["category"]
+        == "subagent_report"
     )
 
-    lines = [
-        event["content"]["line"]
+    assert started["content"]["payload"] == {
+        "agent_id": "abc12345",
+        "task": "child task",
+        "status": "completed",
+        "body": "child task result",
+    }
+
+    entries = [
+        entry
         for event in events
         if event["t"] == "record_detail"
+        for entry in event["content"]["entries"]
     ]
 
-    # The UI mirror reads the structured fields: no prompt
-    # frame, just the report's identity and its body.
-    assert lines == [
-        "id: abc12345",
-        "task: child task",
-        "status: completed",
-        "child task result",
+    # The UI mirror reads the structured entries: field entries
+    # for the report's identity, then the body as text lines.
+    assert entries == [
+        {
+            "kind": "field",
+            "label": "id",
+            "value": "abc12345",
+        },
+        {
+            "kind": "field",
+            "label": "task",
+            "value": "child task",
+        },
+        {
+            "kind": "field",
+            "label": "status",
+            "value": "completed",
+        },
+        {
+            "kind": "text",
+            "text": "child task result",
+        },
     ]
 
     done = [
@@ -520,7 +541,11 @@ def test_harvest_children_collects_and_mirrors_finished_reports():
         if event["t"] == "record_done"
     ][0]
 
-    assert done["content"]["summary"] == "report"
+    # The v1 display strings are gone: the record closes with its
+    # identity only, no summary/note.
+    assert "summary" not in done["content"]
+
+    assert "note" not in done["content"]
 
 
 def test_harvest_children_drops_finished_child_without_report():

@@ -324,9 +324,8 @@ class Agent:
                 sink.emit(
                     "record_started",
                     content={
-                        "kind": "module",
-                        "name": module_id,
-                        "summary": "",
+                        "category": "module_query",
+                        "payload": {},
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -355,7 +354,10 @@ class Agent:
                     "record_failed",
                     id=record_id,
                     content={
-                        "summary": "query failed",
+                        "error": {
+                            "type": "module_query_failed",
+                            "message": "Module query failed.",
+                        },
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -375,12 +377,14 @@ class Agent:
                 )
                 return
 
-            for line in result.splitlines():
+            entries = _result_entries(result)
+
+            if entries:
                 sink.emit(
                     "record_detail",
                     id=record_id,
                     content={
-                        "line": line,
+                        "entries": entries,
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -391,8 +395,7 @@ class Agent:
                 "record_done",
                 id=record_id,
                 content={
-                    "summary": "",
-                    "note": f"{duration:.1f}s",
+                    "duration_s": duration,
                     "agent_hash": self.agent_hash,
                     "parent_hash": self.parent_hash,
                     "depth": self.depth,
@@ -441,17 +444,19 @@ class Agent:
                 child.report,
             )
 
+            report = child.report
+
             record_id = (
                 sink.emit(
                     "record_started",
                     content={
-                        "kind": "agent",
-                        "name": (
-                            f"report · {child.report.task}"
-                            if child.report.task
-                            else "report"
-                        ),
-                        "summary": "",
+                        "category": "subagent_report",
+                        "payload": {
+                            "agent_id": report.agent_id,
+                            "task": report.task or "",
+                            "status": report.status,
+                            "body": report.body,
+                        },
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -460,29 +465,49 @@ class Agent:
             )
 
             if record_id:
-                for line in (
-                    f"id: {child.report.agent_id}",
-                    f"task: {child.report.task}",
-                    f"status: {child.report.status}",
-                    *child.report.body.splitlines(),
-                ):
-                    sink.emit(
-                        "record_detail",
-                        id=record_id,
-                        content={
-                            "line": line,
-                            "agent_hash": self.agent_hash,
-                            "parent_hash": self.parent_hash,
-                            "depth": self.depth,
-                        },
-                    )
+                entries: list[dict[str, Any]] = [
+                    {
+                        "kind": "field",
+                        "label": "id",
+                        "value": report.agent_id,
+                    },
+                    {
+                        "kind": "field",
+                        "label": "task",
+                        "value": report.task or "",
+                    },
+                    {
+                        "kind": "field",
+                        "label": "status",
+                        "value": report.status,
+                    },
+                ]
+
+                entries.extend(
+                    {
+                        "kind": "text",
+                        "text": line,
+                    }
+                    for line in (
+                        report.body or ""
+                    ).splitlines()
+                )
+
+                sink.emit(
+                    "record_detail",
+                    id=record_id,
+                    content={
+                        "entries": entries,
+                        "agent_hash": self.agent_hash,
+                        "parent_hash": self.parent_hash,
+                        "depth": self.depth,
+                    },
+                )
 
                 sink.emit(
                     "record_done",
                     id=record_id,
                     content={
-                        "summary": "report",
-                        "note": "",
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -535,35 +560,26 @@ class Agent:
         self,
         call,
     ) -> str:
-        record_id = sink.emit(
-            "record_started",
-            content={
-                "kind": _RECORD_KINDS.get(
-                    call.name,
-                    "verb",
-                ),
-                "name": call.name,
-                "summary": "",
-                "agent_hash": self.agent_hash,
-                "parent_hash": self.parent_hash,
-                "depth": self.depth,
-            },
-        )
+        # The spawn verb owns its own record (the subagent_spawn
+        # payload carries the child id/depth, which only the verb
+        # knows after it spawns); every other verb is mirrored
+        # here from the call itself.
+        record_id = ""
 
-        if record_id:
-            for line in _pretty_args(
-                call.arguments
-            ):
-                sink.emit(
-                    "record_detail",
-                    id=record_id,
-                    content={
-                        "line": line,
-                        "agent_hash": self.agent_hash,
-                        "parent_hash": self.parent_hash,
-                        "depth": self.depth,
-                    },
-                )
+        if call.name != SPAWN_TOOL_NAME:
+            category, payload = _record_spec(call)
+
+            record_id = sink.emit(
+                "record_started",
+                content={
+                    "category": category,
+                    "payload": payload,
+                    "agent_hash": self.agent_hash,
+                    "parent_hash": self.parent_hash,
+                    "depth": self.depth,
+                },
+            )
+
         started = time.time()
 
         try:
@@ -592,9 +608,10 @@ class Agent:
                     "record_failed",
                     id=record_id,
                     content={
-                        "summary": (
-                            f"{type(exc).__name__}"
-                        ),
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        },
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -604,14 +621,16 @@ class Agent:
             raise
 
         if record_id:
-            for line in _result_lines(
+            entries = _result_entries(
                 result_text
-            ):
+            )
+
+            if entries:
                 sink.emit(
                     "record_detail",
                     id=record_id,
                     content={
-                        "line": line,
+                        "entries": entries,
                         "agent_hash": self.agent_hash,
                         "parent_hash": self.parent_hash,
                         "depth": self.depth,
@@ -622,11 +641,8 @@ class Agent:
                 "record_done",
                 id=record_id,
                 content={
-                    "summary": _compact_result(
-                        result_text
-                    ),
-                    "note": (
-                        f"{time.time() - started:.1f}s"
+                    "duration_s": (
+                        time.time() - started
                     ),
                     "agent_hash": self.agent_hash,
                     "parent_hash": self.parent_hash,
@@ -1001,104 +1017,166 @@ class Agent:
 # ----------------------------------------------------------------------
 
 
-# UI record kind per verb: tools, skills, channels (targets),
-# spawning, sleeping and finishing each get their own kind;
-# anything else stays a generic verb.
-_RECORD_KINDS = {
-    INVOKE_TOOL_TOOL_NAME: "tool",
-    LIST_TOOLS_TOOL_NAME: "tool",
-    SHOW_TOOL_TOOL_NAME: "tool",
-    INVOKE_SKILL_TOOL_NAME: "skill",
-    LIST_SKILLS_TOOL_NAME: "skill",
-    SHOW_SKILL_TOOL_NAME: "skill",
-    INVOKE_CHANNELS_TOOL_NAME: "target",
-    LIST_CHANNELS_TOOL_NAME: "target",
-    SHOW_CHANNELS_TOOL_NAME: "target",
-    SPAWN_TOOL_NAME: "spawn",
+# Record category per verb: tools, skills, channels, sleeping and
+# finishing each map to their own semantic category; anything else
+# falls back to `unknown` carrying the original verb name. The spawn
+# verb builds its own `subagent_spawn` record in agent/verbs.py.
+_RECORD_CATEGORY = {
+    INVOKE_TOOL_TOOL_NAME: "tool_call",
+    LIST_TOOLS_TOOL_NAME: "tool_call",
+    SHOW_TOOL_TOOL_NAME: "tool_call",
+    INVOKE_SKILL_TOOL_NAME: "skill_invoke",
+    LIST_SKILLS_TOOL_NAME: "skill_invoke",
+    SHOW_SKILL_TOOL_NAME: "skill_invoke",
+    INVOKE_CHANNELS_TOOL_NAME: "channel_write",
+    LIST_CHANNELS_TOOL_NAME: "channel_write",
+    SHOW_CHANNELS_TOOL_NAME: "channel_write",
     SLEEP_TOOL_NAME: "sleep",
     FINISH_TOOL_NAME: "finish",
 }
 
 
-def _pretty_args(
-    arguments: Any,
-) -> list[str]:
-    if not arguments:
+def _as_str(
+    value: Any,
+) -> str:
+    """
+    The value as a string, or "" when it is not one.
+    """
+    return value if isinstance(value, str) else ""
+
+
+def _split_tool_name(
+    name: Any,
+) -> tuple[str, str]:
+    """
+    Split a 'provider/tool' composite; a bare name is the tool.
+    """
+    if not isinstance(name, str):
+        return "", ""
+
+    provider, separator, tool = name.partition("/")
+
+    if not separator:
+        return "", provider
+
+    return provider, tool
+
+
+def _record_spec(
+    call,
+) -> tuple[str, dict[str, Any]]:
+    """
+    The typed (category, payload) pair for one verb call, built from
+    the call's raw arguments. The payload mirrors the verb's own
+    parameter shape; the fallback is `unknown` with the verb name.
+    """
+    category = _RECORD_CATEGORY.get(
+        call.name,
+    )
+
+    arguments = (
+        call.arguments
+        if isinstance(call.arguments, dict)
+        else {}
+    )
+
+    if category == "tool_call":
+        provider, tool = _split_tool_name(
+            arguments.get("name")
+        )
+
+        inner = arguments.get("arguments")
+
+        return category, {
+            "provider": provider,
+            "tool": tool,
+            "arguments": (
+                inner if isinstance(inner, dict) else {}
+            ),
+        }
+
+    if category == "skill_invoke":
+        payload: dict[str, Any] = {
+            "skill": _as_str(
+                arguments.get("name")
+            ),
+        }
+
+        resource = _as_str(
+            arguments.get("path")
+        )
+
+        if resource:
+            payload["resource"] = resource
+
+        return category, payload
+
+    if category == "channel_write":
+        channel_payload: dict[str, Any] = {
+            "module": _as_str(
+                arguments.get("module")
+            ),
+            "channel": _as_str(
+                arguments.get("channel")
+            ),
+        }
+
+        if "payload" in arguments:
+            channel_payload["payload"] = (
+                arguments["payload"]
+            )
+
+        return category, channel_payload
+
+    if category == "sleep":
+        seconds = arguments.get("seconds")
+
+        if not isinstance(
+            seconds,
+            (int, float),
+        ) or isinstance(seconds, bool):
+            seconds = 0.0
+
+        return category, {"seconds": seconds}
+
+    if category == "finish":
+        return category, {}
+
+    return "unknown", {"verb": call.name}
+
+
+def _result_entries(
+    text: str,
+) -> list[dict[str, Any]]:
+    """
+    The typed detail entries for a verb/module result. A JSON body
+    travels as one `code` block (the typed form of the old
+    pretty-printed dump); any other text stays plain `text` lines.
+    """
+    if not text:
         return []
 
-    try:
-        return json.dumps(
-            arguments,
-            ensure_ascii=False,
-            indent=2,
-        ).splitlines()
+    stripped = text.strip()
 
-    except Exception:
-        return [
-            str(arguments)[:200]
-        ]
-
-
-def _result_lines(
-    text: str,
-) -> list[str]:
-    return (
-        (text or "").splitlines()
-    )
-
-
-def _compact_result(
-    text: str,
-) -> str:
-    flat = (
-        (text or "")
-        .replace("\n", " ")
-        .strip()
-    )
-
-    # MCP CallToolResult JSON: surface the human text,
-    # not the envelope.
-    if flat.startswith("{"):
+    if stripped[:1] in ("{", "["):
         try:
-            payload = json.loads(flat)
-
-            if isinstance(
-                payload,
-                dict,
-            ):
-                parts = [
-                    str(
-                        block.get(
-                            "text",
-                            "",
-                        )
-                    )
-                    for block in (
-                        payload.get(
-                            "content",
-                            [],
-                        )
-                    )
-                    if (
-                        isinstance(
-                            block,
-                            dict,
-                        )
-                        and block.get(
-                            "type"
-                        )
-                        == "text"
-                    )
-                ]
-
-                if parts:
-                    flat = (
-                        " ".join(
-                            parts
-                        ).strip()
-                    )
+            json.loads(stripped)
 
         except Exception:
             pass
 
-    return flat
+        else:
+            return [
+                {
+                    "kind": "code",
+                    "text": text,
+                }
+            ]
+
+    return [
+        {
+            "kind": "text",
+            "text": line,
+        }
+        for line in text.splitlines()
+    ]
