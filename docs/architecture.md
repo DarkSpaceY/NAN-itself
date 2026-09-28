@@ -107,7 +107,7 @@ engine asks for at every turn start. The machinery here
 - **channels** (`model.py`): modules that declare a `channels` mapping
   on the class expose downlink endpoints the model reaches through the
   `list_channels` / `show_channels` / `invoke_channels` verbs; see
-  [design/reactive-modules.md](design/reactive-modules.md).
+  [modules.md](modules.md) for the channel contract.
 
 Module-side contracts: capture/inference work runs on daemon threads
 with interval gating; the per-turn surface is a pure `ask()`

@@ -191,9 +191,8 @@ NAN-itself/
 | [Architecture](docs/architecture.md) | Repo-mirrored tour: agent core, tool runtime, modules, skills, security model |
 | [Configuration](docs/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
 | [Development](docs/development.md) | Setup, conventions, adding tools and modules |
-| [Reactive modules design](docs/design/reactive-modules.md) | The channel downlink design |
 | [Tools](docs/tools.md) | Built-in tool reference *(placeholder)* |
-| [Modules](docs/modules.md) | Built-in module reference *(placeholder)* |
+| [Modules](docs/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
 
 ## Built-in tools
 

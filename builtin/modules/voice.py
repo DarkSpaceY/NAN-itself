@@ -4,7 +4,7 @@
 Voice: the first bidirectional (reactive) builtin Module.
 
 Perceives speech, decides, and acts -- speaking -- through the
-say channel downlink (docs/design/voice.md). The audio module
+say channel downlink. The audio module
 owns the microphone and publishes a rolling PCM ring; voice is a
 downstream consumer (requires = ["audio"]) and owns everything
 language: VAD endpointing, STT, the semantic/surface split
