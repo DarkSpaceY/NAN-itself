@@ -640,7 +640,7 @@ import asyncio
 from pathlib import Path
 
 
-class Calculator(LocalToolProvider):
+class Calculator(ToolSet):
     id = "calc"
 
     @tool
@@ -659,7 +659,7 @@ class Calculator(LocalToolProvider):
 LOCAL_TOOL_V2 = """
 # @tool
 
-class Calculator(LocalToolProvider):
+class Calculator(ToolSet):
     id = "calc"
 
     @tool
@@ -986,6 +986,8 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
 
     async def fake_connect(
         spec,
+        *,
+        timeout=None,
     ):
         generation = len(
             sessions

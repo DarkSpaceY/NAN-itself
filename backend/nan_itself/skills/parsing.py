@@ -169,39 +169,74 @@ def validate_description(
         )
 
 
-def resource_files(
-    directory: Path,
+def skill_files(
+    root: Path,
 ) -> tuple[Path, ...]:
     """
-    Enumerate bundled resource files as lazy paths.
+    Enumerate every file belonging to a Skill.
 
-    Hidden entries (dot-prefixed path segments) are excluded;
-    ordering is stable.
+    The protocol fixes only SKILL.md itself; scripts/,
+    references/ and assets/ are conventions, not the
+    exhaustive surface. A Skill directory may contain
+    arbitrary additional files and folders and all of them
+    belong to the Skill.
+
+    Hidden entries (dot-prefixed path segments) and
+    __pycache__ are excluded; ordering is stable.
     """
-    if not directory.is_dir():
+    if not root.is_dir():
         return ()
 
     return tuple(
         sorted(
             path.resolve()
-            for path in directory.rglob("*")
+            for path in root.rglob("*")
             if path.is_file()
             and not any(
                 part.startswith(".")
+                or part == "__pycache__"
                 for part in path.relative_to(
-                    directory
+                    root
                 ).parts
             )
         )
     )
 
 
-def fingerprint(
-    path: Path,
+def directory_fingerprint(
+    root: Path,
 ) -> tuple[int, int]:
-    stat = path.stat()
+    """
+    Aggregate change fingerprint over every Skill file.
+
+    A single-file fingerprint would miss edits to bundled
+    resources, so the whole directory is folded into one
+    value: summed mtimes and sizes plus the file count
+    (so additions and removals are detected too).
+    """
+    files = skill_files(root)
+
+    if not files:
+        return (0, 0)
+
+    total_mtime = 0
+
+    total_size = 0
+
+    for path in files:
+        try:
+            stat = path.stat()
+
+        except OSError:
+            continue
+
+        total_mtime += stat.st_mtime_ns
+
+        total_size += stat.st_size
+
+    count = len(files)
 
     return (
-        stat.st_mtime_ns,
-        stat.st_size,
+        total_mtime + count,
+        total_size + count,
     )

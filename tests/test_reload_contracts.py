@@ -49,7 +49,7 @@ def _write_tool(
     path.write_text(
         f"""# @tool
 
-class Provider(LocalToolProvider):
+class Provider(ToolSet):
     id = {provider_id!r}
 
     @tool
@@ -868,7 +868,7 @@ def test_module_reload_does_not_rebind_unrelated_module(
     # Strongest isolation assertion.
     #
     # hot_reload() must bind ONLY the candidate:
-    # _rebuild_dependency_graph(bind=False) must not re-bind other
+    # _rebuild_dependency_graph() must not re-bind other
     # modules, so "b" never appears in bind_calls.
     # ------------------------------------------------------------------
 

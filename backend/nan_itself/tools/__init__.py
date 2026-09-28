@@ -14,7 +14,7 @@ Import from this package, never from sibling modules.
 
 from .local import (
     LocalToolMethod,
-    LocalToolProvider,
+    ToolSet,
     tool,
 )
 from .provider import (
@@ -39,7 +39,7 @@ from .spec import (
 __all__ = [
     # local backend framework
     "LocalToolMethod",
-    "LocalToolProvider",
+    "ToolSet",
     "tool",
     # provider layer
     "Provider",

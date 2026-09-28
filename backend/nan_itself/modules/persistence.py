@@ -19,21 +19,6 @@ from typing import Any
 
 
 
-def ensure_data_dirs(
-    private_dir: Path,
-    dataspace_dir: Path,
-) -> None:
-    private_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    dataspace_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-
 def private_state_path(
     private_dir: Path,
     module_id: str,

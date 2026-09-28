@@ -31,7 +31,7 @@ strict mode).
   every source file is a single hot-reloadable entity:
   - `builtin/tools/mcps/*.yaml` — one stdio MCP server per file
     (`name` / `command` / `args` / `env` / `cwd`).
-  - `builtin/tools/local/*.py` — one `LocalToolProvider` subclass per
+  - `builtin/tools/local/*.py` — one `ToolSet` subclass per
     file, with a `# @tool` header within the first 20 lines.
 - **Local tool methods** are decorated with `@tool`, must be fully
   type-annotated (the JSON schema derives from the annotations), and may
@@ -78,7 +78,7 @@ from __future__ import annotations
 from typing import Any
 
 
-class MyProvider(LocalToolProvider):
+class MyProvider(ToolSet):
 
     id = "<name>"
 
@@ -92,7 +92,7 @@ class MyProvider(LocalToolProvider):
         ...
 ```
 
-`LocalToolProvider`, `@tool`, `text_result` and `error_result` are
+`ToolSet`, `@tool`, `text_result` and `error_result` are
 injected into the module namespace by the loader; the file needs no
 framework imports to hot-reload.
 

@@ -1,8 +1,8 @@
 """
-Workspace module discovery primitives.
+Module source discovery primitives.
 
 Header sniffing, change fingerprints, dynamic import of a
-workspace file and Module class validation. Pure functions.
+module file and Module class validation. Pure functions.
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def import_module_class(
     ModuleType,
 ]:
     """
-    Import a workspace module file.
+    Import a module source file.
 
     Returns the single concrete Module subclass it defines,
     the synthetic module name it was imported under, and the
@@ -130,7 +130,7 @@ def import_module_class(
     ).hexdigest()[:12]
 
     module_name = (
-        f"_workspace_module_"
+        f"_dynamic_module_"
         f"{path.stem}_"
         f"{digest}"
     )

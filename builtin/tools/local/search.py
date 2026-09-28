@@ -56,7 +56,7 @@ def _uvx_command() -> str:
     return resolved
 
 
-class SearchProvider(LocalToolProvider):
+class SearchProvider(ToolSet):
 
     id = "search"
 

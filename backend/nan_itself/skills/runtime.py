@@ -27,12 +27,13 @@ from typing import Iterable
 from nan_itself.utils import paths as _paths
 
 from .model import (
+    SKILL_FILENAME,
     SkillMetadata,
     UnknownSkillError,
     SkillValidationError,
 )
 from .parsing import (
-    resource_files,
+    skill_files,
 )
 from .registry import (
     SkillRecord,
@@ -49,7 +50,15 @@ _SCRIPT_COMMANDS: dict[str, tuple[str, ...]] = {
     ".js": ("node",),
 }
 
-RESOURCE_GROUPS = ("scripts", "references", "assets")
+# The protocol's conventional resource folders. They are
+# listed first in resource_paths() but are NOT exhaustive:
+# any other folder or root-level file a skill ships is
+# listed under its own group.
+PROTOCOL_GROUPS = (
+    "scripts",
+    "references",
+    "assets",
+)
 
 
 class SkillRuntime:
@@ -77,13 +86,13 @@ class SkillRuntime:
     ) -> None:
         project_root = _paths.repo_root()
 
-        self.builtin_skills = (
+        self.builtin_skills_dir = (
             project_root
             / "builtin"
             / "skills"
         ).resolve()
 
-        self.workspace_skills = (
+        self.workspace_skills_dir = (
             project_root
             / "workspace"
             / "skills"
@@ -113,8 +122,8 @@ class SkillRuntime:
         """
         self._registry.discover_roots(
             (
-                self.builtin_skills,
-                self.workspace_skills,
+                self.builtin_skills_dir,
+                self.workspace_skills_dir,
             )
         )
 
@@ -165,21 +174,55 @@ class SkillRuntime:
         name: str,
     ) -> dict[str, tuple[str, ...]]:
         """
-        Relative paths of one Skill's bundled resources,
-        grouped by folder.
+        Relative paths of one Skill's bundled files,
+        grouped by top-level directory.
+
+        The protocol folders (scripts/references/assets)
+        are conventions, not the exhaustive surface: any
+        additional folder or root-level file the skill
+        ships is listed under its own group. SKILL.md
+        itself is not a resource.
         """
         record = self._record(name)
 
-        return {
-            group: tuple(
+        groups: dict[str, list[str]] = {}
+
+        for path in skill_files(
+            record.root
+        ):
+            relative = (
                 path.relative_to(
                     record.root
                 ).as_posix()
-                for path in resource_files(
-                    record.root / group
-                )
             )
-            for group in RESOURCE_GROUPS
+
+            if relative == SKILL_FILENAME:
+                continue
+
+            top = relative.split("/", 1)[0]
+
+            groups.setdefault(
+                top, []
+            ).append(relative)
+
+        ordered = sorted(
+            groups.items(),
+            key=lambda item: (
+                (
+                    0,
+                    PROTOCOL_GROUPS.index(
+                        item[0]
+                    ),
+                )
+                if item[0]
+                in PROTOCOL_GROUPS
+                else (1, item[0])
+            ),
+        )
+
+        return {
+            group: tuple(paths)
+            for group, paths in ordered
         }
 
     async def invoke(

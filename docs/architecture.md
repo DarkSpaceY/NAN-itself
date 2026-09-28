@@ -74,7 +74,7 @@ layouts — builtin (`builtin/tools/`) and workspace
 - **One file = one provider.** An MCP YAML file declares exactly one
   stdio server (`name` / `command` / `args` / `env` / `cwd`; a relative
   `cwd` is repo-anchored, never process-cwd-anchored). A local Python
-  file contains exactly one `LocalToolProvider` subclass, marked with a
+  file contains exactly one `ToolSet` subclass, marked with a
   `# @tool` header in its first 20 lines.
 - **Reload transaction.** Replacement workers are first started as
   unregistered candidates; only after a candidate is fully connected is

@@ -34,7 +34,7 @@ def _write_tool(
     path.write_text(
         f"""# @tool
 
-class Provider(LocalToolProvider):
+class Provider(ToolSet):
     id = {provider_id!r}
 
 {body}
@@ -224,7 +224,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
     assert old.instance.stop_calls == 0
 
     assert (
-        facade._workspace_load_errors.get(
+        facade._source_load_errors.get(
             source.resolve()
         )
         is not None
@@ -303,7 +303,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
         assert old.instance.stop_calls == 0
 
         assert (
-            facade._workspace_load_errors.get(
+            facade._source_load_errors.get(
                 source.resolve()
             )
             is not None
@@ -384,7 +384,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
     assert old.instance.stop_calls == 0
 
     assert (
-        facade._workspace_load_errors.get(
+        facade._source_load_errors.get(
             source.resolve()
         )
         is not None

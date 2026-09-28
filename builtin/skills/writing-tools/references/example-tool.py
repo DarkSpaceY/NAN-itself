@@ -5,10 +5,10 @@ to show the full local-provider contract.
 
 Annotated example of a local Python tool provider:
 - `# @tool` header in the first 20 lines (before the docstring),
-- exactly one LocalToolProvider subclass with a unique `id`,
+- exactly one ToolSet subclass with a unique `id`,
 - @tool methods fully annotated (schema derives from annotations),
 - docstring with an Args: section for every parameter,
-- no framework imports: LocalToolProvider / @tool / text_result /
+- no framework imports: ToolSet / @tool / text_result /
   error_result are injected into the file namespace by the loader.
 """
 
@@ -18,7 +18,7 @@ import hashlib
 from typing import Any
 
 
-class DigestProvider(LocalToolProvider):
+class DigestProvider(ToolSet):
 
     id = "digest"
 

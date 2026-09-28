@@ -3,7 +3,7 @@ name: writing-tools
 description: >-
   How to write a tool provider for NAN-itself: a local Python provider file
   in builtin/tools/local/ or workspace/tools/local/ (# @tool header, one
-  LocalToolProvider subclass, @tool methods with type-annotation-derived
+  ToolSet subclass, @tool methods with type-annotation-derived
   schema), or an MCP server YAML in tools/mcps/. Use when the user asks to
   create, fix, or extend a tool.
 ---
@@ -20,9 +20,9 @@ File: `tools/local/<name>.py`.
 
 - First 20 lines must contain the literal header `# @tool` (convention:
   line 1, before the docstring).
-- Exactly one `LocalToolProvider` subclass per file, with a unique
+- Exactly one `ToolSet` subclass per file, with a unique
   ClassVar `id`.
-- `LocalToolProvider`, `@tool`, `text_result` and `error_result` are
+- `ToolSet`, `@tool`, `text_result` and `error_result` are
   **injected** into the file namespace — the file needs no framework
   imports to hot-reload.
 
@@ -35,7 +35,7 @@ from __future__ import annotations
 from typing import Any
 
 
-class MyProvider(LocalToolProvider):
+class MyProvider(ToolSet):
 
     id = "<name>"
 

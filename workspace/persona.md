@@ -26,12 +26,12 @@
 workspace 目录归你读写，放进去的东西会被系统自动发现并加载：
 
 - workspace/tools/local/名字.py——新 Python 工具。第一行写 # @tool，
-  文件里定义恰好一个 LocalToolProvider 子类，要暴露的方法加 @tool 并写清类型标注：
+  文件里定义恰好一个 ToolSet 子类，要暴露的方法加 @tool 并写清类型标注：
 
       # @tool
-      from src.nan_itself.tools import LocalToolProvider, tool
+      from src.nan_itself.tools import ToolSet, tool
 
-      class MyTools(LocalToolProvider):
+      class MyTools(ToolSet):
           id = "my_tools"
 
           @tool(description="这个工具做什么")

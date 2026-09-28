@@ -1,7 +1,7 @@
 """
 Local Python backend.
 
-One concrete LocalToolProvider subclass plays the same role as
+One concrete ToolSet subclass plays the same role as
 one MCP server: it exposes a group of sub-tools that route
 switches as a block.
 
@@ -10,11 +10,12 @@ This module owns:
     - the @tool decorator and method collection
     - JSON schema derivation from type hints
     - class validation for builtin registration
-    - dynamic import of workspace provider files
+    - dynamic import of local tool provider files
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import sys
@@ -29,7 +30,11 @@ from typing import (
 )
 
 from loguru import logger
-from pydantic import BaseModel, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    create_model,
+)
 
 import mcp.types as types
 
@@ -54,7 +59,7 @@ _LOCAL_TOOL_MARKER = "_nan_local_tool"
 @dataclass(frozen=True)
 class LocalToolMethod:
     """
-    One method of a LocalToolProvider exposed as a tool.
+    One method of a ToolSet exposed as a tool.
 
     `input_model` is a pydantic model derived from the method
     signature. It provides both the JSON schema handed to models
@@ -87,8 +92,26 @@ class LocalToolMethod:
             arguments or {}
         )
 
-        result = self.handler(
-            **validated.model_dump()
+        kwargs = validated.model_dump()
+
+        if (
+            inspect.iscoroutinefunction(
+                self.handler
+            )
+        ):
+            return await self.handler(
+                **kwargs
+            )
+
+        # A synchronous handler must never run on the event
+        # loop: one blocking call (time.sleep, requests, ...)
+        # would freeze every tool, module and agent, and the
+        # runtime's tool_timeout could not fire. Offload it
+        # to the default thread pool. If a sync handler
+        # returns an awaitable it is awaited back on the loop.
+        result = await asyncio.to_thread(
+            self.handler,
+            **kwargs,
         )
 
         if inspect.isawaitable(result):
@@ -143,7 +166,7 @@ def tool(
     return decorate
 
 
-class LocalToolProvider:
+class ToolSet:
     """
     Base class for in-process Python class tool providers.
     """
@@ -165,8 +188,16 @@ class LocalToolProvider:
     ) -> dict[str, LocalToolMethod]:
         collected: dict[str, LocalToolMethod] = {}
 
-        # Walk the MRO base-first so inherited tools register
-        # before overridden ones and source order is preserved.
+        # Track which class registered each tool name so a
+        # subclass override can be distinguished from a
+        # genuine duplicate.
+        owners: dict[str, type] = {}
+
+        # Walk the MRO base-first: inherited tools register
+        # first and a subclass that re-declares @tool on an
+        # override replaces the base version. Two @tool
+        # methods with the same name in ONE class remain an
+        # error.
         for klass in reversed(
             type(self).__mro__
         ):
@@ -192,7 +223,10 @@ class LocalToolProvider:
                     marker,
                 )
 
-                if method.name in collected:
+                if (
+                    owners.get(method.name)
+                    is klass
+                ):
                     raise ValueError(
                         f"Local tool provider "
                         f"{type(self).__name__} "
@@ -200,7 +234,11 @@ class LocalToolProvider:
                         f"'{method.name}'"
                     )
 
-                collected[method.name] = method
+                collected[method.name] = (
+                    method
+                )
+
+                owners[method.name] = klass
 
         return collected
 
@@ -316,6 +354,12 @@ class LocalToolProvider:
         return create_model(
             f"{type(self).__name__}{model_name}"
             "Input",
+            # Unknown argument names are a model mistake and
+            # must surface as a validation error, not be
+            # silently ignored while defaults apply.
+            __config__=ConfigDict(
+                extra="forbid"
+            ),
             **fields,
         )
 
@@ -366,14 +410,14 @@ def validate_class(
         isinstance(cls, type)
         and issubclass(
             cls,
-            LocalToolProvider,
+            ToolSet,
         )
-        and cls is not LocalToolProvider
+        and cls is not ToolSet
         and not inspect.isabstract(cls)
     ):
         raise TypeError(
             "Local tool provider must be a "
-            "concrete LocalToolProvider subclass"
+            "concrete ToolSet subclass"
         )
 
     provider_id = getattr(
@@ -415,11 +459,11 @@ def has_tool_header(
 def load_class_from_file(
     path: Path,
 ) -> tuple[
-    type[LocalToolProvider],
+    type[ToolSet],
     str,
 ]:
     """
-    Import a workspace provider file and extract its class.
+    Import a local tool provider file and extract its class.
 
     Returns the class plus the synthetic module name it was
     imported under, so callers can evict it from sys.modules
@@ -433,7 +477,7 @@ def load_class_from_file(
     ).hexdigest()[:12]
 
     module_name = (
-        f"_workspace_tool_"
+        f"_dynamic_tool_"
         f"{path.stem}_"
         f"{digest}"
     )
@@ -475,7 +519,7 @@ def load_class_from_file(
     # Inject the local-tool vocabulary so hot-reload files work
     # without any nan_itself imports. An explicit import of the
     # same name simply shadows the injection.
-    module.__dict__["LocalToolProvider"] = LocalToolProvider
+    module.__dict__["ToolSet"] = ToolSet
 
     module.__dict__["tool"] = tool
 
@@ -511,9 +555,9 @@ def load_class_from_file(
             == module.__name__
             and issubclass(
                 cls,
-                LocalToolProvider,
+                ToolSet,
             )
-            and cls is not LocalToolProvider
+            and cls is not ToolSet
             and not inspect.isabstract(cls)
         )
     ]
@@ -526,7 +570,7 @@ def load_class_from_file(
 
         raise RuntimeError(
             f"{path} must contain exactly "
-            f"one concrete LocalToolProvider; "
+            f"one concrete ToolSet; "
             f"found {len(candidates)}"
         )
 
@@ -538,7 +582,7 @@ def load_class_from_file(
 
 def build_provider(
     spec: ProviderSpec,
-    cls: type[LocalToolProvider],
+    cls: type[ToolSet],
 ) -> Provider:
     instance = cls()
 

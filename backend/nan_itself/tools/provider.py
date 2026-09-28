@@ -7,7 +7,7 @@ One Provider wraps exactly one active backend:
         stack + session (stdio child process)
 
     kind="local":
-        instance (in-process LocalToolProvider object)
+        instance (in-process ToolSet object)
 
 `tools` is the cached tool-definition table shared by views.
 """
@@ -50,7 +50,7 @@ class Provider:
     stack: AsyncExitStack | None = None
     session: Any | None = None
 
-    # In-process LocalToolProvider instance. Deliberately duck-typed
+    # In-process ToolSet instance. Deliberately duck-typed
     # so the provider layer does not depend on the local backend.
     instance: Any | None = None
 

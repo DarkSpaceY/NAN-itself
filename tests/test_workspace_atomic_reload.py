@@ -201,6 +201,8 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
 
         async def fake_connect(
             spec,
+            *,
+            timeout=None,
         ):
             return make_mcp_provider(
                 spec,
@@ -329,7 +331,7 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
         source.write_text(
             """# @tool
 
-class Provider(LocalToolProvider):
+class Provider(ToolSet):
     id = "example"
 
     @tool
@@ -355,7 +357,7 @@ class Provider(LocalToolProvider):
             source.write_text(
                 """# @tool
 
-class Provider(LocalToolProvider):
+class Provider(ToolSet):
     id = "example"
 
     @tool
@@ -376,7 +378,7 @@ class Provider(LocalToolProvider):
             source.write_text(
                 """# @tool
 
-class Provider(LocalToolProvider):
+class Provider(ToolSet):
     id = "example"
 
     @tool
@@ -587,7 +589,7 @@ class Example(Module):
 
         # Initial scan/register.
         await facade._scan_module_root(
-            facade.workspace_modules
+            facade.workspace_modules_dir
         )
 
         old = (
@@ -612,7 +614,7 @@ class Example(Module):
         )
 
         await facade._scan_module_root(
-            facade.workspace_modules
+            facade.workspace_modules_dir
         )
 
         current = (
@@ -656,7 +658,7 @@ class Example(Module):
         )
 
         await facade._scan_module_root(
-            facade.workspace_modules
+            facade.workspace_modules_dir
         )
 
         new = (
@@ -687,6 +689,85 @@ class Example(Module):
                 await task
             except asyncio.CancelledError:
                 pass
+
+    run(
+        scenario()
+    )
+
+
+def test_module_losing_header_is_unregistered(
+    tmp_path,
+    monkeypatch,
+):
+    """
+    Stripping the `# @module` header must unregister the Module.
+
+    The file still exists, so this is not a deletion; but it is no
+    longer a Module source either. A stale record must not survive.
+    """
+
+    monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
+
+    async def scenario():
+        workspace = (
+            tmp_path / "workspace" / "modules"
+        )
+
+        workspace.mkdir(
+            parents=True
+        )
+
+        source = workspace / "example.py"
+
+        source.write_text(
+            """# @module
+import asyncio
+
+class Example(Module):
+    id = "example"
+
+    async def start(self):
+        await asyncio.Event().wait()
+""",
+            encoding="utf-8",
+        )
+
+        facade = Facade()
+
+        await facade._scan_module_root(
+            facade.workspace_modules_dir
+        )
+
+        assert (
+            facade._find_record_by_source(
+                source
+            )
+            is not None
+        )
+
+        # Same file, header removed.
+        source.write_text(
+            """import asyncio
+
+class Example(Module):
+    id = "example"
+
+    async def start(self):
+        await asyncio.Event().wait()
+""",
+            encoding="utf-8",
+        )
+
+        await facade._scan_module_root(
+            facade.workspace_modules_dir
+        )
+
+        assert (
+            facade._find_record_by_source(
+                source
+            )
+            is None
+        )
 
     run(
         scenario()

@@ -31,8 +31,9 @@ from .model import (
     SkillMetadata,
     SkillValidationError,
 )
+
 from .parsing import (
-    fingerprint,
+    directory_fingerprint,
     read_metadata,
 )
 
@@ -154,12 +155,8 @@ class SkillRegistry:
         for skill_dir in sorted(
             current
         ):
-            skill_file = (
-                skill_dir / SKILL_FILENAME
-            )
-
-            fp = fingerprint(
-                skill_file
+            fp = directory_fingerprint(
+                skill_dir
             )
 
             previous = (

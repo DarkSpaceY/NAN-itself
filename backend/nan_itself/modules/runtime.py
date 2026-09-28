@@ -67,8 +67,6 @@ class Facade:
         even when A declares them in `requires`.
     """
 
-    _DELIVERY_TASKS: set = set()
-
     def __init__(
         self,
         *,
@@ -90,7 +88,7 @@ class Facade:
             / "modules"
         ).resolve()
 
-        self.workspace_modules = (
+        self.workspace_modules_dir = (
             project_root
             / "workspace"
             / "modules"
@@ -138,14 +136,14 @@ class Facade:
             set[str],
         ] = {}
 
-        # workspace file -> latest fingerprint
-        self._workspace_fingerprints: dict[
+        # module source file -> latest fingerprint
+        self._source_fingerprints: dict[
             Path,
             tuple[int, int],
         ] = {}
 
-        # workspace file -> last load error for fingerprint
-        self._workspace_load_errors: dict[
+        # module source file -> last load error for fingerprint
+        self._source_load_errors: dict[
             Path,
             BaseException,
         ] = {}
@@ -153,6 +151,13 @@ class Facade:
         self._supervisor_task: (
             asyncio.Task[None] | None
         ) = None
+
+        # Strong references to running fire-and-forget
+        # delivery tasks so they are not garbage-collected
+        # mid-flight.
+        self._delivery_tasks: set[
+            asyncio.Task[None]
+        ] = set()
 
         self._wake = asyncio.Event()
 
@@ -168,19 +173,13 @@ class Facade:
 
         self._stopping = False
 
-        self._ensure_data_dirs()
-
         # Builtin and workspace module files share one identical
         # hot-reload discovery path.
         await self._scan_modules()
 
         # Graph construction is pure bookkeeping.
         # It must not re-bind already existing instances.
-        self._rebuild_dependency_graph(
-            bind=False
-        )
-
-        self._validate_dependency_graph()
+        self._refresh_dependency_graph()
 
         self._supervisor_task = (
             asyncio.create_task(
@@ -267,10 +266,10 @@ class Facade:
                 )
             )
 
-            self._DELIVERY_TASKS.add(task)
+            self._delivery_tasks.add(task)
 
             task.add_done_callback(
-                self._DELIVERY_TASKS.discard
+                self._delivery_tasks.discard
             )
 
     async def _tell_module(
@@ -601,8 +600,6 @@ class Facade:
     def save_state(
         self,
     ) -> None:
-        self._ensure_data_dirs()
-
         for record in self.modules.values():
             try:
                 self._save_record_state(
@@ -614,68 +611,6 @@ class Facade:
                     f"Failed to persist Module state: "
                     f"{record.id}"
                 )
-
-    def _ensure_data_dirs(
-        self,
-    ) -> None:
-        _persistence.ensure_data_dirs(
-            self.private_dir,
-            self.dataspace_dir,
-        )
-
-    def _private_state_path(
-        self,
-        module_id: str,
-    ) -> Path:
-        return _persistence.private_state_path(
-            self.private_dir,
-            module_id,
-        )
-
-    def _dataspace_path(
-        self,
-        module_id: str,
-    ) -> Path:
-        return _persistence.dataspace_path(
-            self.dataspace_dir,
-            module_id,
-        )
-
-    def _read_json_file(
-        self,
-        path: Path,
-    ) -> Any:
-        return _persistence.read_json_file(
-            path
-        )
-
-    def _atomic_write_json(
-        self,
-        path: Path,
-        value: Any,
-    ) -> None:
-        _persistence.atomic_write_json(
-            path,
-            value,
-        )
-
-    def _load_dataspace_state(
-        self,
-        record: ModuleRecord,
-    ) -> bool:
-        return _persistence.load_dataspace_state(
-            record,
-            self.dataspace_dir,
-        )
-
-    def _load_private_state(
-        self,
-        record: ModuleRecord,
-    ) -> bool:
-        return _persistence.load_private_state(
-            record,
-            self.private_dir,
-        )
 
     def _restore_record_state(
         self,
@@ -704,7 +639,13 @@ class Facade:
     async def _supervisor(
         self,
     ) -> None:
-        next_scan = 0.0
+        # The initial scan+reconcile happens in start()
+        # before this task runs, so the first periodic
+        # scan is one full interval away.
+        next_scan = (
+            time.monotonic()
+            + self.scan_interval
+        )
 
         while not self._stopping:
             now = time.monotonic()
@@ -714,13 +655,7 @@ class Facade:
                     await self._scan_modules()
 
                     # Pure graph reconstruction.
-                    self._rebuild_dependency_graph(
-                        bind=False
-                    )
-
-                    self._validate_dependency_graph()
-
-                    await self._reconcile()
+                    self._refresh_dependency_graph()
 
                 except Exception:
                     logger.exception(
@@ -1042,7 +977,7 @@ class Facade:
         )
 
         await self._scan_module_root(
-            self.workspace_modules
+            self.workspace_modules_dir
         )
 
     async def _scan_module_root(
@@ -1064,6 +999,9 @@ class Facade:
             if (
                 path.is_file()
                 and not path.name.startswith("_")
+                and _loading.has_module_header(
+                    path
+                )
             )
         }
 
@@ -1110,23 +1048,25 @@ class Facade:
         for path in sorted(
             current_files
         ):
-            if not self._has_module_header(
-                path
-            ):
+            # The file can disappear between the rglob above
+            # and the stat here; treat it as already removed
+            # and let the next scan finalize the cleanup.
+            try:
+                fingerprint = self._fingerprint(
+                    path
+                )
+
+            except OSError:
                 continue
 
-            fingerprint = self._fingerprint(
-                path
-            )
-
             previous = (
-                self._workspace_fingerprints.get(
+                self._source_fingerprints.get(
                     path
                 )
             )
 
             previous_error = (
-                self._workspace_load_errors.get(
+                self._source_load_errors.get(
                     path
                 )
             )
@@ -1150,11 +1090,11 @@ class Facade:
             ):
                 continue
 
-            self._workspace_fingerprints[
+            self._source_fingerprints[
                 path
             ] = fingerprint
 
-            self._workspace_load_errors.pop(
+            self._source_load_errors.pop(
                 path,
                 None,
             )
@@ -1166,7 +1106,7 @@ class Facade:
                 )
 
             except Exception as exc:
-                self._workspace_load_errors[
+                self._source_load_errors[
                     path
                 ] = exc
 
@@ -1190,11 +1130,11 @@ class Facade:
             cls,
             imported_name,
             _,
-        ) = self._import_module_file(
+        ) = _loading.import_module_class(
             path
         )
 
-        self._validate_module_class(
+        _loading.validate_module_class(
             cls
         )
 
@@ -1214,11 +1154,7 @@ class Facade:
             # _register_module_class().
             #
             # Only rebuild pure graph bookkeeping here.
-            self._rebuild_dependency_graph(
-                bind=False
-            )
-
-            self._validate_dependency_graph()
+            self._refresh_dependency_graph()
 
             self._wake.set()
 
@@ -1239,36 +1175,6 @@ class Facade:
             fingerprint=fingerprint,
         )
 
-    def _import_module_file(
-        self,
-        path: Path,
-    ) -> tuple[
-        type[Module],
-        str,
-        Any,
-    ]:
-        (
-            cls,
-            imported_name,
-            module,
-        ) = _loading.import_module_class(
-            path
-        )
-
-        return (
-            cls,
-            imported_name,
-            module,
-        )
-
-    def _validate_module_class(
-        self,
-        cls: type[Module],
-    ) -> None:
-        _loading.validate_module_class(
-            cls
-        )
-
     def _register_module_class(
         self,
         cls: type[Module],
@@ -1283,7 +1189,7 @@ class Facade:
             | None
         ) = None,
     ) -> ModuleRecord:
-        self._validate_module_class(
+        _loading.validate_module_class(
             cls
         )
 
@@ -1344,7 +1250,7 @@ class Facade:
         )
 
         if source_fingerprint is not None:
-            self._workspace_fingerprints[
+            self._source_fingerprints[
                 Path(
                     source
                 ).resolve()
@@ -1378,14 +1284,6 @@ class Facade:
 
         return None
 
-    @staticmethod
-    def _has_module_header(
-        path: Path,
-    ) -> bool:
-        return _loading.has_module_header(
-            path
-        )
-
     def _fingerprint(
         self,
         path: Path,
@@ -1398,19 +1296,27 @@ class Facade:
     # Dependency graph
     # ==================================================================
 
-    def _rebuild_dependency_graph(
+    def _refresh_dependency_graph(
         self,
-        *,
-        bind: bool = False,
     ) -> None:
         """
-        Rebuild dependency metadata.
+        Rebuild the dependency metadata and reject cycles.
 
-        By default this is PURE graph bookkeeping.
+        Pure graph bookkeeping: existing Module instance bindings
+        are never touched.
+        """
+        self._rebuild_dependency_graph()
 
-        `bind=True` exists only for explicit bulk-rebinding callers.
-        Normal reconciliation, validation, removal and hot reload must
-        leave existing Module instance bindings untouched.
+        self._topological_order()
+
+    def _rebuild_dependency_graph(
+        self,
+    ) -> None:
+        """
+        Rebuild the dependency graph maps.
+
+        Pure graph bookkeeping: existing Module instance bindings
+        are never touched.
         """
         (
             self.dependencies,
@@ -1418,17 +1324,6 @@ class Facade:
         ) = _deps.build_dependency_maps(
             self.modules
         )
-
-        if bind:
-            for record in self.modules.values():
-                self._bind_instance(
-                    record
-                )
-
-    def _validate_dependency_graph(
-        self,
-    ) -> None:
-        self._topological_order()
 
     def _topological_order(
         self,
@@ -1471,12 +1366,12 @@ class Facade:
             record.source
         ).resolve()
 
-        self._workspace_fingerprints.pop(
+        self._source_fingerprints.pop(
             source_path,
             None,
         )
 
-        self._workspace_load_errors.pop(
+        self._source_load_errors.pop(
             source_path,
             None,
         )
@@ -1486,8 +1381,6 @@ class Facade:
 
         # Pure dependency graph update.
         # Do NOT re-bind remaining Modules.
-        self._rebuild_dependency_graph(
-            bind=False
-        )
+        self._rebuild_dependency_graph()
 
         self._wake.set()

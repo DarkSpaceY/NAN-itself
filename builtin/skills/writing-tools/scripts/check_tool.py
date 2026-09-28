@@ -6,7 +6,7 @@ Usage:
 
 Checks the loadable-file contract enforced by the local tool loader:
   - the literal `# @tool` header within the first 20 lines
-  - exactly one LocalToolProvider subclass
+  - exactly one ToolSet subclass
   - a non-empty `id` assignment on the class
   - at least one @tool-decorated method
   - every @tool method has a docstring and fully annotated parameters
@@ -25,7 +25,7 @@ from pathlib import Path
 
 HEADER = "# @tool"
 SCAN_LINES = 20
-BASE_CLASS = "LocalToolProvider"
+BASE_CLASS = "ToolSet"
 DECORATOR = "tool"
 
 

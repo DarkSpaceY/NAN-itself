@@ -13,6 +13,7 @@ entity: builtin and workspace configs follow the same rule.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from contextlib import AsyncExitStack
@@ -44,10 +45,25 @@ from .spec import (
 
 async def connect(
     spec: ProviderSpec,
+    *,
+    timeout: float | None = None,
 ) -> Provider:
     """
     Start one stdio MCP server and cache its tool table.
+
+    `timeout` bounds the handshake (initialize + initial
+    list_tools). The MCP SDK has no default read timeout,
+    so an unbounded handshake would hang forever on a
+    server that starts but never answers.
     """
+    async def bounded(aw):
+        if timeout is None:
+            return await aw
+
+        return await asyncio.wait_for(
+            aw,
+            timeout=timeout,
+        )
     command = spec.command
 
     if not command:
@@ -101,9 +117,13 @@ async def connect(
             )
         )
 
-        await session.initialize()
+        await bounded(
+            session.initialize()
+        )
 
-        result = await session.list_tools()
+        result = await bounded(
+            session.list_tools()
+        )
 
         provider = Provider(
             spec=spec,
@@ -130,11 +150,25 @@ async def connect(
 
 async def refresh_tools(
     provider: Provider,
+    *,
+    timeout: float | None = None,
 ) -> None:
     """
     Re-list tools from the live session.
+
+    `timeout` bounds the list_tools round trip; a hung
+    server must not freeze the caller.
     """
-    result = await provider.session.list_tools()
+    request = provider.session.list_tools()
+
+    if timeout is None:
+        result = await request
+
+    else:
+        result = await asyncio.wait_for(
+            request,
+            timeout=timeout,
+        )
 
     provider.tools = {
         tool.name: tool

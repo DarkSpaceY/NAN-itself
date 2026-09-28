@@ -83,7 +83,7 @@ def _reject(
     Without this, a rejected reload is skipped silently forever
     because the fingerprint has already been updated.
     """
-    facade._workspace_load_errors[
+    facade._source_load_errors[
         Path(old.source).resolve()
     ] = reason
 
@@ -468,12 +468,8 @@ async def _hot_reload_locked(
         old.id
     ] = candidate
 
-    facade._rebuild_dependency_graph(
-        bind=False
-    )
-
     try:
-        facade._validate_dependency_graph()
+        facade._refresh_dependency_graph()
 
     except Exception as exc:
         # Roll back pointer and graph metadata.
@@ -481,9 +477,7 @@ async def _hot_reload_locked(
             old.id
         ] = old
 
-        facade._rebuild_dependency_graph(
-            bind=False
-        )
+        facade._rebuild_dependency_graph()
 
         await _stop_candidate(
             candidate
@@ -555,13 +549,13 @@ async def _hot_reload_locked(
             None,
         )
 
-    facade._workspace_fingerprints[
+    facade._source_fingerprints[
         Path(
             old.source
         ).resolve()
     ] = fingerprint
 
-    facade._workspace_load_errors.pop(
+    facade._source_load_errors.pop(
         Path(
             old.source
         ).resolve(),

@@ -153,9 +153,7 @@ def test_concurrent_reload_of_independent_modules_isolated(
         b_source,
     )
 
-    facade._rebuild_dependency_graph(
-        bind=False
-    )
+    facade._rebuild_dependency_graph()
 
     bind_calls = []
 
@@ -537,7 +535,7 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
     )
 
     class OldProvider(
-        local_backend.LocalToolProvider
+        local_backend.ToolSet
     ):
         id = "example"
 
@@ -555,7 +553,7 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
             )
 
     class NewProvider(
-        local_backend.LocalToolProvider
+        local_backend.ToolSet
     ):
         id = "example"
 
@@ -657,7 +655,7 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     class AlphaV1(
-        local_backend.LocalToolProvider
+        local_backend.ToolSet
     ):
         id = "alpha"
 
@@ -671,7 +669,7 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             )
 
     class AlphaV2(
-        local_backend.LocalToolProvider
+        local_backend.ToolSet
     ):
         id = "alpha"
 
@@ -685,7 +683,7 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             )
 
     class Beta(
-        local_backend.LocalToolProvider
+        local_backend.ToolSet
     ):
         id = "beta"
 

@@ -84,6 +84,12 @@ from .watcher import (
 )
 
 
+# Grace period for one MCP worker to exit after being asked
+# to stop. A worker stuck in a hung MCP round trip is
+# cancelled after this; a normal stop finishes well within.
+_MCP_STOP_TIMEOUT = 5.0
+
+
 class _MCPWorker:
     """
     Lifecycle owner for exactly one MCP provider.
@@ -402,6 +408,17 @@ class ProviderRuntime:
         finally:
             self._startup_future = None
 
+            # Evict dynamic tool modules before dropping the
+            # name mapping: repeated start/stop cycles must
+            # not accumulate _dynamic_tool_* entries.
+            for imported_name in (
+                self._local_imported_names.values()
+            ):
+                sys.modules.pop(
+                    imported_name,
+                    None,
+                )
+
             self._mcp_sources.clear()
             self._local_sources.clear()
             self._local_imported_names.clear()
@@ -509,9 +526,25 @@ class ProviderRuntime:
             and provider.spec.kind
             != PROVIDER_KIND_LOCAL
         ):
-            await self.refresh_provider_tools(
-                provider_name
-            )
+            try:
+                await self.refresh_provider_tools(
+                    provider_name
+                )
+
+            except Exception as exc:
+                # A failed refresh (hung server, worker
+                # stopping, provider replaced mid-flight)
+                # means the tool cannot be resolved right
+                # now; report None instead of raising out
+                # of a resolver contract.
+                logger.warning(
+                    "Tool table refresh failed for "
+                    "MCP provider '{}': {}",
+                    provider_name,
+                    exc,
+                )
+
+                return None
 
             provider = self.providers.get(
                 provider_name
@@ -566,7 +599,8 @@ class ProviderRuntime:
                 )
 
             await mcp_backend.refresh_tools(
-                provider
+                provider,
+                timeout=self.tool_timeout,
             )
 
         finally:
@@ -768,7 +802,8 @@ class ProviderRuntime:
             )
 
             provider = await mcp_backend.connect(
-                spec
+                spec,
+                timeout=self.mcp_start_timeout,
             )
 
             worker.provider = provider
@@ -871,6 +906,41 @@ class ProviderRuntime:
                     None,
                 )
 
+                # A worker that died on its own (MCP process
+                # crash) must not leave its source marked as
+                # loaded: otherwise the scan sees loaded=True
+                # with an unchanged fingerprint and never
+                # retries, so the provider silently vanishes
+                # until the file is touched.
+                source_file = spec.file
+
+                if source_file is not None:
+                    expected = (
+                        source_file.resolve()
+                    )
+
+                    for source_path, names in (
+                        list(
+                            self._mcp_sources.items()
+                        )
+                    ):
+                        if (
+                            source_path.resolve()
+                            != expected
+                        ):
+                            continue
+
+                        if spec.name not in names:
+                            continue
+
+                        names.discard(spec.name)
+
+                        if not names:
+                            self._mcp_sources.pop(
+                                source_path,
+                                None,
+                            )
+
             current_provider = (
                 self.providers.get(
                     spec.name
@@ -908,7 +978,20 @@ class ProviderRuntime:
             return
 
         try:
-            await task
+            await asyncio.wait_for(
+                task,
+                timeout=_MCP_STOP_TIMEOUT,
+            )
+
+        except asyncio.TimeoutError:
+            # wait_for has cancelled the task; a worker that
+            # could not stop on its own (e.g. hung inside an
+            # MCP round trip) must not hang the caller too.
+            logger.exception(
+                "MCP worker '{}' did not stop within "
+                f"{_MCP_STOP_TIMEOUT:g}s and was cancelled",
+                worker.spec.name,
+            )
 
         except asyncio.CancelledError:
             logger.warning(
@@ -1867,6 +1950,17 @@ class ProviderRuntime:
             self.providers.clear()
 
             self._mcp_workers.clear()
+
+            # Evict dynamic tool modules before dropping the
+            # name mapping: repeated start/stop cycles must
+            # not accumulate _dynamic_tool_* entries.
+            for imported_name in (
+                self._local_imported_names.values()
+            ):
+                sys.modules.pop(
+                    imported_name,
+                    None,
+                )
 
             self._mcp_sources.clear()
             self._local_sources.clear()
