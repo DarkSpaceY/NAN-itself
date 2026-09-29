@@ -14,6 +14,7 @@ import { Store, type NanState } from "../store";
 import { Mapper, type HistoryRound } from "../history/mapper";
 import type { RoundStore } from "../persistence/db";
 import { roundsToMessages } from "../convert";
+import { Stage } from "./Stage";
 import { UserMessage, AssistantMessage } from "./Message";
 
 export interface AppProps {
@@ -81,6 +82,7 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <Stage store={store} />
       <ThreadPrimitive.Root className="dock-root">
         <div id="dock-panel-wrap">
           <Handle />
