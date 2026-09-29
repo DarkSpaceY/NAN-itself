@@ -22,6 +22,11 @@ function assistantTexts(r: HistoryRound): string[] {
     .map((p) => (p as { text: string }).text);
 }
 
+/** 该轮的助手文本部件（断言其字段用）。 */
+function assistantPart(r: HistoryRound) {
+  return r.parts.find((p) => p.kind === "text" && p.role === "assistant");
+}
+
 describe("toolTitle", () => {
   it("prefers payload fields, falls back to keys/category", () => {
     expect(toolTitle("tool_call", { tool: "fs.read", provider: "x" })).toBe("fs.read");
@@ -297,5 +302,28 @@ describe("Mapper", () => {
     m.feed(env("output_delta", { text: "reply-A" }, 3, { id: "eA" }));
 
     expect(assistantTexts(m.getRounds()[0]!)).toEqual(["reply-A"]);
+  });
+
+  // 流未结束就刷新：streaming 是瞬时状态，不能跟着落盘的状态复活
+  // （否则界面上留下永不消失的光标）。
+  it("seed clears transient streaming state, later deltas re-arm it", () => {
+    const live = new Mapper();
+    live.onHello("b1");
+    live.feed(env("user_input", { text: "A", mid: "mA" }, 1, { boot_id: "b1" }));
+    live.feed(env("output_started", {}, 2, { id: "eA", boot_id: "b1" }));
+    live.feed(env("output_delta", { text: "half" }, 3, { id: "eA", boot_id: "b1" }));
+    expect(assistantPart(live.getRounds()[0]!)).toMatchObject({ streaming: true });
+
+    const m = new Mapper();
+    m.seed(structuredClone(live.getRounds()) as HistoryRound[]);
+    expect(assistantPart(m.getRounds()[0]!)).toMatchObject({ streaming: false });
+
+    // 这一路流其实还活着：下一个 delta 到达时重新标为流式中
+    m.onHello("b1");
+    m.feed(env("output_delta", { text: "rest" }, 4, { id: "eA", boot_id: "b1" }));
+    expect(assistantPart(m.getRounds()[0]!)).toMatchObject({
+      streaming: true,
+      text: "halfrest",
+    });
   });
 });

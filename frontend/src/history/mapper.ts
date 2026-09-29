@@ -185,6 +185,11 @@ export class Mapper {
       // 代价是这些轮会被完整重放一次
       r.appliedSeq ??= 0;
       r.bootId ??= null;
+      // 瞬时状态不跨刷新：重载后的轮不是「正在流」。若这一轮其实还没
+      // 结束，后续 delta 会把 streaming 再置上（见 feed 的 output_delta）。
+      for (const p of r.parts) {
+        if (p.kind === "text") p.streaming = false;
+      }
       this.rounds.push(r);
       this.byKey.set(r.key, r);
       this.indexRound(r);
@@ -212,6 +217,8 @@ export class Mapper {
       case "output_delta":
         this.updateTextPart(env, (p) => {
           p.text += typeof env.content.text === "string" ? env.content.text : "";
+          // delta 到达即说明这一路流还活着（刷新恢复的场景）
+          p.streaming = true;
         });
         return;
       case "output_done":

@@ -36,7 +36,6 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
     useCallback((cb) => store.subscribe(cb), [store]),
     () => store.getState(),
   );
-  const isRunning = nanState.status === "working";
 
   // 持久化：关闭轮立即落盘，活动轮节流
   useEffect(() => {
@@ -68,7 +67,13 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
 
   const runtime = useExternalStoreRuntime({
     messages,
-    isRunning,
+    // 显式传 false，而不是省略：aui 在 isRunning === undefined 时会
+    // 回退用「最后一条 assistant 消息的 status」推断运行中，进而禁用
+    // 发送；而消息 status 是我们为了流式光标自己设的 running。
+    //
+    // 语义上这也更准：agent 常态就在跑自主轮次，用户任何时候都能发言
+    // （输入进 Inbox，下一轮模型看到），不存在「运行中不许发」。
+    isRunning: false,
     convertMessage: (m) => m,
     onNew: async ({ content }) => {
       const text = content
