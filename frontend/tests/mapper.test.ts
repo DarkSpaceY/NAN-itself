@@ -151,4 +151,40 @@ describe("Mapper", () => {
     m.feed(env("user_input", { text: "b", mid: "m2" }, 4)); // 关闭 m1 + 开 m2 = 2 次回调
     expect(seen).toEqual(["m1", "m1", "m1", "m1", "m2"]);
   });
+
+  // 回归：rounds 数组是原地 push 的，引用恒定，React 的
+  // useSyncExternalStore/useMemo 只能靠版本号判断变化。
+  it("version increments on every content change, not just new rounds", () => {
+    const m = new Mapper();
+    expect(m.getVersion()).toBe(0);
+
+    m.feed(env("user_input", { text: "hi", mid: "m1" }, 1));
+    const v1 = m.getVersion();
+    expect(v1).toBeGreaterThan(0);
+
+    // 流式 delta 不新增轮，但必须让版本号前进（否则 UI 不重渲染）
+    m.feed(env("output_started", {}, 2, { id: "e1" }));
+    m.feed(env("output_delta", { text: "x" }, 3, { id: "e1" }));
+    expect(m.getVersion()).toBeGreaterThan(v1);
+    expect(m.getRounds().length).toBe(1);
+
+    // 被丢弃的事件（无开启轮）不应推进版本号
+    const m2 = new Mapper();
+    m2.feed(env("record_started", { category: "tool_call", payload: {} }, 1, { id: "r1" }));
+    expect(m2.getRounds().length).toBe(0);
+    expect(m2.getVersion()).toBe(0);
+  });
+
+  it("seed notifies subscribers so restored history renders", () => {
+    const m = new Mapper();
+    m.feed(env("user_input", { text: "hi", mid: "m1" }, 1));
+
+    const m2 = new Mapper();
+    let notified = 0;
+    m2.subscribe(() => notified++);
+    m2.seed(structuredClone(m.getRounds()) as HistoryRound[]);
+
+    expect(notified).toBe(1);
+    expect(m2.getVersion()).toBeGreaterThan(0);
+  });
 });

@@ -1,7 +1,7 @@
 // App：ExternalStoreRuntime 对接自持 mapper + 中央 dock。
 // 布局：ThreadPrimitive.Root 包整个 dock（面板 + 把手 + 输入行）。
 
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -25,19 +25,15 @@ export interface AppProps {
 }
 
 export function App({ store, mapper, db, sendInput }: AppProps) {
-  // mapper 轮次 → React 状态（版本号触发重渲染）
+  // mapper 轮次是原地变更的，用版本号做快照；messages 直接从
+  // getRounds() 现取，不按数组引用缓存（引用恒定不会失效）。
   const roundsVersion = useSyncExternalStore(
-    (cb) => mapper.subscribe(cb),
-    () => mapper.getRounds().length,
-  );
-  const rounds = useMemo(
-    () => mapper.getRounds(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roundsVersion],
+    useCallback((cb) => mapper.subscribe(cb), [mapper]),
+    () => mapper.getVersion(),
   );
 
   const nanState: NanState = useSyncExternalStore(
-    (cb) => store.subscribe(cb),
+    useCallback((cb) => store.subscribe(cb), [store]),
     () => store.getState(),
   );
   const isRunning = nanState.status === "working";
@@ -64,7 +60,11 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
     };
   }, [mapper, db]);
 
-  const messages: ThreadMessageLike[] = useMemo(() => roundsToMessages(rounds), [rounds]);
+  const messages: ThreadMessageLike[] = useMemo(
+    () => roundsToMessages(mapper.getRounds()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roundsVersion],
+  );
 
   const runtime = useExternalStoreRuntime({
     messages,

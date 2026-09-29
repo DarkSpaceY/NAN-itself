@@ -79,6 +79,12 @@ export class Mapper {
   private lastSeq = 0;
   private listeners = new Set<Listener>();
 
+  /**
+   * 单调递增的变化版本号。`rounds` 数组是原地 push 的，引用恒定，
+   * 不能当 React 快照用；版本号才是稳定的 getSnapshot 返回值。
+   */
+  private version = 0;
+
   /** 事件 id → 定位（part 所在轮 + 下标）。 */
   private partIndex = new Map<string, { round: HistoryRound; index: number }>();
 
@@ -91,6 +97,7 @@ export class Mapper {
   }
 
   private emit(round: HistoryRound) {
+    this.version++;
     for (const fn of this.listeners) fn(round);
   }
 
@@ -98,6 +105,11 @@ export class Mapper {
 
   getRounds(): readonly HistoryRound[] {
     return this.rounds;
+  }
+
+  /** 供 useSyncExternalStore 做快照：内容每次变化都会自增。 */
+  getVersion(): number {
+    return this.version;
   }
 
   getCurrent(): HistoryRound | null {
@@ -119,6 +131,10 @@ export class Mapper {
         this.partIndex.set(p.id, { round: r, index: r.parts.indexOf(p) });
       }
     }
+    // seed 发生在首帧之后（boot 是异步的），必须主动通知一次，
+    // 否则恢复出来的历史不会渲染。
+    const last = rounds.at(-1);
+    if (last) this.emit(last);
   }
 
   // -- 事件入口 --------------------------------------------------------
