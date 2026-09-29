@@ -1,7 +1,10 @@
 // 消息渲染：复用 v1 的视觉类名（.round/.part/.tool），自建 CSS 不换。
 
 import { MessagePrimitive } from "@assistant-ui/react";
-import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import type {
+  TextMessagePartProps,
+  ToolCallMessagePartProps,
+} from "@assistant-ui/react";
 
 export function UserMessage() {
   return (
@@ -28,8 +31,17 @@ export function AssistantMessage() {
   );
 }
 
-function TextPart() {
-  return <div className="part text assistant text-body"><MessagePrimitive.Parts /></div>;
+// 自定义 Text 部件渲染器：只能渲染「这个 part 自己」的文本。
+// 注意不能用 MessagePrimitive.Parts（那是整个部件列表的渲染器，
+// 在部件渲染器里再调用它会递归展开、把同一段内容重复渲染）。
+function TextPart({ text, status }: TextMessagePartProps) {
+  const cancelled = status?.type === "incomplete" && status.reason === "cancelled";
+  return (
+    <div className={`part text assistant text-body${cancelled ? " cancelled" : ""}`}>
+      {text}
+      {status?.type === "running" && <span className="cursor">▍</span>}
+    </div>
+  );
 }
 
 interface ToolResult {
