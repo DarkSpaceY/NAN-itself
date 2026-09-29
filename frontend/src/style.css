@@ -1,0 +1,22 @@
+/* 阶段 0 骨架占位 —— 真实设计系统在阶段 2/3 落地 */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+}
+
+#stage {
+  position: absolute;
+  inset: 0;
+}
+
+#dock {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  width: min(720px, calc(100% - 48px));
+}

@@ -22,7 +22,16 @@ from .utils.llm import LLMProvider
 settings = get_settings()
 
 
-async def run_agent_process() -> None:
+async def run_agent_process(
+    stop: asyncio.Event | None = None,
+    install_signals: bool = True,
+) -> None:
+    """Run the agent process until stopped.
+
+    `stop` lets an embedding host (e.g. the pywebview desktop
+    shell) inject its own stop signal; signal handlers are only
+    installed when this loop owns the main thread.
+    """
     # --------------------------------------------------------------
     # Environment: NAN talks to local models on loopback
     # interfaces; ambient shell proxies must never intercept that
@@ -149,7 +158,6 @@ async def run_agent_process() -> None:
         frontend_dir=(
             _paths.repo_root()
             / "frontend"
-            / "app"
             / "dist"
         ),
         dedup_cache_size=settings.events.input_dedup_cache_size,
@@ -193,7 +201,8 @@ async def run_agent_process() -> None:
         )
 
         # ----------------------------------------------------------
-        # Stop signal.
+        # Stop signal: either the injected event (desktop shell)
+        # or OS signals (terminal run).
         # ----------------------------------------------------------
 
         stop_received = asyncio.Event()
@@ -206,14 +215,15 @@ async def run_agent_process() -> None:
             agent.request_stop()
             stop_received.set()
 
-        for sig in (
-            signal.SIGINT,
-            signal.SIGTERM,
-        ):
-            running_loop.add_signal_handler(
-                sig,
-                _request_stop,
-            )
+        if install_signals:
+            for sig in (
+                signal.SIGINT,
+                signal.SIGTERM,
+            ):
+                running_loop.add_signal_handler(
+                    sig,
+                    _request_stop,
+                )
 
         logger.info(
             "NAN is running. Open the gateway frontend to talk."
@@ -223,7 +233,9 @@ async def run_agent_process() -> None:
         # Run until stopped.
         # ----------------------------------------------------------
 
-        await stop_received.wait()
+        await (
+            stop if stop is not None else stop_received
+        ).wait()
 
     finally:
         # ----------------------------------------------------------
