@@ -59,17 +59,34 @@ html, body {
   align-items: stretch;
 }
 
+/* 面板容器：把手骑在顶边，随面板上移 */
+
+#dock-panel-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 /* 上拉历史浅面板 */
 
 #dock-panel {
   overflow: hidden;
-  border-radius: 14px 14px 0 0;
+  border-radius: 14px;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(14px);
   border: 1px solid var(--border);
-  border-bottom: none;
   box-shadow: 0 -8px 32px rgb(0 0 0 / 8%);
   transition: height 120ms ease-out;
+}
+
+/* 拖拽中关闭动画，跟手 */
+#dock-panel.dragging { transition: none; }
+
+/* 收起时彻底隐藏面板（否则 0 高度仍渲染边框 = 灰线） */
+#dock-panel[data-closed="true"] {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 #dock-history {
@@ -79,18 +96,22 @@ html, body {
   outline: none;
 }
 
-/* 细线把手 */
+/* 细线把手：骑在面板顶边，随抽屉移动 */
 
 #dock-handle {
-  height: 20px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* 骑在面板顶边并略上浮，形成悬浮感 */
+  transform: translateY(calc(-50% - 6px));
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
   touch-action: none;
-  margin-top: -20px; /* 叠在面板底边上 */
-  position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 #dock-handle:active { cursor: grabbing; }

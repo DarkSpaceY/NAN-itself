@@ -35,7 +35,10 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
     [roundsVersion],
   );
 
-  const nanState: NanState = useSyncExternalStore(store.subscribe, store.getState);
+  const nanState: NanState = useSyncExternalStore(
+    (cb) => store.subscribe(cb),
+    () => store.getState(),
+  );
   const isRunning = nanState.status === "working";
 
   // 持久化：关闭轮立即落盘，活动轮节流
@@ -79,18 +82,19 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="dock-root">
-        <div id="dock-panel">
-          <ThreadPrimitive.Viewport id="dock-history" autoScroll>
-            <ThreadPrimitive.If empty>
-              <div className="empty-hint">还没有对话。输入第一条消息开始。</div>
-            </ThreadPrimitive.If>
-            <ThreadPrimitive.Messages
-              components={{ UserMessage, AssistantMessage }}
-            />
-          </ThreadPrimitive.Viewport>
+        <div id="dock-panel-wrap">
+          <Handle />
+          <div id="dock-panel" data-closed="true" style={{ height: 0 }}>
+            <ThreadPrimitive.Viewport id="dock-history" autoScroll>
+              <ThreadPrimitive.If empty>
+                <div className="empty-hint">还没有对话。输入第一条消息开始。</div>
+              </ThreadPrimitive.If>
+              <ThreadPrimitive.Messages
+                components={{ UserMessage, AssistantMessage }}
+              />
+            </ThreadPrimitive.Viewport>
+          </div>
         </div>
-
-        <Handle />
 
         <ComposerPrimitive.Root id="dock-input-row">
           <span className="conn-dot" data-state={nanState.connection} />
@@ -106,28 +110,38 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
 function Handle() {
   // 保留与 v1 相同的交互语义；React 实现直接操作 panel 高度
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const panel = e.currentTarget.previousElementSibling as HTMLElement;
+    const panel = e.currentTarget.parentElement?.querySelector(
+      "#dock-panel",
+    ) as HTMLElement | null;
+    if (!panel) return;
+    panel.classList.add("dragging");
     const startY = e.clientY;
     const startH = parseInt(panel.style.height || "0", 10) || 0;
     const max = Math.round(window.innerHeight * 0.6);
     let moved = false;
+
+    const apply = (h: number) => {
+      const clamped = Math.max(0, Math.min(h, max));
+      panel.style.height = `${clamped}px`;
+      panel.dataset.closed = String(clamped === 0);
+    };
+    apply(startH);
 
     e.currentTarget.setPointerCapture(e.pointerId);
 
     const onMove = (ev: PointerEvent) => {
       const dy = startY - ev.clientY;
       if (Math.abs(dy) > 4) moved = true;
-      if (moved) {
-        const h = Math.max(0, Math.min(startH + dy, max));
-        panel.style.height = `${h}px`;
-      }
+      if (moved) apply(startH + dy);
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      panel.classList.remove("dragging");
       if (!moved) {
+        // 轻点：开/关切换
         const cur = parseInt(panel.style.height || "0", 10) || 0;
-        panel.style.height = cur > 0 ? "0px" : `${Math.round(window.innerHeight * 0.4)}px`;
+        apply(cur > 0 ? 0 : Math.round(window.innerHeight * 0.4));
       }
     };
     window.addEventListener("pointermove", onMove);
