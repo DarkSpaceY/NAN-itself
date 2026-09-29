@@ -94,6 +94,26 @@ describe("WsClient", () => {
     expect(s.lastSeq).toBe(4);
   });
 
+  it("hello reports the boot before any replayed envelope", () => {
+    const calls: string[] = [];
+    const client = new WsClient({
+      url: "ws://x/ws",
+      store,
+      socketFactory: (url) => new MockSocket(url) as never,
+      onHello: (b) => calls.push(`hello:${b}`),
+      onEnvelope: (e) => calls.push(`env:${e.seq}`),
+    });
+    client.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+
+    sock.message(hello(3));
+    sock.message({ seq: 1, ts: 1, t: "user_input", content: { text: "r1" } });
+
+    // 游标必须在重放事件之前落定，否则先应用的事件无法被跳过
+    expect(calls).toEqual(["hello:b1", "env:1"]);
+  });
+
   it("reconnects with exponential backoff capped at max, rebuilds via replay", () => {
     const client = makeClient();
     client.connect();

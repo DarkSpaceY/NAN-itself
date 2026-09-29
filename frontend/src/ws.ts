@@ -28,6 +28,8 @@ export interface WsClientOptions {
   store: Store;
   /** 每个事件信封的旁路观察点（mapper 等并行消费者用）。 */
   onEnvelope?: (env: Envelope) => void;
+  /** 握手：新 boot 的标识（缺省 null）。mapper 用它决定重放游标。 */
+  onHello?: (bootId: string | null) => void;
   /** 重连初始退避 ms，默认 1000 */
   backoffBaseMs?: number;
   /** 重连退避封顶 ms，默认 10000 */
@@ -40,6 +42,7 @@ export class WsClient {
   private readonly url: string;
   private readonly store: Store;
   private readonly onEnvelope: ((env: Envelope) => void) | null;
+  private readonly onHello: ((bootId: string | null) => void) | null;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
   private readonly makeSocket: SocketFactory;
@@ -54,6 +57,7 @@ export class WsClient {
     this.url = opts.url;
     this.store = opts.store;
     this.onEnvelope = opts.onEnvelope ?? null;
+    this.onHello = opts.onHello ?? null;
     this.backoffBaseMs = opts.backoffBaseMs ?? 1000;
     this.backoffMaxMs = opts.backoffMaxMs ?? 10000;
     this.makeSocket = opts.socketFactory ?? ((u) => new WebSocket(u));
@@ -114,6 +118,8 @@ export class WsClient {
         this.store.resetForReplay();
         const hello = msg as Extract<ServerMessage, { t: "hello" }>;
         this.store.applyHello(hello as never);
+        // 必须在重放事件到达之前定下游标
+        this.onHello?.(hello.content?.boot ?? null);
         return;
       }
       this.store.applyMessage(msg);

@@ -58,6 +58,7 @@ async function boot() {
     url: wsUrl,
     store,
     onEnvelope: (env) => mapper.feed(env),
+    onHello: (bootId) => mapper.onHello(bootId),
   });
   store.setConnection("connecting");
   client.connect();

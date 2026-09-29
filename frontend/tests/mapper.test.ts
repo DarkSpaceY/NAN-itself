@@ -15,6 +15,13 @@ function roundOf(m: Mapper): HistoryRound | null {
   return m.getCurrent();
 }
 
+/** 该轮内所有助手文本片段，按顺序。 */
+function assistantTexts(r: HistoryRound): string[] {
+  return r.parts
+    .filter((p) => p.kind === "text" && p.role === "assistant")
+    .map((p) => (p as { text: string }).text);
+}
+
 describe("toolTitle", () => {
   it("prefers payload fields, falls back to keys/category", () => {
     expect(toolTitle("tool_call", { tool: "fs.read", provider: "x" })).toBe("fs.read");
@@ -186,5 +193,109 @@ describe("Mapper", () => {
 
     expect(notified).toBe(1);
     expect(m2.getVersion()).toBeGreaterThan(0);
+  });
+
+  // 全新客户端（无本地历史）：全靠后端重放建轮，每轮的输出必须
+  // 挂回自己那一轮，而不是被挂到数组末位。
+  it("fresh client rebuilds rounds from replay, each keeping its own output", () => {
+    const m = new Mapper();
+    m.onHello("b1");
+    const events: Envelope[] = [
+      env("user_input", { text: "A", mid: "mA" }, 1, { boot_id: "b1" }),
+      env("output_started", {}, 2, { id: "eA", boot_id: "b1" }),
+      env("output_delta", { text: "reply-A" }, 3, { id: "eA", boot_id: "b1" }),
+      env("output_done", {}, 4, { id: "eA", boot_id: "b1" }),
+      env("user_input", { text: "B", mid: "mB" }, 5, { boot_id: "b1" }),
+      env("output_started", {}, 6, { id: "eB", boot_id: "b1" }),
+      env("output_delta", { text: "reply-B" }, 7, { id: "eB", boot_id: "b1" }),
+      env("output_done", {}, 8, { id: "eB", boot_id: "b1" }),
+    ];
+    for (const e of events) m.feed(e);
+
+    const rounds = m.getRounds();
+    expect(rounds.length).toBe(2);
+    expect(assistantTexts(rounds[0]!)).toEqual(["reply-A"]);
+    expect(assistantTexts(rounds[1]!)).toEqual(["reply-B"]);
+  });
+
+  // F5（同一 boot）：游标挡住重放里已经应用过的部分，文本不重复。
+  it("same-boot replay after seed is skipped by the persisted cursor", () => {
+    const live = new Mapper();
+    live.onHello("b1");
+    const events: Envelope[] = [
+      env("user_input", { text: "A", mid: "mA" }, 1, { boot_id: "b1" }),
+      env("output_started", {}, 2, { id: "eA", boot_id: "b1" }),
+      env("output_delta", { text: "reply-A" }, 3, { id: "eA", boot_id: "b1" }),
+      env("output_done", {}, 4, { id: "eA", boot_id: "b1" }),
+    ];
+    for (const e of events) live.feed(e);
+
+    const m = new Mapper();
+    m.seed(structuredClone(live.getRounds()) as HistoryRound[]);
+    m.onHello("b1");
+    for (const e of events) m.feed(structuredClone(e));
+
+    const rounds = m.getRounds();
+    expect(rounds.length).toBe(1);
+    expect(assistantTexts(rounds[0]!)).toEqual(["reply-A"]);
+  });
+
+  // 后端重启：seq 从头计数，游标必须归零，否则新事件会被 seq 守卫
+  // 全部丢弃（界面冻住）。
+  it("hello with a new boot resets the cursor so new events apply", () => {
+    const live = new Mapper();
+    live.onHello("b1");
+    live.feed(env("user_input", { text: "A", mid: "mA" }, 400, { boot_id: "b1" }));
+    live.feed(env("output_started", {}, 401, { id: "eA", boot_id: "b1" }));
+
+    const m = new Mapper();
+    m.seed(structuredClone(live.getRounds()) as HistoryRound[]);
+    m.onHello("b2"); // 新 boot，seq 回到 1
+    m.feed(env("user_input", { text: "new", mid: "mNew" }, 1, { boot_id: "b2" }));
+
+    expect(m.getRounds().length).toBe(2);
+    expect(m.getRounds()[1]!.parts[0]).toMatchObject({ text: "new" });
+  });
+
+  // 半途刷新：轮未关闭，恢复为进行中，后续 delta 接着追加而不是丢
+  it("mid-turn resume appends later deltas to the in-flight round", () => {
+    const live = new Mapper();
+    live.onHello("b1");
+    live.feed(env("user_input", { text: "A", mid: "mA" }, 1, { boot_id: "b1" }));
+    live.feed(env("output_started", {}, 2, { id: "eA", boot_id: "b1" }));
+    live.feed(env("output_delta", { text: "part1" }, 3, { id: "eA", boot_id: "b1" }));
+
+    const m = new Mapper();
+    m.seed(structuredClone(live.getRounds()) as HistoryRound[]);
+    m.onHello("b1");
+    m.feed(env("output_delta", { text: "part2" }, 4, { id: "eA", boot_id: "b1" }));
+    m.feed(env("output_done", {}, 5, { id: "eA", boot_id: "b1" }));
+
+    expect(assistantTexts(m.getRounds()[0]!)).toEqual(["part1part2"]);
+  });
+
+  // 旧版记录没有游标，且重放窗口里 user_input 已滑出：重见同一
+  // output id 时重建该 part，而不是再挂一个。
+  it("known output id is rebuilt instead of duplicated", () => {
+    const m = new Mapper();
+    m.seed([
+      {
+        key: "mA",
+        ts: 1000,
+        seq: 1,
+        appliedSeq: 0,
+        bootId: null,
+        closed: false,
+        parts: [
+          { kind: "text", id: "mA:user", role: "user", text: "A" },
+          { kind: "text", id: "eA", role: "assistant", text: "reply-A" },
+        ],
+      },
+    ]);
+    m.onHello(null);
+    m.feed(env("output_started", {}, 2, { id: "eA" }));
+    m.feed(env("output_delta", { text: "reply-A" }, 3, { id: "eA" }));
+
+    expect(assistantTexts(m.getRounds()[0]!)).toEqual(["reply-A"]);
   });
 });

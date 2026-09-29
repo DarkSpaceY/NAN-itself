@@ -2,9 +2,11 @@
 //
 // 设计约束：
 // - 对话轮以 user_input 为边界，append-only；轮内 parts 顺序即事件序
+// - 事件归属锚定「进行中的轮」（open），不是数组末位——重放历史轮时
+//   末位可能是更晚的轮
 // - 历史流是纯文字 + 内联工具卡片（kitn.ai/ui 视觉模式），不含面
-// - seq 单调守卫挡住同 boot 内重放/直播重叠；跨 boot（页面刷新）时
-//   IndexedDB 已有同 mid 的旧轮，用「同 key 重放覆盖替换」去重
+// - 与后端重放对账：每轮持久化 appliedSeq 游标，hello 时按 boot 取出
+//   游标，重放里 seq 更小的事件全部跳过（同 boot 内 seq 才可比）
 // - surface.* / 未知事件不产生 parts
 
 import { classifyEvent, type Envelope } from "../protocol";
@@ -42,6 +44,13 @@ export interface HistoryRound {
   key: string;
   ts: number;
   seq: number;
+  /**
+   * 该轮最后应用过的事件 seq（持久化游标）。刷新后据此跳过重放里
+   * 已经见过的部分，避免重复追加文本。
+   */
+  appliedSeq: number;
+  /** 产生该轮的后端 boot（seq 只在同一 boot 内单调）。 */
+  bootId: string | null;
   closed: boolean;
   parts: Part[];
 }
@@ -79,6 +88,15 @@ export class Mapper {
   private lastSeq = 0;
   private listeners = new Set<Listener>();
 
+  /** 当前后端 boot（seq 只在同一 boot 内可比）。 */
+  private bootId: string | null = null;
+
+  /**
+   * 当前「进行中」的轮。事件归属以它为锚，而不是数组末位——重放
+   * 历史轮时末位可能是更晚的轮，按末位挂会把输出写错轮。
+   */
+  private open: HistoryRound | null = null;
+
   /**
    * 单调递增的变化版本号。`rounds` 数组是原地 push 的，引用恒定，
    * 不能当 React 快照用；版本号才是稳定的 getSnapshot 返回值。
@@ -97,8 +115,18 @@ export class Mapper {
   }
 
   private emit(round: HistoryRound) {
+    // feed() 已把 lastSeq 推到当前事件，故这里就是该轮的游标
+    round.appliedSeq = Math.max(round.appliedSeq, this.lastSeq);
     this.version++;
     for (const fn of this.listeners) fn(round);
+  }
+
+  private indexRound(round: HistoryRound): void {
+    round.parts.forEach((p, i) => this.partIndex.set(p.id, { round, index: i }));
+  }
+
+  private unindexRound(round: HistoryRound): void {
+    for (const p of round.parts) this.partIndex.delete(p.id);
   }
 
   // -- 状态 ----------------------------------------------------------
@@ -112,24 +140,54 @@ export class Mapper {
     return this.version;
   }
 
+  /** 当前进行中的轮（无则 null）。 */
   getCurrent(): HistoryRound | null {
-    return this.rounds.at(-1) ?? null;
+    return this.open;
+  }
+
+  // -- 握手 ------------------------------------------------------------
+
+  /**
+   * hello：确定重放游标与进行中的轮。
+   *
+   * - boot 变了说明后端重启、seq 从头计数，必须把游标归零，否则
+   *   新事件会被 seq 守卫全部丢弃（界面就此冻住）
+   * - boot 未变则用本地持久化的 appliedSeq 作游标，重放里已见过的
+   *   事件全部跳过，不重复追加
+   * - 半途刷新时最后一轮尚未关闭，恢复为进行中，后续 delta 才有归属
+   */
+  onHello(bootId: string | null): void {
+    if (this.bootId !== bootId) {
+      this.lastSeq = 0;
+    }
+    this.bootId = bootId;
+
+    let cursor = 0;
+    for (const r of this.rounds) {
+      if (r.bootId === bootId) cursor = Math.max(cursor, r.appliedSeq);
+    }
+    this.lastSeq = Math.max(this.lastSeq, cursor);
+
+    const last = this.rounds.at(-1);
+    this.open = last && !last.closed && last.bootId === bootId ? last : null;
   }
 
   // -- 种子（IndexedDB 恢复） ------------------------------------------
 
   /**
-   * 用持久化的历史轮做种子。只登记 key 与已配对事件 id；不动
-   * lastSeq——后端重启后 seq 归零，抬高会挡掉整个重放。同 boot
-   * 刷新场景由「同 key 重放覆盖」去重。
+   * 用持久化的历史轮做种子。只登记 key / 事件 id / 游标，不动
+   * lastSeq——游标要等 hello 拿到 boot 之后才能确定（seq 只在同一
+   * boot 内可比）。
    */
   seed(rounds: HistoryRound[]): void {
     for (const r of rounds) {
+      // 旧版记录没有这两个字段：游标当 0、boot 当未知，
+      // 代价是这些轮会被完整重放一次
+      r.appliedSeq ??= 0;
+      r.bootId ??= null;
       this.rounds.push(r);
       this.byKey.set(r.key, r);
-      for (const p of r.parts) {
-        this.partIndex.set(p.id, { round: r, index: r.parts.indexOf(p) });
-      }
+      this.indexRound(r);
     }
     // seed 发生在首帧之后（boot 是异步的），必须主动通知一次，
     // 否则恢复出来的历史不会渲染。
@@ -210,7 +268,7 @@ export class Mapper {
 
   private onUserInput(env: Envelope): void {
     // 上一轮就此关闭
-    const prev = this.getCurrent();
+    const prev = this.open;
     if (prev && !prev.closed) {
       prev.closed = true;
       this.emit(prev);
@@ -220,54 +278,66 @@ export class Mapper {
     const key = mid ?? `seq-${env.seq}`;
     const text = typeof env.content.text === "string" ? env.content.text : "";
 
-    const existing = this.byKey.get(key);
-    if (existing) {
-      // 跨 boot 重放覆盖：同 mid 的轮以重放为准重建
-      const round: HistoryRound = {
-        key,
-        ts: env.ts,
-        seq: env.seq,
-        closed: false,
-        parts: [{ kind: "text", id: `${key}:user`, role: "user", text }],
-      };
-      const idx = this.rounds.indexOf(existing);
-      if (idx >= 0) this.rounds[idx] = round;
-      this.byKey.set(key, round);
-      this.partIndex.clear();
-      this.emit(round);
-      return;
-    }
-
     const round: HistoryRound = {
       key,
       ts: env.ts,
       seq: env.seq,
+      appliedSeq: env.seq,
+      bootId: env.boot_id ?? null,
       closed: false,
       parts: [{ kind: "text", id: `${key}:user`, role: "user", text }],
     };
-    this.rounds.push(round);
+
+    const existing = this.byKey.get(key);
+    if (existing) {
+      // 同 mid 重放：以重放为准重建该轮（旧部件的事件索引一并摘掉）
+      const idx = this.rounds.indexOf(existing);
+      if (idx >= 0) this.rounds[idx] = round;
+      this.unindexRound(existing);
+    } else {
+      this.rounds.push(round);
+    }
+
     this.byKey.set(key, round);
-    this.partIndex.set(round.parts[0]!.id, { round, index: 0 });
+    this.indexRound(round);
+    this.open = round;
     this.emit(round);
   }
 
   private onOutputStarted(env: Envelope): void {
-    const round = this.getCurrent();
+    const id = env.id!;
+
+    // 重见同一 id：说明对应的 part 已存在（本地已存过一段），
+    // 重建它而不是再挂一个，否则同一段文本会出现两次
+    const seen = this.partIndex.get(id);
+    if (seen) {
+      const part = seen.round.parts[seen.index];
+      if (part?.kind === "text") {
+        part.text = "";
+        part.streaming = true;
+        part.cancelled = false;
+        this.emit(seen.round);
+      }
+      return;
+    }
+
+    const round = this.open;
     if (!round) return;
+
     const part: TextPart = {
       kind: "text",
-      id: env.id!,
+      id,
       role: "assistant",
       text: "",
       streaming: true,
     };
     round.parts.push(part);
-    this.partIndex.set(env.id!, { round, index: round.parts.length - 1 });
+    this.partIndex.set(id, { round, index: round.parts.length - 1 });
     this.emit(round);
   }
 
   private onRecordStarted(env: Envelope): void {
-    const round = this.getCurrent();
+    const round = this.open;
     if (!round) return;
     const category = String(env.content.category ?? "unknown");
     const payload =
