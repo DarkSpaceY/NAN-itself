@@ -4,7 +4,13 @@
 // - 输入补发带 mid，后端网关按 mid 保证恰好一次
 // - 30s 心跳 ping（后端回 pong），借 send 失败感知死连接
 
-import { newMid, type ClientMessage, type ServerMessage } from "./protocol";
+import {
+  isEnvelope,
+  newMid,
+  type ClientMessage,
+  type Envelope,
+  type ServerMessage,
+} from "./protocol";
 import type { Store } from "./store";
 
 /** 最小 socket 接口（测试可注入 mock）。 */
@@ -20,6 +26,8 @@ export type SocketFactory = (url: string) => MinimalSocket;
 export interface WsClientOptions {
   url: string;
   store: Store;
+  /** 每个事件信封的旁路观察点（mapper 等并行消费者用）。 */
+  onEnvelope?: (env: Envelope) => void;
   /** 重连初始退避 ms，默认 1000 */
   backoffBaseMs?: number;
   /** 重连退避封顶 ms，默认 10000 */
@@ -31,6 +39,7 @@ export interface WsClientOptions {
 export class WsClient {
   private readonly url: string;
   private readonly store: Store;
+  private readonly onEnvelope: ((env: Envelope) => void) | null;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
   private readonly makeSocket: SocketFactory;
@@ -44,6 +53,7 @@ export class WsClient {
   constructor(opts: WsClientOptions) {
     this.url = opts.url;
     this.store = opts.store;
+    this.onEnvelope = opts.onEnvelope ?? null;
     this.backoffBaseMs = opts.backoffBaseMs ?? 1000;
     this.backoffMaxMs = opts.backoffMaxMs ?? 10000;
     this.makeSocket = opts.socketFactory ?? ((u) => new WebSocket(u));
@@ -107,6 +117,7 @@ export class WsClient {
         return;
       }
       this.store.applyMessage(msg);
+      if (this.onEnvelope && isEnvelope(msg)) this.onEnvelope(msg);
     });
 
     socket.addEventListener("close", () => {
