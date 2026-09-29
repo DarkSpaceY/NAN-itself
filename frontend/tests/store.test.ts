@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyEvent, initialState, Store, type NanState } from "../src/store";
+import { applyEvent, initialState, Store } from "../src/store";
 import { classifyEvent, isEnvelope, newMid, type Envelope } from "../src/protocol";
 
 function env(
@@ -19,7 +19,7 @@ describe("classifyEvent", () => {
 
   it("surface.* and unknown are not live", () => {
     expect(classifyEvent(env("surface.stage.focus" as never, {}, 1))).toBe("surface");
-    expect(classifyEvent(env("nope", {}, 1) as never)).toBe("unknown");
+    expect(classifyEvent(env("nope" as never, {}, 1) as never)).toBe("unknown");
   });
 });
 
@@ -92,13 +92,12 @@ describe("applyEvent", () => {
     );
     expect(s.items["r1"]).toMatchObject({ kind: "record", state: "running", category: "tool_call" });
 
-    s = applyEvent(
-      s,
-      env("record_detail", { entries: [{ kind: "field", label: "status", value: "ok" }] }, 2, {
-        id: "r1",
-      }),
-    );
-    expect(s.items["r1"]!.entries).toEqual([{ kind: "field", label: "status", value: "ok" }]);
+    s = applyEvent(s, env("record_detail", { entries: [{ kind: "field", label: "status", value: "ok" }] }, 2, {
+      id: "r1",
+    }));
+    expect((s.items["r1"] as { entries?: unknown }).entries).toEqual([
+      { kind: "field", label: "status", value: "ok" },
+    ]);
 
     s = applyEvent(s, env("record_done", { duration_s: 0.4 }, 3, { id: "r1" }));
     expect(s.items["r1"]).toMatchObject({ state: "done", durationS: 0.4 });

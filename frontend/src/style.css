@@ -46,9 +46,9 @@ html, body {
   inset: 0;
 }
 
-/* ---- 中央 dock ---- */
+/* ---- 中央 dock（React: ThreadPrimitive.Root） ---- */
 
-#dock {
+.dock-root {
   position: absolute;
   left: 50%;
   bottom: 24px;
@@ -150,9 +150,8 @@ html, body {
 
 #dock-send:disabled { opacity: 0.3; cursor: default; }
 
-/* 连接状态：输入框左上角小点 */
-#dock-input-row::before {
-  content: "";
+/* 连接状态：输入框左侧小点 */
+.conn-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -160,9 +159,9 @@ html, body {
   margin: 6px 4px 0 0;
   flex-shrink: 0;
 }
-#dock[data-connection="open"] #dock-input-row::before { background: var(--dot-done); }
-#dock[data-connection="connecting"] #dock-input-row::before { background: var(--dot-run); }
-#dock[data-connection="closed"] #dock-input-row::before { background: var(--dot-fail); }
+.conn-dot[data-state="open"] { background: var(--dot-done); }
+.conn-dot[data-state="connecting"] { background: var(--dot-run); }
+.conn-dot[data-state="closed"] { background: var(--dot-fail); }
 
 /* ---- 历史流 ---- */
 
@@ -269,3 +268,20 @@ html, body {
 .entry { display: flex; gap: 8px; padding: 1px 0; }
 .entry-label { color: var(--text-faint); flex-shrink: 0; }
 .entry-value { word-break: break-all; white-space: pre-wrap; }
+
+/* details 版详情 */
+.tool-detail summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 12px;
+  list-style: none;
+}
+.tool-detail[open] summary { margin-bottom: 6px; }
+.tool-detail summary:hover { color: var(--text); }
+
+.empty-hint {
+  color: var(--text-faint);
+  text-align: center;
+  padding: 24px 0;
+  font-size: 13px;
+}

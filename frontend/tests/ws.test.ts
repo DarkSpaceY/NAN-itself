@@ -55,7 +55,6 @@ function hello(seq: number) {
 
 describe("WsClient", () => {
   let store: Store;
-  let timers: number[];
 
   beforeEach(() => {
     vi.useFakeTimers();
