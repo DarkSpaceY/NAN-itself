@@ -45,9 +45,6 @@ dependencies = [
 # CI installs the framework only; its tests for the builtin content live
 # in tests/builtin/ and are excluded there.
 [project.optional-dependencies]
-desktop = [
-    "pywebview>=5.4",
-]
 perception = [
     "easyocr>=1.7.2",
     "face-recognition>=1.3.0",
@@ -86,7 +83,6 @@ dev = [
 
 [project.scripts]
 nan-itself = "nan_itself:main"
-nan-desktop = "nan_itself.desktop:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]

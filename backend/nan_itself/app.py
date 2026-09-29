@@ -28,9 +28,9 @@ async def run_agent_process(
 ) -> None:
     """Run the agent process until stopped.
 
-    `stop` lets an embedding host (e.g. the pywebview desktop
-    shell) inject its own stop signal; signal handlers are only
-    installed when this loop owns the main thread.
+    `stop` lets an embedding host inject its own stop signal;
+    signal handlers are only installed when this loop owns the
+    main thread.
     """
     # --------------------------------------------------------------
     # Environment: NAN talks to local models on loopback
@@ -201,7 +201,7 @@ async def run_agent_process(
         )
 
         # ----------------------------------------------------------
-        # Stop signal: either the injected event (desktop shell)
+        # Stop signal: either the injected event (embedding host)
         # or OS signals (terminal run).
         # ----------------------------------------------------------
 
