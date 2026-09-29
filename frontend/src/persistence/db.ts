@@ -59,11 +59,26 @@ function reqAsPromise<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 export function idbRoundStore(): RoundStore {
-  let dbp: Promise<IDBDatabase> | null = null;
+  let conn: IDBDatabase | null = null;
+  let opening: Promise<IDBDatabase> | null = null;
 
-  const db = (): Promise<IDBDatabase> => {
-    dbp ??= openDB();
-    return dbp;
+  const db = async (): Promise<IDBDatabase> => {
+    if (conn) return conn;
+
+    opening ??= openDB();
+    const dbi = await opening;
+
+    // 别的上下文（另一个标签页、deleteDatabase、版本升级）要求
+    // 让出连接时必须关闭，否则那个请求会一直 blocked。关掉后清空
+    // 缓存，下次调用自动重开。
+    dbi.onversionchange = () => {
+      dbi.close();
+      conn = null;
+      opening = null;
+    };
+
+    conn = dbi;
+    return conn;
   };
 
   return {
