@@ -44,13 +44,32 @@ export function createMockClient(opts: MockClientOptions): MockClient {
     await sleep(300);
     emit("record_done", { duration_s: 1.1 }, { id: r1 });
 
-    // 流式回复
+    // 流式回复：刻意包含各种 markdown 元素，便于肉眼核对渲染
     const stream = id(2);
     emit("output_started", {}, { id: stream });
-    const reply =
-      "已经读完 main.ts。当前是数据层 + dock 的骨架：store 订阅式状态源，ws 负责重连与重放，" +
-      "mapper 把事件流折叠成对话轮。接下来我会接入舞台布局引擎。\n\n第二段用于观察换行与长文本折行表现——" +
-      "拖一下上拉把手看看历史面板的高度手感，轻点把手可以收起。";
+    const reply = [
+      "已经读完 `main.ts`。当前是**数据层 + dock** 的骨架：",
+      "",
+      "1. store —— 订阅式状态源",
+      "2. ws —— 重连与重放",
+      "3. mapper —— 把事件流折叠成对话轮",
+      "",
+      "```ts",
+      "const faces = deriveFaces(Object.values(state.items));",
+      "const layout = computeLayout(faces);",
+      "```",
+      "",
+      "| 层 | 职责 |",
+      "| --- | --- |",
+      "| store | 事件 → 状态 |",
+      "| mapper | 事件 → 对话轮 |",
+      "",
+      "行内公式 $E = mc^2$，块级公式：",
+      "",
+      "$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$",
+      "",
+      "> 引用一段话，看看 blockquote 与长文本折行的表现。",
+    ].join("\n");
     for (let i = 0; i < reply.length; i += 3) {
       emit("output_delta", { text: reply.slice(i, i + 3) }, { id: stream });
       await sleep(24);

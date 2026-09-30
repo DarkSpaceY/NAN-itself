@@ -8,6 +8,7 @@ import { computeLayout, type Face } from "../stage/engine";
 import { deriveFaces } from "../stage/faces";
 import { toolTitle } from "../history/mapper";
 import type { Item, OutputItem, RecordItem, Store } from "../store";
+import { Markdown } from "./markdown";
 
 const FADE_MS = 400;
 
@@ -88,8 +89,7 @@ function OutputFace({ item }: { item: OutputItem }) {
         <span className="face-meta">{stateLabel(item.state)}</span>
       </div>
       <div className="face-text">
-        {item.text}
-        {item.state === "streaming" && <span className="cursor">▍</span>}
+        <Markdown text={item.text} />
         {!item.text && item.state === "streaming" && (
           <span className="face-placeholder">思考中…</span>
         )}
