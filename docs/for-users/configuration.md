@@ -1,12 +1,13 @@
 # Configuration
 
-Configuration lives in two layers, and there are no environment
+Configuration lives in three files, and there are no environment
 variables to set:
 
 - `config/settings.yaml` — core framework parameters only. Modules
   never appear here.
 - `config/modules/<module_id>.yaml` — one file per module, loaded and
   validated by the module itself.
+- `config/sources.yaml` — the source block list (see below).
 
 ## settings.yaml
 
@@ -52,6 +53,36 @@ events:
   subscriber_queue_size: 2000
   input_dedup_cache_size: 256
 ```
+
+## Source block list
+
+`config/sources.yaml` marks sources as if they did not exist: a
+listed source is never loaded, and one that is already loaded is
+unloaded by the next discovery scan.
+
+```yaml
+block:
+  modules: [audio, vision, voice]
+  tools: [calculation, command]
+  skills: [writing-modules]
+```
+
+Matching is by name, never by path:
+
+| Kind | Matched against | Source | Name |
+|---|---|---|---|
+| `modules` | source-file stem | `builtin/modules/voice.py` | `voice` |
+| `tools` | source-file stem | `builtin/tools/mcps/calculation.yaml` | `calculation` |
+| `tools` | source-file stem | `builtin/tools/local/search.py` | `search` |
+| `skills` | skill directory name | `builtin/skills/writing-modules/` | `writing-modules` |
+
+The file is read on every discovery pass, so an edit takes effect
+without a restart. An empty or missing list blocks nothing; a
+malformed file is logged as a warning and treated as empty — it never
+crashes the agent.
+
+This is a discovery-layer filter, not a permission system: a blocked
+source is indistinguishable from a deleted one.
 
 ## Module configuration
 

@@ -20,6 +20,16 @@ once a stable release line starts.
 - Repository restructured: `src/nan_itself/` → `backend/nan_itself/`
   (import name unchanged), symmetric with `frontend/` and `infraend/`.
 - Open-source facade: CI workflow, CONTRIBUTING, SECURITY, changelog.
+- Source block list (`config/sources.yaml`): naming a module, tool or
+  skill under `block:` keeps it out of the registry — every discovery
+  pass filters the candidate set, so a blocked source is never loaded
+  and an already-loaded one is unloaded on the next scan. See
+  [`docs/for-users/configuration.md`](docs/for-users/configuration.md).
+- Cooperative pause: inbound `pause` / `resume` gates the agent's own
+  autonomous loop at a turn boundary and never propagates to
+  subagents; the state rides on the existing `status` event as
+  `state: "paused"`. The contract is in
+  [`frontend/src/protocol.ts`](frontend/src/protocol.ts).
 
 ### Changed
 
