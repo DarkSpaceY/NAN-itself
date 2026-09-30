@@ -22,16 +22,7 @@ from .utils.llm import LLMProvider
 settings = get_settings()
 
 
-async def run_agent_process(
-    stop: asyncio.Event | None = None,
-    install_signals: bool = True,
-) -> None:
-    """Run the agent process until stopped.
-
-    `stop` lets an embedding host inject its own stop signal;
-    signal handlers are only installed when this loop owns the
-    main thread.
-    """
+async def run_agent_process() -> None:
     # --------------------------------------------------------------
     # Environment: NAN talks to local models on loopback
     # interfaces; ambient shell proxies must never intercept that
@@ -204,8 +195,7 @@ async def run_agent_process(
         )
 
         # ----------------------------------------------------------
-        # Stop signal: either the injected event (embedding host)
-        # or OS signals (terminal run).
+        # Stop signal.
         # ----------------------------------------------------------
 
         stop_received = asyncio.Event()
@@ -218,15 +208,14 @@ async def run_agent_process(
             agent.request_stop()
             stop_received.set()
 
-        if install_signals:
-            for sig in (
-                signal.SIGINT,
-                signal.SIGTERM,
-            ):
-                running_loop.add_signal_handler(
-                    sig,
-                    _request_stop,
-                )
+        for sig in (
+            signal.SIGINT,
+            signal.SIGTERM,
+        ):
+            running_loop.add_signal_handler(
+                sig,
+                _request_stop,
+            )
 
         logger.info(
             "NAN is running. Open the gateway frontend to talk."
@@ -236,9 +225,7 @@ async def run_agent_process(
         # Run until stopped.
         # ----------------------------------------------------------
 
-        await (
-            stop if stop is not None else stop_received
-        ).wait()
+        await stop_received.wait()
 
     finally:
         # ----------------------------------------------------------
