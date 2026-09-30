@@ -76,17 +76,24 @@ class SkillRegistry:
     def discover_roots(
         self,
         roots: Iterable[Path],
+        skip: frozenset[str] = frozenset(),
     ) -> None:
         """
         Re-scan every root. Removed directories are unregistered;
         changed directories are re-registered transactionally.
+
+        `skip` lists skill directory names that must be treated as
+        absent: they are excluded from the candidate set, so they
+        are never registered and an already-registered one is
+        unregistered by this same scan.
         """
         for root in roots:
-            self.discover_root(root)
+            self.discover_root(root, skip=skip)
 
     def discover_root(
         self,
         root: Path,
+        skip: frozenset[str] = frozenset(),
     ) -> None:
         root = root.resolve()
 
@@ -101,6 +108,7 @@ class SkillRegistry:
             if (
                 path.is_dir()
                 and not path.name.startswith("_")
+                and path.name not in skip
                 and (
                     path / SKILL_FILENAME
                 ).is_file()
@@ -110,7 +118,7 @@ class SkillRegistry:
         # A root that is itself a skill directory is also accepted.
         if (
             root / SKILL_FILENAME
-        ).is_file():
+        ).is_file() and root.name not in skip:
             current.add(root)
 
         known = {

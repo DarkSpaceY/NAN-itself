@@ -67,6 +67,7 @@ from typing import Any
 import mcp.types as types
 from loguru import logger
 
+from nan_itself import dev as _dev
 from nan_itself.utils import paths as _paths
 
 from . import local as local_backend
@@ -1222,6 +1223,14 @@ class ProviderRuntime:
             exist_ok=True,
         )
 
+        # Development-time block list, read once per scan. A
+        # blocked source is dropped from the candidate set, so it
+        # is never loaded and an already-loaded one is removed
+        # below as a plain source removal.
+        blocked_names = _dev.blocked(
+            "tools"
+        )
+
         current_files = {
             path.resolve()
             for path in root.iterdir()
@@ -1230,6 +1239,7 @@ class ProviderRuntime:
                 and path.suffix.lower()
                 in {".yaml", ".yml"}
                 and not path.name.startswith("_")
+                and path.stem not in blocked_names
             )
         }
 
@@ -1306,6 +1316,14 @@ class ProviderRuntime:
             exist_ok=True,
         )
 
+        # Development-time block list, read once per scan. A
+        # blocked source is dropped from the candidate set, so it
+        # is never loaded and an already-loaded one is removed
+        # below as a plain source removal.
+        blocked_names = _dev.blocked(
+            "tools"
+        )
+
         current_files = {
             path.resolve()
             for path in root.rglob(
@@ -1314,6 +1332,7 @@ class ProviderRuntime:
             if (
                 path.is_file()
                 and not path.name.startswith("_")
+                and path.stem not in blocked_names
                 and local_backend.has_tool_header(
                     path
                 )

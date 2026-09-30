@@ -1,0 +1,29 @@
+# Development-time block list.
+#
+# Sources listed here are treated as if they did not exist: they
+# are never loaded, and an already-loaded one is unloaded by the
+# next discovery scan. No restart is needed -- edit this file and
+# the change takes effect on the following scan.
+#
+# Matching rules:
+#   modules / tools: the source-file stem
+#     builtin/modules/voice.py            -> voice
+#     builtin/tools/mcps/calculation.yaml -> calculation
+#     builtin/tools/local/search.py       -> search
+#   skills: the skill directory name
+#     builtin/skills/writing-modules      -> writing-modules
+#
+# An empty (or missing) list blocks nothing. A malformed file is
+# logged as a warning and treated as empty; it never crashes the
+# agent. This file is for local debugging only.
+
+dev:
+  block:
+    # 联调临时启用：屏蔽持续推送上下文的感知模块，让 agent 安静下来
+    # （inbox 绝不能屏蔽，它是用户输入的入口）
+    modules: [audio, vision, voice, network, system]
+    # modules: [audio, vision, voice]
+    tools: []
+    # tools: [calculation, command]
+    skills: []
+    # skills: [writing-modules]

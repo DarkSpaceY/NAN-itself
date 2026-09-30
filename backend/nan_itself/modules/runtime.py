@@ -14,6 +14,7 @@ from loguru import logger
 from . import deps as _deps
 from . import loading as _loading
 from . import persistence as _persistence
+from nan_itself import dev as _dev
 from nan_itself.utils import paths as _paths
 from .model import (
     DataSpace,
@@ -1024,6 +1025,14 @@ class Facade:
         self,
         root: Path,
     ) -> None:
+        # Development-time block list, read once per scan. A
+        # blocked source is dropped from the candidate set, so it
+        # is never loaded and an already-loaded one is unloaded
+        # below as a plain removal.
+        blocked_names = _dev.blocked(
+            "modules"
+        )
+
         # One resolved-source index for the whole scan. Both the
         # removal lookup and the already-loaded lookup below would
         # otherwise walk every record once per file.
@@ -1044,6 +1053,7 @@ class Facade:
             if (
                 path.is_file()
                 and not path.name.startswith("_")
+                and path.stem not in blocked_names
                 and _loading.has_module_header(
                     path
                 )
