@@ -57,7 +57,7 @@ export interface NanState {
   /** 已应用的最大事件 seq（hello 之后用于去重重放）。 */
   lastSeq: number;
   /** 最近一次 status 事件的状态。 */
-  status: "working" | "idle" | null;
+  status: "working" | "idle" | "paused" | null;
   /** 对话轮：user_input 边界，append-only。 */
   rounds: Round[];
   /** 舞台素材：按事件 id 配对聚合的 output/record。 */
@@ -109,7 +109,10 @@ export function applyEvent(state: NanState, env: Envelope): NanState {
 
     case "status": {
       const state_ = env.content.state;
-      next.status = state_ === "working" || state_ === "idle" ? state_ : state.status;
+      next.status =
+        state_ === "working" || state_ === "idle" || state_ === "paused"
+          ? state_
+          : state.status;
       return next;
     }
 

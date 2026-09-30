@@ -50,7 +50,7 @@ export interface UserInputContent {
 
 /** status.content */
 export interface StatusContent {
-  state: "working" | "idle";
+  state: "working" | "idle" | "paused";
   agent_hash?: string;
   parent_hash?: string;
   depth?: number;
@@ -156,7 +156,17 @@ export interface PingMessage {
   t: "ping";
 }
 
-export type ClientMessage = InputMessage | PingMessage;
+/** 请求暂停自主循环（协作式：当前轮跑完才停，不开新轮）。 */
+export interface PauseMessage {
+  t: "pause";
+}
+
+/** 请求恢复自主循环。 */
+export interface ResumeMessage {
+  t: "resume";
+}
+
+export type ClientMessage = InputMessage | PingMessage | PauseMessage | ResumeMessage;
 
 // ------------------------------------------------------------------
 // 类型守卫

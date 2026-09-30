@@ -921,6 +921,89 @@ def test_stop_takes_effect_at_the_next_turn_boundary():
     assert agent.stopping
 
 
+def test_loop_pause_halts_new_turns_until_resume():
+    """
+    Pause is cooperative and takes effect at a turn boundary: the
+    in-flight turn finishes, no further turn opens while paused, and
+    resume picks the loop back up. The "paused" and post-resume
+    "working" states ride the existing status channel.
+    """
+    bus = EventBus()
+
+    sink.attach(bus)
+
+    engine = CapturingEngine()
+
+    agent = make_agent(
+        engine=engine,
+    )
+
+    def pause_after_second(
+        engine_self,
+        turn,
+    ):
+        if len(engine_self.executions) >= 2:
+            agent.pause()
+
+    engine.on_execute = pause_after_second
+
+    def statuses() -> list[str]:
+        return [
+            event["content"].get("state")
+            for event in bus.history()
+            if event["t"] == "status"
+        ]
+
+    async def scenario():
+        task = asyncio.create_task(agent.loop())
+
+        # Park right after the second turn boundary: wait until the
+        # paused state reached the bus.
+        for _ in range(400):
+            if "paused" in statuses():
+                break
+
+            await asyncio.sleep(0.01)
+
+        assert agent.paused
+        assert "paused" in statuses()
+
+        cycles_at_pause = agent.cycles
+        executions_at_pause = len(engine.executions)
+
+        # Polling while paused opens no new turn.
+        await asyncio.sleep(0.6)
+
+        assert agent.cycles == cycles_at_pause
+        assert len(engine.executions) == executions_at_pause
+
+        agent.resume()
+
+        # The loop resumes at the next boundary and opens turns
+        # again.
+        for _ in range(400):
+            if agent.cycles > cycles_at_pause:
+                break
+
+            await asyncio.sleep(0.01)
+
+        assert agent.cycles > cycles_at_pause
+
+        agent.request_stop()
+
+        await asyncio.wait_for(task, timeout=2.0)
+
+    run(scenario())
+
+    recorded = statuses()
+
+    # "paused" appeared and a fresh "working" followed it (the
+    # resume announcement).
+    assert "paused" in recorded
+
+    assert "working" in recorded[recorded.index("paused") + 1 :]
+
+
 # ============================================================================
 # InboxModule semantics (loaded straight from its hot-reload file)
 # ============================================================================

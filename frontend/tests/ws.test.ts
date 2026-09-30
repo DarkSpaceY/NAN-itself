@@ -164,6 +164,19 @@ describe("WsClient", () => {
     expect(typeof sent.mid).toBe("string");
   });
 
+  it("pause()/resume() send the right frames", () => {
+    const client = makeClient();
+    client.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    client.pause();
+    client.resume();
+    expect(sock.sent.map((s) => JSON.parse(s))).toEqual([
+      { t: "pause" },
+      { t: "resume" },
+    ]);
+  });
+
   it("does not send while socket is down", () => {
     const client = makeClient();
     client.connect();

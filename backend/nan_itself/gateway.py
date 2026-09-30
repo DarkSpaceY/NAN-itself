@@ -9,6 +9,8 @@ Server-authoritative stream:
     - on connect: hello + history replay
     - live: forward subscribed events
     - inbound: {"t":"input","text"} -> on_input(text)
+              {"t":"pause"}         -> on_pause(True)
+              {"t":"resume"}        -> on_pause(False)
 
 The gateway owns nothing about agent semantics; it only formats
 the stream and inserts a date divider when the wall-clock date
@@ -41,6 +43,7 @@ class Gateway:
         host: str = "127.0.0.1",
         port: int = 8765,
         on_input: Callable[[str, Any], None] | None = None,
+        on_pause: Callable[[bool], None] | None = None,
         state_provider: Callable[[], dict] | None = None,
         frontend_dir: str | Path | None = None,
         dedup_cache_size: int = 256,
@@ -49,6 +52,7 @@ class Gateway:
         self.host = host
         self.port = port
         self.on_input = on_input
+        self.on_pause = on_pause
         self.state_provider = state_provider
         self.frontend_dir = Path(frontend_dir) if frontend_dir else None
         self.dedup_cache_size = dedup_cache_size
@@ -297,6 +301,12 @@ class Gateway:
                     {"t": "pong", "content": {}},
                 )
             )
+        elif kind in ("pause", "resume"):
+            if self.on_pause is not None:
+                try:
+                    self.on_pause(kind == "pause")
+                except Exception as e:
+                    logger.error(f"on_pause callback error: {e}")
 
     # ------------------------------------------------------------------
     # Helpers

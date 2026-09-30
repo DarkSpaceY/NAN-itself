@@ -33,6 +33,11 @@ paced by autonomous_interval. Mid-turn abort is always the
 whole task's cancellation, never an in-flight turn's. Exit
 cleanup is a single path: descendants are stopped/cancelled and
 a subagent's final report is recorded as a structured Report.
+
+Pause is cooperative too: it only gates the agent's OWN
+autonomous turn loop and takes effect at a turn boundary (the
+in-flight turn always runs to completion); it never propagates
+to subagents.
 """
 
 from __future__ import annotations
@@ -80,6 +85,11 @@ DEFAULT_BACKOFF = (
     30.0,
     60.0,
 )
+
+
+# Poll interval while paused: the loop wakes at most this often to
+# re-check `_paused` / a stop request.
+PAUSE_POLL_SECONDS = 0.5
 
 
 class Agent:
@@ -164,6 +174,10 @@ class Agent:
         self._stopping = False
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
+
+        # Cooperative pause of this agent's own autonomous loop;
+        # read at the next turn boundary.
+        self._paused = False
 
     @property
     def stopping(self) -> bool:
@@ -714,6 +728,43 @@ class Agent:
         return child
 
     # ==================================================================
+    # Pause / resume
+    # ==================================================================
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def pause(self) -> None:
+        """
+        Pause this agent's own autonomous loop.
+
+        Cooperative: the flag is read at the next turn boundary, so
+        an in-flight turn always runs to completion; the loop then
+        parks until resume(). It never propagates to subagents.
+        """
+        self._paused = True
+
+    def resume(self) -> None:
+        """Resume the autonomous loop at the next turn boundary."""
+        self._paused = False
+
+    async def _wait_while_paused(self) -> bool:
+        """
+        Park while paused, polling at PAUSE_POLL_SECONDS.
+
+        Returns True only when a stop was requested in the
+        meantime (the caller then breaks the loop).
+        """
+        while self._paused:
+            if await self._interruptible_wait(
+                PAUSE_POLL_SECONDS,
+            ):
+                return True
+
+        return False
+
+    # ==================================================================
     # Stop / teardown
     # ==================================================================
 
@@ -883,18 +934,14 @@ class Agent:
 
         1 agent = 1 Task: `await self.run()` inline, no per-turn
         task and no wait()/event race.
+
+        Pause only gates this agent's own turn loop and takes
+        effect at a turn boundary (cooperative); it does not
+        propagate to subagents.
         """
         # create_task copies the parent context; every event this
         # agent emits carries its own identity explicitly.
-        sink.emit(
-            "status",
-            content={
-                "state": "working",
-                "agent_hash": self.agent_hash,
-                "parent_hash": self.parent_hash,
-                "depth": self.depth,
-            },
-        )
+        self._emit_status("working")
 
         backoff_index = 0
         cancelled = False
@@ -904,6 +951,16 @@ class Agent:
                 not self.done
                 and not self._stopping
             ):
+                # Cooperative pause: checked before every turn,
+                # never mid-turn.
+                if self._paused:
+                    self._emit_status("paused")
+
+                    if await self._wait_while_paused():
+                        break
+
+                    self._emit_status("working")
+
                 try:
                     turn = await self.run()
 
@@ -967,6 +1024,20 @@ class Agent:
     # ==================================================================
     # Small helpers
     # ==================================================================
+
+    def _emit_status(self, state: str) -> None:
+        """
+        Emit one status event carrying this agent's own identity.
+        """
+        sink.emit(
+            "status",
+            content={
+                "state": state,
+                "agent_hash": self.agent_hash,
+                "parent_hash": self.parent_hash,
+                "depth": self.depth,
+            },
+        )
 
     @staticmethod
     async def _cancel_and_suppress(

@@ -15,6 +15,7 @@ const mapper = new Mapper();
 const db = createRoundStore();
 
 let sendInput: (text: string) => void = () => {};
+let setPaused: (paused: boolean) => void = () => {};
 
 const root = createRoot(document.getElementById("root")!);
 root.render(
@@ -23,6 +24,7 @@ root.render(
     mapper,
     db,
     sendInput: (text) => sendInput(text),
+    setPaused: (paused) => setPaused(paused),
   }),
 );
 
@@ -47,6 +49,7 @@ async function boot() {
       onConnection: (state) => store.setConnection(state),
     });
     sendInput = (text) => mock.sendInput(text);
+    setPaused = (paused) => (paused ? mock.pause() : mock.resume());
     mock.connect();
     return;
   }
@@ -63,6 +66,7 @@ async function boot() {
   store.setConnection("connecting");
   client.connect();
   sendInput = (text) => client.sendInput(text);
+  setPaused = (paused) => (paused ? client.pause() : client.resume());
 }
 
 void boot();

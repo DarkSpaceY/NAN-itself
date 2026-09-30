@@ -58,6 +58,14 @@ describe("applyEvent", () => {
     expect(s.status).toBe("idle");
   });
 
+  it("status paused flows through the store", () => {
+    const store = new Store();
+    store.applyMessage(env("status", { state: "paused" }, 1));
+    expect(store.getState().status).toBe("paused");
+    store.applyMessage(env("status", { state: "working" }, 2));
+    expect(store.getState().status).toBe("working");
+  });
+
   it("output stream: started → delta → done accumulates text", () => {
     let s = initialState();
     s = applyEvent(s, env("output_started", {}, 1, { id: "e1" }));

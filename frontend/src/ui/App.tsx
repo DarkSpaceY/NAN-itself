@@ -1,7 +1,7 @@
 // App：ExternalStoreRuntime 对接自持 mapper + 中央 dock。
 // 布局：ThreadPrimitive.Root 包整个 dock（面板 + 把手 + 输入行）。
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -22,9 +22,10 @@ export interface AppProps {
   mapper: Mapper;
   db: RoundStore;
   sendInput: (text: string) => void;
+  setPaused: (paused: boolean) => void;
 }
 
-export function App({ store, mapper, db, sendInput }: AppProps) {
+export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
   // mapper 轮次是原地变更的，用版本号做快照；messages 直接从
   // getRounds() 现取，不按数组引用缓存（引用恒定不会失效）。
   const roundsVersion = useSyncExternalStore(
@@ -36,6 +37,16 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
     useCallback((cb) => store.subscribe(cb), [store]),
     () => store.getState(),
   );
+
+  // 暂停按钮：状态由后端 status 事件回传（协作式，可能在当前轮
+  // 跑完后才生效）。点击「暂停」后到后端确认 paused 之前显示等待
+  // 态；「继续」即时派发，无需等待态。
+  const isPaused = nanState.status === "paused";
+  const [pausePending, setPausePending] = useState(false);
+
+  useEffect(() => {
+    if (nanState.status === "paused") setPausePending(false);
+  }, [nanState.status]);
 
   // 持久化：关闭轮立即落盘，活动轮节流
   useEffect(() => {
@@ -106,6 +117,27 @@ export function App({ store, mapper, db, sendInput }: AppProps) {
         <ComposerPrimitive.Root id="dock-input-row">
           <span className="conn-dot" data-state={nanState.connection} />
           <ComposerPrimitive.Input id="dock-input" rows={1} autoFocus />
+          <button
+            id="dock-pause"
+            type="button"
+            data-state={isPaused ? "paused" : "running"}
+            disabled={pausePending}
+            title={
+              isPaused
+                ? "继续自主循环"
+                : "暂停自主循环（当前轮跑完后生效）"
+            }
+            onClick={() => {
+              if (isPaused) {
+                setPaused(false);
+              } else {
+                setPaused(true);
+                setPausePending(true);
+              }
+            }}
+          >
+            {pausePending ? "暂停中…" : isPaused ? "继续" : "暂停"}
+          </button>
           <ComposerPrimitive.Send id="dock-send">↑</ComposerPrimitive.Send>
         </ComposerPrimitive.Root>
       </ThreadPrimitive.Root>

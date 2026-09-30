@@ -171,6 +171,33 @@ html, body {
 
 #dock-send:disabled { opacity: 0.3; cursor: default; }
 
+/* 暂停/恢复按钮：与发送按钮同行同高，视觉上让位（次级样式） */
+
+#dock-pause {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#dock-pause:hover { color: var(--text); border-color: var(--text-faint); }
+
+#dock-pause[data-state="paused"] {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+/* 等待后端确认暂停：降低不透明度表达等待态 */
+#dock-pause:disabled { opacity: 0.4; cursor: default; }
+
 /* 连接状态：输入框左侧小点 */
 .conn-dot {
   width: 6px;

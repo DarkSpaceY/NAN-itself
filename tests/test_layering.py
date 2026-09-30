@@ -117,3 +117,49 @@ def test_gateway_hello_defaults_to_idle():
     assert payload["content"]["status"] == {
         "state": "idle",
     }
+
+
+def test_gateway_routes_pause_and_resume_to_on_pause():
+    calls: list[bool] = []
+
+    gateway = Gateway(
+        bus=EventBus(),
+        host="127.0.0.1",
+        port=0,
+        on_input=lambda text, mid: None,
+        on_pause=calls.append,
+    )
+
+    # The pause/resume branch touches only on_pause: no websocket
+    # is needed to drive it.
+    gateway._handle_message(None, '{"t":"pause"}')
+
+    gateway._handle_message(None, '{"t":"resume"}')
+
+    assert calls == [True, False]
+
+
+def test_gateway_contains_on_pause_callback_errors():
+    def boom(paused: bool) -> None:
+        raise RuntimeError("boom")
+
+    gateway = Gateway(
+        bus=EventBus(),
+        host="127.0.0.1",
+        port=0,
+        on_pause=boom,
+    )
+
+    # A raising callback must not break the receive loop.
+    gateway._handle_message(None, '{"t":"pause"}')
+
+    gateway._handle_message(None, '{"t":"resume"}')
+
+
+def test_gateway_ignores_pause_without_callback():
+    gateway = _gateway()
+
+    # No on_pause wired: the message is simply ignored.
+    gateway._handle_message(None, '{"t":"pause"}')
+
+    gateway._handle_message(None, '{"t":"resume"}')

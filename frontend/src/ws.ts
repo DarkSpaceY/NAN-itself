@@ -85,6 +85,16 @@ export class WsClient {
     return mid;
   }
 
+  /** 请求暂停自主循环（协作式：后端在轮边界生效）。 */
+  pause(): void {
+    this.send({ t: "pause" });
+  }
+
+  /** 请求恢复自主循环。 */
+  resume(): void {
+    this.send({ t: "resume" });
+  }
+
   // -- 内部 ----------------------------------------------------------
 
   private dial(): void {

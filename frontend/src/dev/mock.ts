@@ -6,6 +6,8 @@ import type { Envelope } from "../protocol";
 export interface MockClient {
   connect(): void;
   sendInput(text: string): void;
+  pause(): void;
+  resume(): void;
 }
 
 export interface MockClientOptions {
@@ -18,6 +20,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export function createMockClient(opts: MockClientOptions): MockClient {
   let seq = 0;
   let running = false;
+  let paused = false;
+  let pauseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emit = (t: Envelope["t"], content: Record<string, unknown>, extra: Partial<Envelope> = {}) => {
     opts.onEnvelope({ seq: ++seq, ts: Date.now() / 1000, t, content, ...extra });
@@ -92,7 +96,29 @@ export function createMockClient(opts: MockClientOptions): MockClient {
       setTimeout(() => opts.onConnection("open"), 400);
     },
     sendInput(text) {
+      // 暂停状态下用户发消息 → 自动恢复（先回到 working）
+      if (paused || pauseTimer !== null) {
+        this.resume();
+      }
       void runScenario(text, `mock-mid-${Date.now()}`);
+    },
+    pause() {
+      if (paused || pauseTimer !== null) return;
+      // 协作式：模拟「当前轮跑完才停」的延迟后进入暂停态
+      pauseTimer = setTimeout(() => {
+        pauseTimer = null;
+        paused = true;
+        emit("status", { state: "paused" });
+      }, 300);
+    },
+    resume() {
+      if (pauseTimer !== null) {
+        clearTimeout(pauseTimer);
+        pauseTimer = null;
+      }
+      if (!paused) return;
+      paused = false;
+      emit("status", { state: "working" });
     },
   };
 }
