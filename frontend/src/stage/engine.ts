@@ -1,9 +1,10 @@
 // 舞台布局引擎：纯函数，语义与几何分离。
 //
 // 设计约束（方案B）：
-// - 面分两类：常驻面（当前对话轮）与临时面（机器活动/工作产物）
-// - 排序与占位：聚焦者占主位；无聚焦时按 类型默认权重 > 同权重最新优先
-// - LLM focus 标记（surface.* 事件）> 类型默认权重 > 最新优先
+// - 面分两类：常驻面（当前对话轮）与临时面（工具/步骤记录）
+// - 面的来源是前端对事件流的推断（后端只发事件，不参与渲染决策），
+//   见 stage/faces.ts
+// - 排序与占位：类型默认权重 > 同权重最新优先；首位占主位
 // - 临时面容量：舞台 ≥5 个面时最旧临时面进入 fading，动画后移除
 // - 面与历史互不关联：淡出不在历史留痕
 
@@ -18,8 +19,6 @@ export interface Face {
   kind: FaceKind;
   /** 类型默认权重：越大越靠前。 */
   weight: number;
-  /** LLM focus 标记（阶段4由 surface.* 驱动）。 */
-  focus: boolean;
   /** 同权重内最新优先的时序依据。 */
   createdAt: number;
   /** 淡出中的面：仍在舞台，动画结束后由宿主移除。 */
@@ -28,7 +27,7 @@ export interface Face {
 
 export interface Slot {
   id: string;
-  /** 主位（聚焦者）或次位。 */
+  /** 主位（排序首位）或次位。 */
   primary: boolean;
 }
 
@@ -54,15 +53,12 @@ export const DEFAULT_WEIGHTS: Record<string, number> = {
 
 /**
  * 计算舞台布局。
- * - 聚焦面（focus=true，多个时取最新）占主位
- * - 无聚焦时排序第一者占主位
+ * - 排序第一者占主位
  * - 超容量时最旧临时面标记 fading（常驻面永不淡出）
  * - fading 面不参与排序占位，但保留在 fadingIds 中供宿主动画
  */
 export function computeLayout(faces: readonly Face[]): LayoutResult {
-  const fadingIds = faces
-    .filter((f) => f.fading)
-    .map((f) => f.id);
+  const fadingIds = faces.filter((f) => f.fading).map((f) => f.id);
 
   const active = faces.filter((f) => !f.fading);
 
@@ -78,18 +74,15 @@ export function computeLayout(faces: readonly Face[]): LayoutResult {
 
   const staged = active.filter((f) => !toFade.has(f.id));
 
-  // 排序：focus > weight > createdAt 降序
+  // 排序：weight 降序 > createdAt 降序
   const sorted = [...staged].sort((a, b) => {
-    if (a.focus !== b.focus) return a.focus ? -1 : 1;
     if (a.weight !== b.weight) return b.weight - a.weight;
     return b.createdAt - a.createdAt;
   });
 
-  const focusTarget = sorted.find((f) => f.focus) ?? sorted[0];
-
-  const slots = sorted.map((f) => ({
+  const slots = sorted.map((f, i) => ({
     id: f.id,
-    primary: f === focusTarget,
+    primary: i === 0,
   }));
 
   return {

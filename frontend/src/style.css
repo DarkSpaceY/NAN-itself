@@ -277,14 +277,12 @@ html, body {
 }
 
 .tool-detail {
-  display: none;
   margin-top: 8px;
   border-top: 1px solid var(--border);
   padding-top: 8px;
   font-family: ui-monospace, "SF Mono", monospace;
   font-size: 12px;
 }
-.part.tool.open .tool-detail { display: block; }
 
 .entry { display: flex; gap: 8px; padding: 1px 0; }
 .entry-label { color: var(--text-faint); flex-shrink: 0; }
@@ -356,21 +354,45 @@ html, body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  gap: 6px;
   padding: 14px 16px;
   min-height: 0;
 }
 
-.face-label {
+/* 面头部：状态点 + 标题 + 右侧元信息 */
+.face-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.face-label {
   font-size: 11px;
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: 8px;
   flex-shrink: 0;
 }
+
+.face-title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.face-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.face-placeholder { color: var(--text-faint); }
 
 .face-text {
   font-size: 14px;

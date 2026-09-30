@@ -6,7 +6,6 @@ function face(id: string, opts: Partial<Face> = {}): Face {
     id,
     kind: "temp",
     weight: 50,
-    focus: false,
     createdAt: 1000,
     ...opts,
   };
@@ -37,22 +36,6 @@ describe("computeLayout", () => {
     ]);
     expect(r.slots[0]?.id).toBe("new");
     expect(r.slots[0]?.primary).toBe(true);
-  });
-
-  it("focus overrides weight and recency", () => {
-    const r = computeLayout([
-      face("heavy", { weight: 100, createdAt: 3 }),
-      face("focused", { weight: 10, createdAt: 1, focus: true }),
-    ]);
-    expect(r.slots[0]).toEqual({ id: "focused", primary: true });
-  });
-
-  it("multiple focus faces: latest focused is primary", () => {
-    const r = computeLayout([
-      face("f1", { focus: true, createdAt: 1 }),
-      face("f2", { focus: true, createdAt: 2 }),
-    ]);
-    expect(r.slots[0]?.id).toBe("f2");
   });
 
   it("resident face never fades on overflow", () => {
