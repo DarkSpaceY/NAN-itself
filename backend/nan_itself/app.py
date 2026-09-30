@@ -121,12 +121,6 @@ async def run_agent_process(
         # module and is echoed to the UI at once, so a user
         # message never seems to vanish during a long turn.
         # (mid dedup is the gateway's business.)
-        #
-        # A user message while paused auto-resumes the loop: the
-        # text still lands in the inbox and the next turn sees it.
-        if agent.paused:
-            agent.resume()
-
         inbox = modules.get("inbox")
 
         if inbox is None:
@@ -149,18 +143,11 @@ async def run_agent_process(
     def gateway_state() -> dict:
         # status 快照由 gateway 负责（从 bus 历史提取），
         # 这里只提供 app 才知道的身份信息。
-        state = {
+        return {
             "boot": boot_id,
             "model": settings.llm.model,
             "base_url": settings.llm.base_url,
         }
-
-        # 暂停是 app 才知道的实时状态；非暂停时不覆盖
-        # gateway 自己从 bus 历史取的 status。
-        if agent.paused:
-            state["status"] = {"state": "paused"}
-
-        return state
 
     gateway = Gateway(
         bus=bus,

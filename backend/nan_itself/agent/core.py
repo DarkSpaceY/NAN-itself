@@ -731,38 +731,18 @@ class Agent:
     # Pause / resume
     # ==================================================================
 
-    @property
-    def paused(self) -> bool:
-        return self._paused
-
     def pause(self) -> None:
         """
-        Pause this agent's own autonomous loop.
+        Pause this agent's own turn loop at the next turn boundary.
 
-        Cooperative: the flag is read at the next turn boundary, so
-        an in-flight turn always runs to completion; the loop then
-        parks until resume(). It never propagates to subagents.
+        Cooperative: an in-flight turn always runs to completion,
+        and the pause never propagates to subagents.
         """
         self._paused = True
 
     def resume(self) -> None:
-        """Resume the autonomous loop at the next turn boundary."""
+        """Let the loop start turns again."""
         self._paused = False
-
-    async def _wait_while_paused(self) -> bool:
-        """
-        Park while paused, polling at PAUSE_POLL_SECONDS.
-
-        Returns True only when a stop was requested in the
-        meantime (the caller then breaks the loop).
-        """
-        while self._paused:
-            if await self._interruptible_wait(
-                PAUSE_POLL_SECONDS,
-            ):
-                return True
-
-        return False
 
     # ==================================================================
     # Stop / teardown
@@ -956,7 +936,12 @@ class Agent:
                 if self._paused:
                     self._emit_status("paused")
 
-                    if await self._wait_while_paused():
+                    while self._paused and not self._stopping:
+                        await self._interruptible_wait(
+                            PAUSE_POLL_SECONDS,
+                        )
+
+                    if self._stopping:
                         break
 
                     self._emit_status("working")

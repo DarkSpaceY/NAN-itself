@@ -965,7 +965,8 @@ def test_loop_pause_halts_new_turns_until_resume():
 
             await asyncio.sleep(0.01)
 
-        assert agent.paused
+        # The paused state is announced on the status channel;
+        # that is the observable signal (no need to read the flag).
         assert "paused" in statuses()
 
         cycles_at_pause = agent.cycles

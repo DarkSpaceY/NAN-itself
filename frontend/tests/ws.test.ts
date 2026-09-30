@@ -164,6 +164,26 @@ describe("WsClient", () => {
     expect(typeof sent.mid).toBe("string");
   });
 
+  it("sendInput while paused resumes before sending", () => {
+    const client = makeClient();
+    client.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+
+    store.applyMessage({
+      seq: 1,
+      ts: 1,
+      t: "status",
+      content: { state: "paused" },
+    });
+
+    client.sendInput("hi");
+
+    const frames = sock.sent.map((s) => JSON.parse(s));
+    expect(frames.map((f) => f.t)).toEqual(["resume", "input"]);
+    expect(frames[1]!.text).toBe("hi");
+  });
+
   it("pause()/resume() send the right frames", () => {
     const client = makeClient();
     client.connect();

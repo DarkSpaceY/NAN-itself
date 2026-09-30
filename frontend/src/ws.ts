@@ -78,8 +78,18 @@ export class WsClient {
     this.store.setConnection("closed");
   }
 
-  /** 提交用户输入；mid 由本地生成，后端按 mid 去重。 */
+  /**
+   * 提交用户输入；mid 由本地生成，后端按 mid 去重。
+   *
+   * 暂停态下先发 resume：暂停时发消息即自动恢复（消息进 inbox，
+   * 下一轮模型看到）。这条策略属于交互约定，放在客户端；后端不
+   * 关心暂停与输入的先后关系。
+   */
   sendInput(text: string): string {
+    if (this.store.getState().status === "paused") {
+      this.send({ t: "resume" });
+    }
+
     const mid = newMid();
     this.send({ t: "input", text, mid });
     return mid;

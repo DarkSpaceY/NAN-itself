@@ -96,7 +96,8 @@ export function createMockClient(opts: MockClientOptions): MockClient {
       setTimeout(() => opts.onConnection("open"), 400);
     },
     sendInput(text) {
-      // 暂停状态下用户发消息 → 自动恢复（先回到 working）
+      // 与 WsClient 同一条客户端策略：暂停态下发消息先恢复。
+      // （策略在客户端；后端不关心暂停与输入的先后。）
       if (paused || pauseTimer !== null) {
         this.resume();
       }
