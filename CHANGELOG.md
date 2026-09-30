@@ -58,7 +58,7 @@ once a stable release line starts.
   `payload`, details are typed entries (`text` / `item` / `field` /
   `code`), and durations are numbers of seconds instead of formatted
   strings; the frontend owns all rendering. See
-  [`frontend/PROTOCOL.md`](frontend/PROTOCOL.md).
+  [`frontend/src/protocol.ts`](frontend/src/protocol.ts).
 - Module registration is validate-then-install: the dependency graph is
   checked on a copy before the record reaches any live table, so a
   dependency cycle is rejected with nothing installed. Previously the
