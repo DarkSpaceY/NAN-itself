@@ -67,7 +67,7 @@ from typing import Any
 import mcp.types as types
 from loguru import logger
 
-from nan_itself import dev as _dev
+from nan_itself import blocklist as _blocklist
 from nan_itself.utils import paths as _paths
 
 from . import local as local_backend
@@ -1223,11 +1223,11 @@ class ProviderRuntime:
             exist_ok=True,
         )
 
-        # Development-time block list, read once per scan. A
-        # blocked source is dropped from the candidate set, so it
-        # is never loaded and an already-loaded one is removed
-        # below as a plain source removal.
-        blocked_names = _dev.blocked(
+        # Source block list, read once per scan. A blocked source
+        # is dropped from the candidate set, so it is never loaded
+        # and an already-loaded one is removed below as a plain
+        # source removal.
+        blocked_names = _blocklist.blocked(
             "tools"
         )
 
@@ -1316,11 +1316,11 @@ class ProviderRuntime:
             exist_ok=True,
         )
 
-        # Development-time block list, read once per scan. A
-        # blocked source is dropped from the candidate set, so it
-        # is never loaded and an already-loaded one is removed
-        # below as a plain source removal.
-        blocked_names = _dev.blocked(
+        # Source block list, read once per scan. A blocked source
+        # is dropped from the candidate set, so it is never loaded
+        # and an already-loaded one is removed below as a plain
+        # source removal.
+        blocked_names = _blocklist.blocked(
             "tools"
         )
 

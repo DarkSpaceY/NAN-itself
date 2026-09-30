@@ -1,63 +1,64 @@
 """
-Development-time block list (config/dev.yaml, nan_itself.dev).
+Source block list (config/sources.yaml, nan_itself.blocklist).
 
-The dev block list is a debugging aid: listing a Module / Tool /
-Skill name there makes the runtime treat that source as absent.
-These tests pin the config contract -- a missing or broken file
-degrades to an empty block list and never raises -- and the
-candidate-set filtering that makes the "unload if already
-loaded" behaviour fall out of the existing discovery logic.
+Listing a Module / Tool / Skill name there makes the runtime
+treat that source as absent. These tests pin the config contract
+-- a missing or broken file degrades to an empty block list and
+never raises -- and the candidate-set filtering that makes the
+"unload if already loaded" behaviour fall out of the existing
+discovery logic.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from nan_itself import dev
-from nan_itself.dev import load_dev_config
+import pytest
+
+from nan_itself import blocklist
+from nan_itself.blocklist import load_blocklist
 
 
 # ============================================================================
-# load_dev_config
+# load_blocklist
 # ============================================================================
 
 
 def test_missing_file_yields_empty_block_list(
     tmp_path: Path,
 ) -> None:
-    config = load_dev_config(tmp_path / "dev.yaml")
+    config = load_blocklist(tmp_path / "sources.yaml")
 
-    assert config.dev.block.modules == []
-    assert config.dev.block.tools == []
-    assert config.dev.block.skills == []
+    assert config.block.modules == []
+    assert config.block.tools == []
+    assert config.block.skills == []
 
 
 def test_parses_the_three_block_lists(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "dev.yaml"
+    path = tmp_path / "sources.yaml"
 
     path.write_text(
-        "dev:\n"
-        "  block:\n"
-        "    modules: [audio, vision]\n"
-        "    tools: [calculation]\n"
-        "    skills: [writing-modules]\n",
+        "block:\n"
+        "  modules: [audio, vision]\n"
+        "  tools: [calculation]\n"
+        "  skills: [writing-modules]\n",
         encoding="utf-8",
     )
 
-    config = load_dev_config(path)
+    config = load_blocklist(path)
 
-    assert config.dev.block.modules == [
+    assert config.block.modules == [
         "audio",
         "vision",
     ]
 
-    assert config.dev.block.tools == [
+    assert config.block.tools == [
         "calculation",
     ]
 
-    assert config.dev.block.skills == [
+    assert config.block.skills == [
         "writing-modules",
     ]
 
@@ -65,79 +66,78 @@ def test_parses_the_three_block_lists(
 def test_broken_yaml_yields_empty_block_list(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "dev.yaml"
+    path = tmp_path / "sources.yaml"
 
     # Unclosed flow sequence: yaml.safe_load raises.
     path.write_text(
-        "dev: [1, 2\n",
+        "block: [1, 2\n",
         encoding="utf-8",
     )
 
-    config = load_dev_config(path)
+    config = load_blocklist(path)
 
-    assert config.dev.block.modules == []
-    assert config.dev.block.tools == []
-    assert config.dev.block.skills == []
+    assert config.block.modules == []
+    assert config.block.tools == []
+    assert config.block.skills == []
 
 
 def test_non_mapping_document_yields_empty_block_list(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "dev.yaml"
+    path = tmp_path / "sources.yaml"
 
     path.write_text(
         "- audio\n- vision\n",
         encoding="utf-8",
     )
 
-    config = load_dev_config(path)
+    config = load_blocklist(path)
 
-    assert config.dev.block.modules == []
+    assert config.block.modules == []
 
 
 def test_invalid_field_type_yields_empty_block_list(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "dev.yaml"
+    path = tmp_path / "sources.yaml"
 
     # modules must be a list of names, not a scalar.
     path.write_text(
-        "dev:\n"
-        "  block:\n"
-        "    modules: 42\n",
+        "block:\n"
+        "  modules: 42\n",
         encoding="utf-8",
     )
 
-    config = load_dev_config(path)
+    config = load_blocklist(path)
 
-    assert config.dev.block.modules == []
-    assert config.dev.block.tools == []
-    assert config.dev.block.skills == []
+    assert config.block.modules == []
+    assert config.block.tools == []
+    assert config.block.skills == []
 
 
 def test_reload_picks_up_edits(
     tmp_path: Path,
 ) -> None:
     """The file is re-read per call: edits need no restart."""
-    path = tmp_path / "dev.yaml"
+    path = tmp_path / "sources.yaml"
 
     path.write_text(
-        "dev:\n  block:\n    modules: [audio]\n",
+        "block:\n  modules: [audio]\n",
         encoding="utf-8",
     )
 
-    assert load_dev_config(
+    assert load_blocklist(
         path
-    ).dev.block.modules == ["audio"]
+    ).block.modules == ["audio"]
 
     path.write_text(
-        "dev:\n  block:\n    modules: []\n",
+        "block:\n  modules: []\n",
         encoding="utf-8",
     )
 
-    assert load_dev_config(
+    assert load_blocklist(
         path
-    ).dev.block.modules == []
+    ).block.modules == []
 
 
 # ============================================================================
@@ -151,7 +151,7 @@ def _point_repo_root_at(
 ) -> None:
     """Make the default config path resolve under `root`."""
     monkeypatch.setattr(
-        dev._paths,
+        blocklist._paths,
         "repo_root",
         lambda: root,
     )
@@ -165,18 +165,17 @@ def test_blocked_membership(
 
     config_dir.mkdir()
 
-    (config_dir / "dev.yaml").write_text(
-        "dev:\n"
-        "  block:\n"
-        "    modules: [audio, vision]\n"
-        "    tools: [calculation]\n"
-        "    skills: [writing-modules]\n",
+    (config_dir / "sources.yaml").write_text(
+        "block:\n"
+        "  modules: [audio, vision]\n"
+        "  tools: [calculation]\n"
+        "  skills: [writing-modules]\n",
         encoding="utf-8",
     )
 
     _point_repo_root_at(monkeypatch, tmp_path)
 
-    modules = dev.blocked("modules")
+    modules = blocklist.blocked("modules")
 
     assert isinstance(modules, frozenset)
 
@@ -187,11 +186,11 @@ def test_blocked_membership(
     assert "audio" in modules
     assert "voice" not in modules
 
-    assert dev.blocked("tools") == frozenset(
+    assert blocklist.blocked("tools") == frozenset(
         {"calculation"}
     )
 
-    assert dev.blocked("skills") == frozenset(
+    assert blocklist.blocked("skills") == frozenset(
         {"writing-modules"}
     )
 
@@ -202,9 +201,14 @@ def test_blocked_empty_without_file(
 ) -> None:
     _point_repo_root_at(monkeypatch, tmp_path)
 
-    assert dev.blocked("modules") == frozenset()
-    assert dev.blocked("tools") == frozenset()
-    assert dev.blocked("skills") == frozenset()
+    assert blocklist.blocked("modules") == frozenset()
+    assert blocklist.blocked("tools") == frozenset()
+    assert blocklist.blocked("skills") == frozenset()
+
+
+def test_blocked_rejects_unknown_kind() -> None:
+    with pytest.raises(ValueError):
+        blocklist.blocked("widgets")
 
 
 # ============================================================================

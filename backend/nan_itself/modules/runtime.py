@@ -14,7 +14,7 @@ from loguru import logger
 from . import deps as _deps
 from . import loading as _loading
 from . import persistence as _persistence
-from nan_itself import dev as _dev
+from nan_itself import blocklist as _blocklist
 from nan_itself.utils import paths as _paths
 from .model import (
     DataSpace,
@@ -1025,11 +1025,11 @@ class Facade:
         self,
         root: Path,
     ) -> None:
-        # Development-time block list, read once per scan. A
-        # blocked source is dropped from the candidate set, so it
-        # is never loaded and an already-loaded one is unloaded
-        # below as a plain removal.
-        blocked_names = _dev.blocked(
+        # Source block list, read once per scan. A blocked source
+        # is dropped from the candidate set, so it is never loaded
+        # and an already-loaded one is unloaded below as a plain
+        # removal.
+        blocked_names = _blocklist.blocked(
             "modules"
         )
 
