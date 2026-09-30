@@ -18,10 +18,7 @@
 # agent.
 
 block:
-  # Currently on: the perception Modules that keep pushing context are
-  # silenced (never block "inbox" -- it is the user-input entry point).
-  # Set this back to `modules: []` to restore the full capability set.
-  modules: [audio, vision, voice, network, system]
+  modules: []
   # modules: [audio, vision, voice]
   tools: []
   # tools: [calculation, command]

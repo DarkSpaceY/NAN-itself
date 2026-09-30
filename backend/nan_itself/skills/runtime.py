@@ -24,7 +24,6 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-from nan_itself import blocklist as _blocklist
 from nan_itself.utils import paths as _paths
 
 from .model import (
@@ -125,8 +124,7 @@ class SkillRuntime:
             (
                 self.builtin_skills_dir,
                 self.workspace_skills_dir,
-            ),
-            skip=_blocklist.blocked("skills"),
+            )
         )
 
     def refresh(self) -> None:

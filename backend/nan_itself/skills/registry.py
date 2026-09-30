@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from nan_itself.utils import blocklist as _blocklist
+
 from .model import (
     SKILL_FILENAME,
     SkillMetadata,
@@ -76,24 +78,17 @@ class SkillRegistry:
     def discover_roots(
         self,
         roots: Iterable[Path],
-        skip: frozenset[str] = frozenset(),
     ) -> None:
         """
         Re-scan every root. Removed directories are unregistered;
         changed directories are re-registered transactionally.
-
-        `skip` lists skill directory names that must be treated as
-        absent: they are excluded from the candidate set, so they
-        are never registered and an already-registered one is
-        unregistered by this same scan.
         """
         for root in roots:
-            self.discover_root(root, skip=skip)
+            self.discover_root(root)
 
     def discover_root(
         self,
         root: Path,
-        skip: frozenset[str] = frozenset(),
     ) -> None:
         root = root.resolve()
 
@@ -102,13 +97,18 @@ class SkillRegistry:
             exist_ok=True,
         )
 
+        # Blocked names are dropped from the candidate set, so a
+        # blocked Skill is never registered -- and an already
+        # registered one is unregistered by this same scan.
+        blocked_names = _blocklist.blocked("skills")
+
         current = {
             path.resolve()
             for path in root.iterdir()
             if (
                 path.is_dir()
                 and not path.name.startswith("_")
-                and path.name not in skip
+                and path.name not in blocked_names
                 and (
                     path / SKILL_FILENAME
                 ).is_file()
@@ -118,7 +118,7 @@ class SkillRegistry:
         # A root that is itself a skill directory is also accepted.
         if (
             root / SKILL_FILENAME
-        ).is_file() and root.name not in skip:
+        ).is_file() and root.name not in blocked_names:
             current.add(root)
 
         known = {

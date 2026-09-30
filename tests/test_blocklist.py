@@ -1,148 +1,35 @@
 """
-Source block list (config/sources.yaml, nan_itself.blocklist).
+Source block list (config/sources.yaml, nan_itself.utils.blocklist).
 
-Listing a Module / Tool / Skill name there makes the runtime
-treat that source as absent. These tests pin the config contract
--- a missing or broken file degrades to an empty block list and
-never raises -- and the candidate-set filtering that makes the
-"unload if already loaded" behaviour fall out of the existing
-discovery logic.
+Listing a Module / Tool / Skill name there makes a discovery pass
+treat that source as absent. These tests pin the lookup contract
+-- a missing or broken file blocks nothing and never raises -- and
+the candidate-set filtering each discovery layer does with it.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+from nan_itself.utils import blocklist
+from nan_itself.utils import paths
 
-from nan_itself import blocklist
-from nan_itself.blocklist import load_blocklist
-
-
-# ============================================================================
-# load_blocklist
-# ============================================================================
+CONFIG_DIR = "config"
 
 
-def test_missing_file_yields_empty_block_list(
-    tmp_path: Path,
-) -> None:
-    config = load_blocklist(tmp_path / "sources.yaml")
+def _write_config(
+    root: Path,
+    body: str,
+) -> Path:
+    config_dir = root / CONFIG_DIR
 
-    assert config.block.modules == []
-    assert config.block.tools == []
-    assert config.block.skills == []
+    config_dir.mkdir(exist_ok=True)
 
+    path = config_dir / "sources.yaml"
 
-def test_parses_the_three_block_lists(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "sources.yaml"
+    path.write_text(body, encoding="utf-8")
 
-    path.write_text(
-        "block:\n"
-        "  modules: [audio, vision]\n"
-        "  tools: [calculation]\n"
-        "  skills: [writing-modules]\n",
-        encoding="utf-8",
-    )
-
-    config = load_blocklist(path)
-
-    assert config.block.modules == [
-        "audio",
-        "vision",
-    ]
-
-    assert config.block.tools == [
-        "calculation",
-    ]
-
-    assert config.block.skills == [
-        "writing-modules",
-    ]
-
-
-def test_broken_yaml_yields_empty_block_list(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "sources.yaml"
-
-    # Unclosed flow sequence: yaml.safe_load raises.
-    path.write_text(
-        "block: [1, 2\n",
-        encoding="utf-8",
-    )
-
-    config = load_blocklist(path)
-
-    assert config.block.modules == []
-    assert config.block.tools == []
-    assert config.block.skills == []
-
-
-def test_non_mapping_document_yields_empty_block_list(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "sources.yaml"
-
-    path.write_text(
-        "- audio\n- vision\n",
-        encoding="utf-8",
-    )
-
-    config = load_blocklist(path)
-
-    assert config.block.modules == []
-
-
-def test_invalid_field_type_yields_empty_block_list(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "sources.yaml"
-
-    # modules must be a list of names, not a scalar.
-    path.write_text(
-        "block:\n"
-        "  modules: 42\n",
-        encoding="utf-8",
-    )
-
-    config = load_blocklist(path)
-
-    assert config.block.modules == []
-    assert config.block.tools == []
-    assert config.block.skills == []
-
-
-def test_reload_picks_up_edits(
-    tmp_path: Path,
-) -> None:
-    """The file is re-read per call: edits need no restart."""
-    path = tmp_path / "sources.yaml"
-
-    path.write_text(
-        "block:\n  modules: [audio]\n",
-        encoding="utf-8",
-    )
-
-    assert load_blocklist(
-        path
-    ).block.modules == ["audio"]
-
-    path.write_text(
-        "block:\n  modules: []\n",
-        encoding="utf-8",
-    )
-
-    assert load_blocklist(
-        path
-    ).block.modules == []
-
-
-# ============================================================================
-# blocked()
-# ============================================================================
+    return path
 
 
 def _point_repo_root_at(
@@ -151,68 +38,116 @@ def _point_repo_root_at(
 ) -> None:
     """Make the default config path resolve under `root`."""
     monkeypatch.setattr(
-        blocklist._paths,
+        paths,
         "repo_root",
         lambda: root,
     )
 
 
-def test_blocked_membership(
+# ============================================================================
+# blocked()
+# ============================================================================
+
+
+def test_missing_file_blocks_nothing(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    config_dir = tmp_path / "config"
+    _point_repo_root_at(monkeypatch, tmp_path)
 
-    config_dir.mkdir()
+    assert blocklist.blocked("modules") == set()
+    assert blocklist.blocked("tools") == set()
+    assert blocklist.blocked("skills") == set()
 
-    (config_dir / "sources.yaml").write_text(
+
+def test_parses_the_three_lists(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_config(
+        tmp_path,
         "block:\n"
         "  modules: [audio, vision]\n"
         "  tools: [calculation]\n"
         "  skills: [writing-modules]\n",
-        encoding="utf-8",
     )
 
     _point_repo_root_at(monkeypatch, tmp_path)
 
-    modules = blocklist.blocked("modules")
+    assert blocklist.blocked("modules") == {
+        "audio",
+        "vision",
+    }
 
-    assert isinstance(modules, frozenset)
-
-    assert modules == frozenset(
-        {"audio", "vision"}
-    )
-
-    assert "audio" in modules
-    assert "voice" not in modules
-
-    assert blocklist.blocked("tools") == frozenset(
-        {"calculation"}
-    )
-
-    assert blocklist.blocked("skills") == frozenset(
-        {"writing-modules"}
-    )
+    assert blocklist.blocked("tools") == {"calculation"}
+    assert blocklist.blocked("skills") == {"writing-modules"}
 
 
-def test_blocked_empty_without_file(
+def test_broken_yaml_blocks_nothing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # Unclosed flow sequence: yaml.safe_load raises.
+    _write_config(tmp_path, "block: [1, 2\n")
+
+    _point_repo_root_at(monkeypatch, tmp_path)
+
+    assert blocklist.blocked("modules") == set()
+
+
+def test_unexpected_shapes_block_nothing(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     _point_repo_root_at(monkeypatch, tmp_path)
 
-    assert blocklist.blocked("modules") == frozenset()
-    assert blocklist.blocked("tools") == frozenset()
-    assert blocklist.blocked("skills") == frozenset()
+    # Not a mapping at all.
+    config = _write_config(tmp_path, "- audio\n")
+    assert blocklist.blocked("modules") == set()
+
+    # `block` present but not a mapping.
+    config.write_text("block: 42\n", encoding="utf-8")
+    assert blocklist.blocked("modules") == set()
+
+    # A list where a name should be: treated as absent, not raised.
+    config.write_text(
+        "block:\n  modules: 42\n",
+        encoding="utf-8",
+    )
+    assert blocklist.blocked("modules") == set()
+
+    # Unknown kind.
+    config.write_text(
+        "block:\n  modules: [audio]\n",
+        encoding="utf-8",
+    )
+    assert blocklist.blocked("widgets") == set()
 
 
-def test_blocked_rejects_unknown_kind() -> None:
-    with pytest.raises(ValueError):
-        blocklist.blocked("widgets")
+def test_reload_picks_up_edits(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The file is re-read per call: edits need no restart."""
+    _point_repo_root_at(monkeypatch, tmp_path)
+
+    config = _write_config(
+        tmp_path,
+        "block:\n  modules: [audio]\n",
+    )
+
+    assert blocklist.blocked("modules") == {"audio"}
+
+    config.write_text(
+        "block:\n  modules: []\n",
+        encoding="utf-8",
+    )
+
+    assert blocklist.blocked("modules") == set()
 
 
 # ============================================================================
-# Candidate-set filtering (skills registry)
+# Discovery filtering (skills registry)
 # ============================================================================
 
 
@@ -234,49 +169,57 @@ def _write_skill(
     )
 
 
-def test_registry_skip_never_registers(
-    tmp_path: Path,
+def _block(
+    monkeypatch,
+    names: set[str],
 ) -> None:
-    from nan_itself.skills.registry import (
-        SkillRegistry,
+    """
+    Pin the lookup so registry tests do not depend on the
+    repository's own config/sources.yaml.
+    """
+    monkeypatch.setattr(
+        blocklist,
+        "blocked",
+        lambda kind: names if kind == "skills" else set(),
     )
+
+
+def test_registry_never_registers_blocked_skill(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from nan_itself.skills.registry import SkillRegistry
 
     _write_skill(tmp_path, "alpha")
     _write_skill(tmp_path, "beta")
 
-    registry = SkillRegistry()
+    _block(monkeypatch, {"beta"})
 
-    registry.discover_root(
-        tmp_path,
-        skip=frozenset({"beta"}),
-    )
+    registry = SkillRegistry()
+    registry.discover_root(tmp_path)
 
     assert set(registry.records) == {"alpha"}
 
 
-def test_registry_skip_unregisters_loaded(
+def test_registry_unregisters_a_newly_blocked_skill(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    """A name that becomes skipped is unloaded by the next scan."""
-    from nan_itself.skills.registry import (
-        SkillRegistry,
-    )
+    """A name that becomes blocked is unloaded by the next scan."""
+    from nan_itself.skills.registry import SkillRegistry
 
     _write_skill(tmp_path, "alpha")
     _write_skill(tmp_path, "beta")
 
-    registry = SkillRegistry()
+    _block(monkeypatch, set())
 
+    registry = SkillRegistry()
     registry.discover_root(tmp_path)
 
-    assert set(registry.records) == {
-        "alpha",
-        "beta",
-    }
+    assert set(registry.records) == {"alpha", "beta"}
 
-    registry.discover_root(
-        tmp_path,
-        skip=frozenset({"beta"}),
-    )
+    _block(monkeypatch, {"beta"})
+
+    registry.discover_root(tmp_path)
 
     assert set(registry.records) == {"alpha"}
