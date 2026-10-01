@@ -31,3 +31,4 @@ workspace/modules/*
 
 # Model weights (large binaries, managed outside git)
 models/
+infraend/

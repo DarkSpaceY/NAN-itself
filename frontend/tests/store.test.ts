@@ -66,69 +66,16 @@ describe("applyEvent", () => {
     expect(store.getState().status).toBe("working");
   });
 
-  it("output stream: started → delta → done accumulates text", () => {
+  it("output/record events only advance lastSeq (no items state)", () => {
     let s = initialState();
     s = applyEvent(s, env("output_started", {}, 1, { id: "e1" }));
-    s = applyEvent(s, env("output_delta", { text: "he" }, 2, { id: "e1" }));
-    s = applyEvent(s, env("output_delta", { text: "llo" }, 3, { id: "e1" }));
-    s = applyEvent(s, env("output_done", { duration_s: 1.5 }, 4, { id: "e1" }));
-    const item = s.items["e1"]!;
-    expect(item.kind).toBe("output");
-    expect(item).toMatchObject({ state: "done", text: "hello", durationS: 1.5 });
-  });
-
-  it("output cancelled", () => {
-    let s = initialState();
-    s = applyEvent(s, env("output_started", {}, 1, { id: "e1" }));
-    s = applyEvent(s, env("output_cancelled", {}, 2, { id: "e1" }));
-    expect(s.items["e1"]).toMatchObject({ state: "cancelled" });
-  });
-
-  it("delta before started is ignored", () => {
-    let s = initialState();
-    s = applyEvent(s, env("output_delta", { text: "x" }, 1, { id: "ghost" }));
-    expect(s.items["ghost"]).toBeUndefined();
-  });
-
-  it("record lifecycle: started → detail → done", () => {
-    let s = initialState();
-    s = applyEvent(
-      s,
-      env("record_started", { category: "tool_call", payload: { provider: "x", tool: "y" } }, 1, {
-        id: "r1",
-      }),
-    );
-    expect(s.items["r1"]).toMatchObject({ kind: "record", state: "running", category: "tool_call" });
-
-    s = applyEvent(s, env("record_detail", { entries: [{ kind: "field", label: "status", value: "ok" }] }, 2, {
-      id: "r1",
-    }));
-    expect((s.items["r1"] as { entries?: unknown }).entries).toEqual([
-      { kind: "field", label: "status", value: "ok" },
-    ]);
-
-    s = applyEvent(s, env("record_done", { duration_s: 0.4 }, 3, { id: "r1" }));
-    expect(s.items["r1"]).toMatchObject({ state: "done", durationS: 0.4 });
-  });
-
-  it("record failed carries error", () => {
-    let s = initialState();
-    s = applyEvent(s, env("record_started", { category: "tool_call", payload: {} }, 1, { id: "r1" }));
-    s = applyEvent(
-      s,
-      env("record_failed", { error: { type: "module_query_failed", message: "boom" } }, 2, { id: "r1" }),
-    );
-    expect(s.items["r1"]).toMatchObject({
-      state: "failed",
-      error: { type: "module_query_failed", message: "boom" },
-    });
-  });
-
-  it("record void", () => {
-    let s = initialState();
-    s = applyEvent(s, env("record_started", { category: "finish", payload: {} }, 1, { id: "r1" }));
-    s = applyEvent(s, env("record_void", {}, 2, { id: "r1" }));
-    expect(s.items["r1"]).toMatchObject({ state: "void" });
+    s = applyEvent(s, env("record_started", { category: "tool_call" }, 2, { id: "r1" }));
+    expect(s.lastSeq).toBe(2);
+    expect(s.rounds).toEqual([]);
+    // 旧 seq 的重复事件仍被去重
+    const before = s;
+    s = applyEvent(s, env("output_delta", { text: "x" }, 1, { id: "e1" }));
+    expect(s).toBe(before);
   });
 });
 

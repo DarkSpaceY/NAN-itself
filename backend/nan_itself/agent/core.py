@@ -277,6 +277,12 @@ class Agent:
 
         turn = await self._observe(turn)
 
+        # Round anchor for the UI: everything emitted after this
+        # belongs to this turn. Root only -- a subagent's turn is
+        # not part of the user-facing stream.
+        if self.depth == 0:
+            sink.emit("turn_started", content={})
+
         completed = turn
 
         try:

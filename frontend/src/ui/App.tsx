@@ -1,12 +1,21 @@
-// App：ExternalStoreRuntime 对接自持 mapper + 中央 dock。
-// 布局：ThreadPrimitive.Root 包整个 dock（面板 + 把手 + 输入行）。
+// App：ExternalStoreRuntime + 官方 Thread 素材。
+//
+// 布局：单列对话流（往上滚即历史），composer 随 Thread 内置。
+// Agent 无限运行 step——没有「轮」的边界，所以界面不设「等待回复」态：
+// 用户任何时候都能发言，输入进 Inbox，下一个 step 的 module_query 会看到。
+// 暂停按钮挂在 composer 操作行（经 pause context 下发，见 pause.tsx）。
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type PropsWithChildren,
+} from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
-  ThreadPrimitive,
-  ComposerPrimitive,
 } from "@assistant-ui/react";
 import type { ThreadMessageLike } from "@assistant-ui/react";
 
@@ -14,8 +23,9 @@ import { Store, type NanState } from "../store";
 import { Mapper, type HistoryRound } from "../history/mapper";
 import type { RoundStore } from "../persistence/db";
 import { roundsToMessages } from "../convert";
-import { Stage } from "./Stage";
-import { UserMessage, AssistantMessage } from "./Message";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { RecordTool } from "./RecordTool";
+import { PauseControlContext, type PauseControl } from "./pause";
 
 export interface AppProps {
   store: Store;
@@ -25,7 +35,32 @@ export interface AppProps {
   setPaused: (paused: boolean) => void;
 }
 
+// shadcn 主题用 .dark class（不走媒体查询），这里同步系统偏好。
+function useDarkMode() {
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => document.documentElement.classList.toggle("dark", mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+}
+
+// ToolGroup：连续的工具调用共用一条脊线，成为「一段活动」。
+// 必须是模块级的稳定组件：若在 render 里内联定义，每次 App 重渲染都会换
+// 组件类型，整段时间线被卸载重挂，展开状态全部丢失。
+function ActivityGroup({ children }: PropsWithChildren) {
+  return <div className="nan-activity">{children}</div>;
+}
+
+const threadComponents = {
+  ToolFallback: RecordTool,
+  ToolGroup: ActivityGroup,
+};
+
 export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
+  useDarkMode();
+
   // mapper 轮次是原地变更的，用版本号做快照；messages 直接从
   // getRounds() 现取，不按数组引用缓存（引用恒定不会失效）。
   const roundsVersion = useSyncExternalStore(
@@ -38,17 +73,37 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
     () => store.getState(),
   );
 
-  // 暂停按钮：状态由后端 status 事件回传（协作式，可能在当前轮
-  // 跑完后才生效）。点击「暂停」后到后端确认 paused 之前显示等待
-  // 态；「继续」即时派发，无需等待态。
+  // ── 暂停 ───────────────────────────────────────────────────────
+  // 状态由后端 status 事件回传（协作式，可能在当前 step 跑完后才生效）。
+  // 点「暂停」后到后端确认之前是 pending；pending 时再点 = 撤回请求。
   const isPaused = nanState.status === "paused";
   const [pausePending, setPausePending] = useState(false);
 
   useEffect(() => {
-    if (nanState.status === "paused") setPausePending(false);
-  }, [nanState.status]);
+    if (isPaused) setPausePending(false);
+  }, [isPaused]);
 
-  // 持久化：关闭轮立即落盘，活动轮节流
+  const pauseControl = useMemo<PauseControl>(() => {
+    const pending = pausePending && !isPaused;
+    return {
+      state: isPaused ? "paused" : pending ? "pending" : "running",
+      paused: isPaused,
+      pending,
+      toggle: () => {
+        if (isPaused) {
+          setPaused(false);
+        } else if (pending) {
+          setPausePending(false);
+          setPaused(false);
+        } else {
+          setPausePending(true);
+          setPaused(true);
+        }
+      },
+    };
+  }, [isPaused, pausePending, setPaused]);
+
+  // ── 持久化：关闭轮立即落盘，活动轮节流；卸载时冲刷未落盘的活动轮 ──
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pending: HistoryRound | null = null;
@@ -61,29 +116,37 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
       pending = round;
       timer ??= setTimeout(() => {
         timer = null;
-        if (pending && !pending.closed) void db.saveRound(pending);
+        const r = pending;
+        pending = null;
+        if (r && !r.closed) void db.saveRound(r);
       }, 500);
     });
     return () => {
       unsub();
       if (timer) clearTimeout(timer);
+      if (pending && !pending.closed) void db.saveRound(pending);
     };
   }, [mapper, db]);
 
+  // ── 消息 ───────────────────────────────────────────────────────
   const messages: ThreadMessageLike[] = useMemo(
     () => roundsToMessages(mapper.getRounds()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [roundsVersion],
   );
 
+  // 排队中的输入（已发出、等当前轮结束才被看见）——输入框上方的等待卡
+  const pendingInputs: string[] = useMemo(
+    () => mapper.getPendingTexts(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roundsVersion],
+  );
+
   const runtime = useExternalStoreRuntime({
     messages,
-    // 显式传 false，而不是省略：aui 在 isRunning === undefined 时会
-    // 回退用「最后一条 assistant 消息的 status」推断运行中，进而禁用
-    // 发送；而消息 status 是我们为了流式光标自己设的 running。
-    //
-    // 语义上这也更准：agent 常态就在跑自主轮次，用户任何时候都能发言
-    // （输入进 Inbox，下一轮模型看到），不存在「运行中不许发」。
+    // 显式传 false：aui 在 isRunning === undefined 时会回退用最后一条
+    // assistant 消息的 status 推断运行中并禁用发送；agent 常态就在跑，
+    // 用户任何时候都能发言。
     isRunning: false,
     convertMessage: (m) => m,
     onNew: async ({ content }) => {
@@ -93,103 +156,26 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
         .join("\n");
       if (text.trim()) sendInput(text);
     },
-    onCancel: undefined, // 阶段4接 cancel
+    onCancel: undefined,
   });
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <Stage store={store} />
-      <ThreadPrimitive.Root className="dock-root">
-        <div id="dock-panel-wrap">
-          <Handle />
-          <div id="dock-panel" data-closed="true" style={{ height: 0 }}>
-            <ThreadPrimitive.Viewport id="dock-history" autoScroll>
-              <ThreadPrimitive.If empty>
-                <div className="empty-hint">还没有对话。输入第一条消息开始。</div>
-              </ThreadPrimitive.If>
-              <ThreadPrimitive.Messages
-                components={{ UserMessage, AssistantMessage }}
-              />
-            </ThreadPrimitive.Viewport>
-          </div>
+    <PauseControlContext.Provider value={pauseControl}>
+      <AssistantRuntimeProvider runtime={runtime}>
+        {/* 固定高度容器：composer 的 sticky 底部停靠依赖它。
+            data-* 供 CSS 响应：暂停确认后，所有「进行中」的呼吸点静止。 */}
+        <div
+          className="relative h-dvh"
+          data-agent-status={nanState.status}
+          data-paused={isPaused}
+        >
+          <Thread
+            components={threadComponents}
+            autoFocus
+            pendingInputs={pendingInputs}
+          />
         </div>
-
-        <ComposerPrimitive.Root id="dock-input-row">
-          <span className="conn-dot" data-state={nanState.connection} />
-          <ComposerPrimitive.Input id="dock-input" rows={1} autoFocus />
-          <button
-            id="dock-pause"
-            type="button"
-            data-state={isPaused ? "paused" : "running"}
-            disabled={pausePending}
-            title={
-              isPaused
-                ? "继续自主循环"
-                : "暂停自主循环（当前轮跑完后生效）"
-            }
-            onClick={() => {
-              if (isPaused) {
-                setPaused(false);
-              } else {
-                setPaused(true);
-                setPausePending(true);
-              }
-            }}
-          >
-            {pausePending ? "暂停中…" : isPaused ? "继续" : "暂停"}
-          </button>
-          <ComposerPrimitive.Send id="dock-send">↑</ComposerPrimitive.Send>
-        </ComposerPrimitive.Root>
-      </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
-  );
-}
-
-/** 细线把手：拖拽调面板高度，轻点开关。 */
-function Handle() {
-  // 保留与 v1 相同的交互语义；React 实现直接操作 panel 高度
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const panel = e.currentTarget.parentElement?.querySelector(
-      "#dock-panel",
-    ) as HTMLElement | null;
-    if (!panel) return;
-    panel.classList.add("dragging");
-    const startY = e.clientY;
-    const startH = parseInt(panel.style.height || "0", 10) || 0;
-    const max = Math.round(window.innerHeight * 0.6);
-    let moved = false;
-
-    const apply = (h: number) => {
-      const clamped = Math.max(0, Math.min(h, max));
-      panel.style.height = `${clamped}px`;
-      panel.dataset.closed = String(clamped === 0);
-    };
-    apply(startH);
-
-    e.currentTarget.setPointerCapture(e.pointerId);
-
-    const onMove = (ev: PointerEvent) => {
-      const dy = startY - ev.clientY;
-      if (Math.abs(dy) > 4) moved = true;
-      if (moved) apply(startH + dy);
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      panel.classList.remove("dragging");
-      if (!moved) {
-        // 轻点：开/关切换
-        const cur = parseInt(panel.style.height || "0", 10) || 0;
-        apply(cur > 0 ? 0 : Math.round(window.innerHeight * 0.4));
-      }
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
-
-  return (
-    <div id="dock-handle" onPointerDown={onPointerDown} title="拖拽调整高度，轻点开/关">
-      <div className="handle-line" />
-    </div>
+      </AssistantRuntimeProvider>
+    </PauseControlContext.Provider>
   );
 }

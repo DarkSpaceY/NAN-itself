@@ -1,14 +1,12 @@
 // 订阅式状态源：单一 store，事件 reducer，UI 层订阅渲染。
-// 设计约束：方案B —— 对话轮（user_input 边界）为常驻历史，
-// 记录/输出为舞台面素材；store 不持有任何渲染概念（parts 映射
-// 在阶段2的 mapper 中，布局在阶段3的 layout 引擎中）。
+// 职责：连接状态、status、对话轮（user_input 边界）与 seq 去重。
+// output/record 事件不在这里聚合——历史渲染所需的 parts 映射在
+// mapper 中；本 store 只推进 lastSeq 参与去重。
 
 import {
   classifyEvent,
   isEnvelope,
   type Envelope,
-  type DetailEntry,
-  type RecordCategory,
 } from "./protocol";
 
 // ------------------------------------------------------------------
@@ -24,33 +22,6 @@ export interface Round {
   mid?: string;
 }
 
-export interface OutputItem {
-  kind: "output";
-  id: string;
-  seq: number;
-  ts: number;
-  state: "streaming" | "done" | "cancelled";
-  text: string;
-  durationS?: number;
-}
-
-export type RecordState = "running" | "done" | "failed" | "void";
-
-export interface RecordItem {
-  kind: "record";
-  id: string;
-  seq: number;
-  ts: number;
-  category: RecordCategory;
-  payload: Record<string, unknown>;
-  state: RecordState;
-  entries?: DetailEntry[];
-  error?: { type: string; message: string };
-  durationS?: number;
-}
-
-export type Item = OutputItem | RecordItem;
-
 export interface NanState {
   connection: ConnectionState;
   bootId: string | null;
@@ -60,8 +31,6 @@ export interface NanState {
   status: "working" | "idle" | "paused" | null;
   /** 对话轮：user_input 边界，append-only。 */
   rounds: Round[];
-  /** 舞台素材：按事件 id 配对聚合的 output/record。 */
-  items: Record<string, Item>;
 }
 
 export function initialState(): NanState {
@@ -71,7 +40,6 @@ export function initialState(): NanState {
     lastSeq: 0,
     status: null,
     rounds: [],
-    items: {},
   };
 }
 
@@ -81,10 +49,9 @@ export function initialState(): NanState {
 
 /**
  * 应用一个事件信封。规则：
- * - seq 单调去重（重放与直播重叠时丢弃旧事件）
+ * - seq 单调去重（重放与直播重叠时丢弃旧事件）；任何 live 事件都
+ *   推进 lastSeq（含 output/record，虽然它们不产生状态）
  * - user_input 开新轮
- * - 同 id 事件配对：record_started → detail/done/failed/void；
- *   output_started → delta…/done/cancelled
  * - 未知 / surface.* 事件忽略
  */
 export function applyEvent(state: NanState, env: Envelope): NanState {
@@ -115,136 +82,9 @@ export function applyEvent(state: NanState, env: Envelope): NanState {
           : state.status;
       return next;
     }
-
-    case "output_started": {
-      next.items = {
-        ...state.items,
-        [env.id!]: {
-          kind: "output",
-          id: env.id!,
-          seq: env.seq,
-          ts: env.ts,
-          state: "streaming",
-          text: "",
-        },
-      };
-      return next;
-    }
-
-    case "output_delta": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "output") return next;
-      const text = typeof env.content.text === "string" ? env.content.text : "";
-      next.items = {
-        ...state.items,
-        [env.id!]: { ...item, text: item.text + text },
-      };
-      return next;
-    }
-
-    case "output_done": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "output") return next;
-      next.items = {
-        ...state.items,
-        [env.id!]: {
-          ...item,
-          state: "done",
-          durationS: num(env.content.duration_s),
-        },
-      };
-      return next;
-    }
-
-    case "output_cancelled": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "output") return next;
-      next.items = {
-        ...state.items,
-        [env.id!]: { ...item, state: "cancelled" },
-      };
-      return next;
-    }
-
-    case "record_started": {
-      next.items = {
-        ...state.items,
-        [env.id!]: {
-          kind: "record",
-          id: env.id!,
-          seq: env.seq,
-          ts: env.ts,
-          category: (env.content.category as RecordCategory) ?? "unknown",
-          payload:
-            typeof env.content.payload === "object" && env.content.payload !== null
-              ? (env.content.payload as Record<string, unknown>)
-              : {},
-          state: "running",
-        },
-      };
-      return next;
-    }
-
-    case "record_detail": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "record") return next;
-      const entries = Array.isArray(env.content.entries)
-        ? (env.content.entries as DetailEntry[])
-        : undefined;
-      next.items = {
-        ...state.items,
-        [env.id!]: { ...item, entries },
-      };
-      return next;
-    }
-
-    case "record_done": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "record") return next;
-      next.items = {
-        ...state.items,
-        [env.id!]: { ...item, state: "done", durationS: num(env.content.duration_s) },
-      };
-      return next;
-    }
-
-    case "record_failed": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "record") return next;
-      const err = env.content.error;
-      next.items = {
-        ...state.items,
-        [env.id!]: {
-          ...item,
-          state: "failed",
-          error:
-            typeof err === "object" && err !== null
-              ? {
-                  type: String((err as Record<string, unknown>).type ?? ""),
-                  message: String((err as Record<string, unknown>).message ?? ""),
-                }
-              : undefined,
-        },
-      };
-      return next;
-    }
-
-    case "record_void": {
-      const item = state.items[env.id!];
-      if (!item || item.kind !== "record") return next;
-      next.items = {
-        ...state.items,
-        [env.id!]: { ...item, state: "void" },
-      };
-      return next;
-    }
   }
 
   return next;
-}
-
-function num(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
 // ------------------------------------------------------------------

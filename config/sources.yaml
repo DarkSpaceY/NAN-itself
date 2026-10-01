@@ -18,8 +18,7 @@
 # agent.
 
 block:
-  modules: []
-  # modules: [audio, vision, voice]
+  modules: [audio, vision, voice]
   tools: []
   # tools: [calculation, command]
   skills: []

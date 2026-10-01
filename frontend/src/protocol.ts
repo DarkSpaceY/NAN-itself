@@ -12,6 +12,7 @@
 /** 事件类型（信封 t 字段）。surface.* 为阶段4预留，回放时忽略。 */
 export type EventType =
   | "user_input"
+  | "turn_started"
   | "status"
   | "output_started"
   | "output_delta"
@@ -47,6 +48,9 @@ export interface UserInputContent {
   text: string;
   mid?: string;
 }
+
+/** turn_started.content：空。轮锚点事件，用户气泡来自 user_input 回执。 */
+export interface TurnStartedContent {}
 
 /** status.content */
 export interface StatusContent {
@@ -174,6 +178,7 @@ export type ClientMessage = InputMessage | PingMessage | PauseMessage | ResumeMe
 
 const KNOWN_EVENT_TYPES = new Set([
   "user_input",
+  "turn_started",
   "status",
   "output_started",
   "output_delta",

@@ -1,10 +1,13 @@
 // 事件流 → 历史对话轮 parts 的映射。
 //
 // 设计约束：
-// - 对话轮以 user_input 为边界，append-only；轮内 parts 顺序即事件序
+// - 对话轮以 turn_started 为边界（后端在每轮观察完成后发射，附带
+//   该轮消费的 inbox 文本），append-only；轮内 parts 顺序即事件序
+// - user_input 只是回执（输入已进 inbox）：登记到 pending 等待卡，
+//   不构造轮——轮由 turn_started 锚定，输入不截断运行中的流
 // - 事件归属锚定「进行中的轮」（open），不是数组末位——重放历史轮时
 //   末位可能是更晚的轮
-// - 历史流是纯文字 + 内联工具卡片（kitn.ai/ui 视觉模式），不含面
+// - 历史流是纯文字 + 内联工具卡片，不含面
 // - 与后端重放对账：每轮持久化 appliedSeq 游标，hello 时按 boot 取出
 //   游标，重放里 seq 更小的事件全部跳过（同 boot 内 seq 才可比）
 // - surface.* / 未知事件不产生 parts
@@ -97,6 +100,9 @@ export class Mapper {
    */
   private open: HistoryRound | null = null;
 
+  /** 已 echo、但尚未被某个 turn_started 消费的输入（等待卡数据源）。 */
+  private pendingTexts: string[] = [];
+
   /**
    * 单调递增的变化版本号。`rounds` 数组是原地 push 的，引用恒定，
    * 不能当 React 快照用；版本号才是稳定的 getSnapshot 返回值。
@@ -117,8 +123,13 @@ export class Mapper {
   private emit(round: HistoryRound) {
     // feed() 已把 lastSeq 推到当前事件，故这里就是该轮的游标
     round.appliedSeq = Math.max(round.appliedSeq, this.lastSeq);
+    this.touch(round);
+  }
+
+  /** 版本号前进 + 通知订阅者（无轮上下文的变化传 undefined，如回执等待卡）。 */
+  private touch(round?: HistoryRound) {
     this.version++;
-    for (const fn of this.listeners) fn(round);
+    for (const fn of this.listeners) fn(round ?? this.open ?? this.rounds[0]);
   }
 
   private indexRound(round: HistoryRound): void {
@@ -207,7 +218,14 @@ export class Mapper {
     if (env.seq <= this.lastSeq) return;
     this.lastSeq = env.seq;
 
+    this.handle(env);
+  }
+
+  private handle(env: Envelope): void {
     switch (env.t) {
+      case "turn_started":
+        this.onTurnStarted(env);
+        return;
       case "user_input":
         this.onUserInput(env);
         return;
@@ -273,17 +291,41 @@ export class Mapper {
 
   // -- 各事件处理 -------------------------------------------------------
 
+  /**
+   * user_input 只是回执：输入已进 inbox，这一轮不被打断。登记到
+   * pending（输入框上方的等待卡），等 turn_started 消费。
+   */
   private onUserInput(env: Envelope): void {
-    // 上一轮就此关闭
+    const text = typeof env.content.text === "string" ? env.content.text : "";
+    if (!text) return;
+    this.pendingTexts.push(text);
+    // 通知等待卡：没有轮变化，只推版本号
+    this.touch();
+  }
+
+  /** 等待卡数据源：已发送、尚未被任何轮消费的输入文本。 */
+  getPendingTexts(): string[] {
+    return this.pendingTexts;
+  }
+
+  /**
+   * 轮锚点：后端每轮观察完成后发射（空 content）。关闭上一轮，
+   * 开启新轮；等待卡里的回执（user_input）在此落位成用户气泡——
+   * 一轮把 inbox 清空，所以全部消费。
+   * 事件顺序保证：turn_started 之后的 record/output 都属于这一轮。
+   */
+  private onTurnStarted(env: Envelope): void {
     const prev = this.open;
     if (prev && !prev.closed) {
       prev.closed = true;
       this.emit(prev);
     }
 
-    const mid = typeof env.content.mid === "string" ? env.content.mid : null;
-    const key = mid ?? `seq-${env.seq}`;
-    const text = typeof env.content.text === "string" ? env.content.text : "";
+    // 本轮把 inbox 清空了——等待卡全部落位成用户消息
+    const consumed = this.pendingTexts;
+    this.pendingTexts = [];
+
+    const key = `turn-${env.seq}`;
 
     const round: HistoryRound = {
       key,
@@ -292,12 +334,17 @@ export class Mapper {
       appliedSeq: env.seq,
       bootId: env.boot_id ?? null,
       closed: false,
-      parts: [{ kind: "text", id: `${key}:user`, role: "user", text }],
+      parts: consumed.map((text, i): Part => ({
+        kind: "text",
+        id: `${key}:u${i}`,
+        role: "user",
+        text,
+      })),
     };
 
     const existing = this.byKey.get(key);
     if (existing) {
-      // 同 mid 重放：以重放为准重建该轮（旧部件的事件索引一并摘掉）
+      // 同 key 重放：以重放为准重建该轮
       const idx = this.rounds.indexOf(existing);
       if (idx >= 0) this.rounds[idx] = round;
       this.unindexRound(existing);
@@ -309,6 +356,36 @@ export class Mapper {
     this.indexRound(round);
     this.open = round;
     this.emit(round);
+  }
+
+  /**
+   * 兜底：没有 turn_started 的事件（旧版本后端/异常流）挂到隐式轮，
+   * 与数组末位无关，始终以 open 为锚。
+   */
+  private ensureOpen(env: Envelope): HistoryRound {
+    if (this.open && !this.open.closed) return this.open;
+
+    const prev = this.open;
+    if (prev && !prev.closed) {
+      prev.closed = true;
+      this.emit(prev);
+    }
+
+    const key = `auto-${env.seq}`;
+    const round: HistoryRound = {
+      key,
+      ts: env.ts,
+      seq: env.seq,
+      appliedSeq: env.seq,
+      bootId: env.boot_id ?? null,
+      closed: false,
+      parts: [],
+    };
+    this.byKey.set(key, round);
+    this.rounds.push(round);
+    this.open = round;
+    this.emit(round);
+    return round;
   }
 
   private onOutputStarted(env: Envelope): void {
@@ -328,8 +405,7 @@ export class Mapper {
       return;
     }
 
-    const round = this.open;
-    if (!round) return;
+    const round = this.ensureOpen(env);
 
     const part: TextPart = {
       kind: "text",
@@ -344,8 +420,7 @@ export class Mapper {
   }
 
   private onRecordStarted(env: Envelope): void {
-    const round = this.open;
-    if (!round) return;
+    const round = this.ensureOpen(env);
     const category = String(env.content.category ?? "unknown");
     const payload =
       typeof env.content.payload === "object" && env.content.payload !== null

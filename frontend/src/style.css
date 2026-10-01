@@ -1,519 +1,793 @@
-/* NAN 前端 — dock + 历史流样式（阶段2）
-   极简：输入框为唯一常驻组件，历史通过上拉浅面板查看。 */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------
+   令牌
+   中性灰微带冷调（hue 260，chroma ≤ 0.008），只多一个语义色 --live：
+   「正在发生」。它只出现在进行中的呼吸点上——整个界面唯一的颜色。
+   ------------------------------------------------------------------ */
 
 :root {
-  --bg: #ffffff;
-  --surface: #f7f7f8;
-  --border: #e4e4e7;
-  --text: #18181b;
-  --text-muted: #71717a;
-  --text-faint: #a1a1aa;
-  --accent: #18181b;
-  --dot-run: #d97706;
-  --dot-done: #22c55e;
-  --dot-fail: #ef4444;
-  --dot-void: #d4d4d8;
+  --background: oklch(0.994 0.002 260);
+  --foreground: oklch(0.2 0.006 260);
+  --card: oklch(0.994 0.002 260);
+  --card-foreground: oklch(0.2 0.006 260);
+  --popover: oklch(0.994 0.002 260);
+  --popover-foreground: oklch(0.2 0.006 260);
+  --primary: oklch(0.22 0.006 260);
+  --primary-foreground: oklch(0.985 0.002 260);
+  --secondary: oklch(0.966 0.003 260);
+  --secondary-foreground: oklch(0.22 0.006 260);
+  --muted: oklch(0.966 0.003 260);
+  --muted-foreground: oklch(0.54 0.008 260);
+  --accent: oklch(0.966 0.003 260);
+  --accent-foreground: oklch(0.22 0.006 260);
+  --destructive: oklch(0.577 0.22 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.93 0.004 260);
+  --input: oklch(0.93 0.004 260);
+  --ring: oklch(0.708 0.01 260);
+  --radius: 0.625rem;
+
+  /* 正在发生 */
+  --live: oklch(0.6 0.14 250);
+
+  /* 时间线栅格：点所在的列宽 / 点与文字的间距 */
+  --nan-gutter: 1rem;
+  --nan-gap: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111113;
-    --surface: #1b1b1e;
-    --border: #2e2e33;
-    --text: #ececee;
-    --text-muted: #9d9da5;
-    --text-faint: #63636b;
-    --accent: #ececee;
-    --dot-void: #3f3f46;
+.dark {
+  --background: oklch(0.158 0.004 260);
+  --foreground: oklch(0.975 0.002 260);
+  --card: oklch(0.2 0.004 260);
+  --card-foreground: oklch(0.975 0.002 260);
+  --popover: oklch(0.2 0.004 260);
+  --popover-foreground: oklch(0.975 0.002 260);
+  --primary: oklch(0.92 0.003 260);
+  --primary-foreground: oklch(0.2 0.006 260);
+  --secondary: oklch(0.262 0.005 260);
+  --secondary-foreground: oklch(0.975 0.002 260);
+  --muted: oklch(0.262 0.005 260);
+  --muted-foreground: oklch(0.7 0.008 260);
+  --accent: oklch(0.262 0.005 260);
+  --accent-foreground: oklch(0.975 0.002 260);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.556 0.01 260);
+
+  --live: oklch(0.76 0.12 250);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-live: var(--live);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  @keyframes collapsible-down {
+  from {
+    height: 0;
+    }
+  to {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  to {
+    height: 0;
+    }
   }
 }
 
-html, body {
-  height: 100%;
-  overflow: hidden;
-  font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    /* 中英混排自动留白（支持的浏览器生效，其余忽略） */
+    text-autospace: normal;
+  }
+  body {
+    @apply bg-background text-foreground;
+    line-height: 1.7;
+  }
+  code,
+  pre,
+  kbd {
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+      Menlo, monospace;
+    font-variant-ligatures: contextual;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--live) 24%, transparent);
+  }
 }
 
-/* ---- 舞台占位（阶段3填充） ---- */
-
-#stage {
-  position: absolute;
-  inset: 0;
-}
-
-/* ---- 中央 dock（React: ThreadPrimitive.Root） ---- */
-
-.dock-root {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  width: min(720px, calc(100% - 48px));
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-/* 面板容器：把手骑在顶边，随面板上移 */
-
-#dock-panel-wrap {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
-/* 上拉历史浅面板 */
-
-#dock-panel {
-  overflow: hidden;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(14px);
-  border: 1px solid var(--border);
-  box-shadow: 0 -8px 32px rgb(0 0 0 / 8%);
-  transition: height 120ms ease-out;
-}
-
-/* 拖拽中关闭动画，跟手 */
-#dock-panel.dragging { transition: none; }
-
-/* 收起时彻底隐藏面板（否则 0 高度仍渲染边框 = 灰线） */
-#dock-panel[data-closed="true"] {
-  border-color: transparent;
-  box-shadow: none;
-}
-
-#dock-history {
-  height: 100%;
-  overflow-y: auto;
-  padding: 16px 18px;
-  outline: none;
-}
-
-/* 细线把手：骑在面板顶边，随抽屉移动 */
-
-#dock-handle {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  /* 骑在面板顶边并略上浮，形成悬浮感 */
-  transform: translateY(calc(-50% - 6px));
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  touch-action: none;
-  z-index: 2;
-}
-
-#dock-handle:active { cursor: grabbing; }
-
-.handle-line {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--border);
-  transition: background 100ms;
-}
-
-#dock-handle:hover .handle-line { background: var(--text-faint); }
-
-/* 输入行 */
-
-#dock-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg);
-  box-shadow: 0 4px 24px rgb(0 0 0 / 6%);
-  transition: border-color 100ms;
-}
-
-#dock-input-row:focus-within { border-color: var(--text-faint); }
-
-#dock-input {
-  flex: 1;
-  border: none;
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  line-height: 1.5;
-  max-height: 160px;
-}
-
-#dock-input::placeholder { color: var(--text-faint); }
-#dock-input:disabled { opacity: 0.5; }
-
-#dock-send {
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 15px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-#dock-send:disabled { opacity: 0.3; cursor: default; }
-
-/* 暂停/恢复按钮：与发送按钮同行同高，视觉上让位（次级样式） */
-
-#dock-pause {
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-#dock-pause:hover { color: var(--text); border-color: var(--text-faint); }
-
-#dock-pause[data-state="paused"] {
-  color: var(--text);
-  border-color: var(--text-faint);
-}
-
-/* 等待后端确认暂停：降低不透明度表达等待态 */
-#dock-pause:disabled { opacity: 0.4; cursor: default; }
-
-/* 连接状态：输入框左侧小点 */
-.conn-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--dot-void);
-  margin: 6px 4px 0 0;
-  flex-shrink: 0;
-}
-.conn-dot[data-state="open"] { background: var(--dot-done); }
-.conn-dot[data-state="connecting"] { background: var(--dot-run); }
-.conn-dot[data-state="closed"] { background: var(--dot-fail); }
-
-/* ---- 历史流 ---- */
-
-.round {
-  padding: 10px 0;
-  opacity: 1;
-  transition: opacity 160ms;
-}
-
-.round + .round { border-top: 1px solid var(--border); }
-
-.part { padding: 4px 0; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-
-.part.text.user { color: var(--text-muted); }
-.part.text.user::before {
-  content: "你";
-  display: inline-block;
-  font-size: 11px;
-  color: var(--text-faint);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0 4px;
-  margin-right: 8px;
-  vertical-align: 1px;
-}
-
-.part.text.assistant { color: var(--text); }
-
-.part.text.cancelled .text-body { text-decoration: line-through; color: var(--text-faint); }
-
-/* ---- markdown（历史流与舞台面共用） ---- */
+/* ------------------------------------------------------------------
+   markdown 排版（.aui-md）——Agent 的「言语」。
+   留白优先：层级靠灰度与间距而非边框；表格走横线风格。
+   ------------------------------------------------------------------ */
 
 .aui-md {
-  white-space: normal;
-  word-break: break-word;
-  line-height: 1.65;
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  color: color-mix(in oklch, var(--foreground) 90%, transparent);
 }
 
-.aui-md > :first-child { margin-top: 0; }
-.aui-md > :last-child { margin-bottom: 0; }
+.aui-md > :first-child {
+  margin-top: 0;
+}
+.aui-md > :last-child {
+  margin-bottom: 0;
+}
 
-.aui-md p { margin: 0 0 8px; }
+.aui-md p {
+  margin-block: 0.75rem;
+  text-wrap: pretty;
+}
+
+.aui-md strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.aui-md a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--foreground) 28%, transparent);
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color 150ms ease;
+}
+.aui-md a:hover {
+  text-decoration-color: var(--foreground);
+}
 
 .aui-md h1,
 .aui-md h2,
 .aui-md h3,
 .aui-md h4 {
-  margin: 14px 0 6px;
+  margin-block: 1.5rem 0.75rem;
   font-weight: 600;
-  line-height: 1.35;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  color: var(--foreground);
+  text-wrap: balance;
 }
-.aui-md h1 { font-size: 18px; }
-.aui-md h2 { font-size: 16px; }
-.aui-md h3 { font-size: 15px; }
-.aui-md h4 { font-size: 14px; }
-
-.aui-md ul,
-.aui-md ol { margin: 0 0 8px; padding-left: 22px; }
-.aui-md li { margin: 2px 0; }
-.aui-md li > p { margin: 0; }
-
-.aui-md blockquote {
-  margin: 8px 0;
-  padding: 2px 0 2px 10px;
-  border-left: 2px solid var(--border);
-  color: var(--text-muted);
+.aui-md h1 {
+  font-size: 1.25rem;
 }
-
-.aui-md a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.aui-md h2 {
+  font-size: 1.125rem;
+}
+.aui-md h3 {
+  font-size: 1rem;
+}
+.aui-md h4 {
+  font-size: 0.9375rem;
+  color: color-mix(in oklch, var(--foreground) 80%, transparent);
 }
 
-.aui-md code {
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 0.9em;
+.aui-md hr {
+  margin-block: 1.5rem;
+  border: none;
+  border-top: 1px solid var(--border);
 }
 
-/* 行内代码；代码块里的 code 由高亮器负责 */
+/* 行内代码：与正文明确区分，但不抢戏 */
 .aui-md :not(pre) > code {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 4px;
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
+  border-radius: 5px;
+  padding: 0.12em 0.38em;
+  font-size: 0.85em;
+  color: color-mix(in oklch, var(--foreground) 92%, transparent);
 }
 
-/* 代码块：高亮器输出 pre > code，配色由高亮器内联样式给出 */
+/* 代码块：与 CodeHeader（语言条）连为一体——顶边直角无上边距，
+   只留自己的侧/底边框和圆角 */
 .aui-md pre {
-  margin: 8px 0;
-  border-radius: 10px;
+  margin-block: 0 1.25rem;
+  padding: 0.875rem 1rem;
+  border-radius: 0 0 calc(var(--radius) + 2px) calc(var(--radius) + 2px);
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-top: none;
+  background: color-mix(in oklch, var(--muted) 40%, var(--background));
+  font-size: 0.8125rem;
+  line-height: 1.6;
   overflow-x: auto;
 }
+.aui-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
 
+/* 表格：横线为主；separate + overflow hidden 让表头底色被整体圆角裁掉 */
 .aui-md table {
   width: 100%;
-  margin: 8px 0;
-  border-collapse: collapse;
-  font-size: 13px;
+  margin-block: 1.25rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 0.875rem;
+}
+.aui-md thead {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
 }
 .aui-md th,
 .aui-md td {
-  border: 1px solid var(--border);
-  padding: 4px 8px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  padding: 0.5rem 0.875rem;
   text-align: left;
+  vertical-align: top;
 }
-.aui-md th { background: var(--surface); font-weight: 600; }
-
-.aui-md hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 12px 0;
+.aui-md tbody tr:last-child td {
+  border-bottom: none;
 }
-
-/* 块级公式过宽时可横向滚动 */
-.aui-md .katex-display {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 2px 0;
+.aui-md th {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.aui-md tbody tr:hover {
+  background: color-mix(in oklch, var(--muted) 25%, transparent);
 }
 
-/* 内联工具卡片 */
-
-.part.tool {
-  margin: 6px 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  padding: 8px 12px;
-  font-size: 13px;
-}
-
-.tool-head {
+/* 列表 */
+.aui-md ul,
+.aui-md ol {
+  margin-block: 0.75rem;
+  padding-left: 1.5rem;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.aui-md ul {
+  list-style: disc;
+}
+.aui-md ol {
+  list-style: decimal;
+}
+.aui-md li::marker {
+  color: color-mix(in oklch, var(--muted-foreground) 80%, transparent);
+}
+.aui-md li > ul,
+.aui-md li > ol {
+  margin-block: 0.375rem;
+}
+.aui-md blockquote {
+  margin-block: 1rem;
+  border-left: 2px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
 }
 
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--dot-void);
+/* ------------------------------------------------------------------
+   语法高亮（rehype-highlight → hljs class）
+   自绘 token 色：跟随主题变量，浅色/深色各一套。
+   ------------------------------------------------------------------ */
+
+.aui-md .hljs-comment,
+.aui-md .hljs-quote {
+  color: color-mix(in oklch, var(--muted-foreground) 85%, transparent);
+  font-style: italic;
 }
-.state-running .dot { background: var(--dot-run); animation: pulse 1.2s ease-in-out infinite; }
-.state-done .dot { background: var(--dot-done); }
-.state-failed .dot { background: var(--dot-fail); }
-.state-void .dot { background: var(--dot-void); }
-
-@keyframes pulse { 50% { opacity: 0.35; } }
-
-.tool-title {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.aui-md .hljs-keyword,
+.aui-md .hljs-selector-tag,
+.aui-md .hljs-doctag,
+.aui-md .hljs-meta {
+  color: oklch(0.58 0.19 285);
 }
-
-.tool-meta { margin-left: auto; color: var(--text-faint); font-size: 12px; flex-shrink: 0; }
-
-.tool-toggle {
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 2px 4px;
+.aui-md .hljs-string,
+.aui-md .hljs-regexp,
+.aui-md .hljs-addition {
+  color: oklch(0.55 0.14 150);
 }
-.tool-toggle:hover { color: var(--text); }
-
-.tool-error {
-  margin-top: 6px;
-  color: var(--dot-fail);
-  font-size: 12px;
-  font-family: ui-monospace, "SF Mono", monospace;
-  word-break: break-all;
+.aui-md .hljs-number,
+.aui-md .hljs-literal,
+.aui-md .hljs-built_in {
+  color: oklch(0.6 0.15 55);
 }
-
-.tool-detail {
-  margin-top: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 12px;
+.aui-md .hljs-title,
+.aui-md .hljs-function,
+.aui-md .hljs-name,
+.aui-md .hljs-section {
+  color: oklch(0.52 0.16 250);
+}
+.aui-md .hljs-attr,
+.aui-md .hljs-attribute,
+.aui-md .hljs-variable,
+.aui-md .hljs-template-variable,
+.aui-md .hljs-type {
+  color: oklch(0.55 0.15 25);
+}
+.aui-md .hljs-deletion {
+  color: oklch(0.55 0.2 25);
 }
 
-.entry { display: flex; gap: 8px; padding: 1px 0; }
-.entry-label { color: var(--text-faint); flex-shrink: 0; }
-.entry-value { word-break: break-all; white-space: pre-wrap; }
-
-/* details 版详情 */
-.tool-detail summary {
-  cursor: pointer;
-  color: var(--text-faint);
-  font-size: 12px;
-  list-style: none;
+.dark .aui-md .hljs-keyword,
+.dark .aui-md .hljs-selector-tag,
+.dark .aui-md .hljs-doctag,
+.dark .aui-md .hljs-meta {
+  color: oklch(0.75 0.14 290);
 }
-.tool-detail[open] summary { margin-bottom: 6px; }
-.tool-detail summary:hover { color: var(--text); }
-
-.empty-hint {
-  color: var(--text-faint);
-  text-align: center;
-  padding: 24px 0;
-  font-size: 13px;
+.dark .aui-md .hljs-string,
+.dark .aui-md .hljs-regexp,
+.dark .aui-md .hljs-addition {
+  color: oklch(0.78 0.13 150);
+}
+.dark .aui-md .hljs-number,
+.dark .aui-md .hljs-literal,
+.dark .aui-md .hljs-built_in {
+  color: oklch(0.8 0.13 70);
+}
+.dark .aui-md .hljs-title,
+.dark .aui-md .hljs-function,
+.dark .aui-md .hljs-name,
+.dark .aui-md .hljs-section {
+  color: oklch(0.78 0.12 250);
+}
+.dark .aui-md .hljs-attr,
+.dark .aui-md .hljs-attribute,
+.dark .aui-md .hljs-variable,
+.dark .aui-md .hljs-template-variable,
+.dark .aui-md .hljs-type {
+  color: oklch(0.78 0.12 30);
+}
+.dark .aui-md .hljs-deletion {
+  color: oklch(0.72 0.18 25);
 }
 
-/* ---- 舞台（阶段3） ---- */
+/* ------------------------------------------------------------------
+   活动时间线（RecordTool）
 
-.stage-grid {
+   一条脊线 + 脊线上的点。无芯片、无容器底色、无图标。
+     ○ ring     感知    ● dot   行动    · pip   轻量    ◆ diamond  收尾
+   「现在」最亮：进行中的行标题全亮、点带呼吸光晕；已完成的行退后。
+
+   脊线画在容器上（.nan-activity / 独立出现的 .nan-activity-group），
+   点用 3px 背景色外环把穿过它的脊线遮住。
+   ------------------------------------------------------------------ */
+
+.nan-activity {
+  display: flex;
+  flex-direction: column;
+  margin-block: 0.375rem;
+}
+
+.nan-activity,
+.nan-activity-group {
+  position: relative;
+}
+
+.nan-activity::before,
+.nan-activity-group::before {
+  content: "";
   position: absolute;
-  inset: 0;
-  padding: 24px 24px 140px; /* 底部为 dock 让位 */
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 16px;
-}
-
-.face {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  backdrop-filter: blur(10px);
-  overflow: hidden;
-  min-height: 0;
-  animation: face-in 160ms ease-out;
-}
-
-.face-primary {
-  grid-column: 1;
-  grid-row: 1 / span 2; /* 聚焦者占主列 */
-}
-
-.face-secondary {
-  grid-column: 2;
-}
-
-@keyframes face-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-
-.face-fading {
-  animation: face-out 400ms ease-in forwards;
+  left: calc(var(--nan-gutter) / 2 - 0.5px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--border) 0.875rem,
+    var(--border) calc(100% - 0.875rem),
+    transparent
+  );
   pointer-events: none;
 }
 
-@keyframes face-out {
-  to { opacity: 0; transform: scale(0.96); }
+/* 脊线在 DOM 里最先出现；子元素显式 relative，才能压在它上面 */
+.nan-activity > *,
+.nan-activity-group > * {
+  position: relative;
 }
 
-.face-body {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  min-height: 0;
+/* 只有一行时没有「串联」可言：不画脊线 */
+.nan-activity:has(> :only-child:not(.nan-activity-group))::before {
+  display: none;
+}
+/* 折叠组收起时只是一行，同样不画脊线 */
+.nan-activity:has(> .nan-activity-group[data-open="false"]:only-child)::before,
+.nan-activity-group[data-open="false"]::before {
+  display: none;
+}
+/* 动作组落在 .nan-activity 里时，共用外层脊线 */
+.nan-activity .nan-activity-group::before {
+  display: none;
 }
 
-/* 面头部：状态点 + 标题 + 右侧元信息 */
-.face-head {
+/* ── 行 ─────────────────────────────────────────────────────────── */
+
+.nan-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--nan-gap);
+  width: 100%;
+  min-height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  text-align: start;
+}
+
+button.nan-row {
+  cursor: pointer;
+}
+button.nan-row:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 80%, transparent);
+  outline-offset: 2px;
+}
+
+.nan-row[data-weight="sense"],
+.nan-row[data-weight="light"] {
+  min-height: 1.5rem;
+}
+.nan-row[data-weight="sense"] {
+  font-size: 0.78125rem;
+}
+
+.nan-row-label {
+  flex: 1 1 auto;
   min-width: 0;
-  flex-shrink: 0;
-}
-
-.face-label {
-  font-size: 11px;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
-}
-
-.face-title {
-  font-size: 13px;
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+}
+/* 展开后允许完整阅读被截断的标题 */
+.nan-row[aria-expanded="true"] .nan-row-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.face-meta {
+.nan-verb {
+  margin-right: 0.5em;
+  color: var(--muted-foreground);
+  letter-spacing: 0.01em;
+}
+
+.nan-title {
+  font-weight: 500;
+  color: color-mix(in oklch, var(--foreground) 78%, var(--background));
+  transition: color 150ms ease;
+}
+.nan-row[data-weight="sense"] .nan-title {
+  color: color-mix(in oklch, var(--foreground) 62%, var(--background));
+}
+.nan-row[data-weight="light"] .nan-title {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.nan-row[data-state="running"] .nan-title,
+button.nan-row:hover .nan-title {
+  color: var(--foreground);
+}
+
+/* 内联字段（感知行 / 组摘要）：标签灰、数值深 */
+.nan-field {
+  margin-left: 0.75em;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.nan-field b {
+  margin-left: 0.3em;
+  font-weight: 500;
+  color: color-mix(in oklch, var(--foreground) 85%, var(--background));
+}
+.nan-field[data-tone="error"] {
+  color: var(--destructive);
+}
+
+.nan-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: none;
   margin-left: auto;
-  font-size: 11px;
-  color: var(--text-faint);
-  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklch, var(--muted-foreground) 75%, transparent);
 }
 
-.face-placeholder { color: var(--text-faint); }
+/* 展开提示：悬停/聚焦/展开时才出现；触屏无悬停，常驻淡显 */
+.nan-chevron {
+  width: 0.875rem;
+  height: 0.875rem;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nan-chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+.nan-row:hover .nan-chevron,
+.nan-row:focus-visible .nan-chevron,
+.nan-chevron[data-open="true"] {
+  opacity: 0.7;
+}
+@media (hover: none) {
+  .nan-chevron {
+    opacity: 0.45;
+  }
+}
 
-.face-text {
-  font-size: 14px;
-  line-height: 1.6;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+/* ── 点 ─────────────────────────────────────────────────────────── */
+
+.nan-dot {
+  --d: 0.4375rem;
+  --c: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--nan-gutter);
+  height: var(--nan-gutter);
+}
+
+.nan-dot::after {
+  content: "";
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 3px var(--background);
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+}
+
+.nan-dot[data-shape="ring"]::after {
+  background: var(--background);
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 3px var(--background);
+}
+.nan-dot[data-shape="pip"] {
+  --d: 0.25rem;
+  --c: color-mix(in oklch, var(--muted-foreground) 45%, var(--background));
+}
+.nan-dot[data-shape="diamond"] {
+  --d: 0.375rem;
+}
+.nan-dot[data-shape="diamond"]::after {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+/* 状态（须在形状规则之后，同优先级后者胜） */
+.nan-dot[data-state="running"] {
+  --c: var(--live);
+}
+.nan-dot[data-state="failed"] {
+  --c: var(--destructive);
+}
+
+/* 进行中：呼吸光晕。::before 绝对定位在 ::after 之下 */
+.nan-dot[data-state="running"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--d);
+  height: var(--d);
+  margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2);
+  border-radius: 50%;
+  background: var(--live);
+  animation: nan-breathe 2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+@keyframes nan-breathe {
+  0% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+/* 暂停已被后端确认：任何残留的「进行中」都不再发光，也不再是 live 色 */
+[data-paused="true"] .nan-dot[data-state="running"] {
+  --c: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
+}
+[data-paused="true"] .nan-dot[data-state="running"]::before {
+  display: none;
+}
+
+/* ── 展开 / 详情 ────────────────────────────────────────────────── */
+
+/* grid-rows 0fr→1fr；收起时 visibility:hidden 让内容退出 Tab 序与读屏 */
+.nan-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows 240ms cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s 240ms;
+}
+.nan-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.nan-collapse > div {
   min-height: 0;
+  overflow: hidden;
 }
+
+.nan-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 0 0.5rem calc(var(--nan-gutter) + var(--nan-gap));
+}
+/* 动作组的子行与摘要行共用脊线，不再缩进 */
+.nan-detail-body[data-flush] {
+  padding: 0;
+  gap: 0;
+}
+
+.nan-entry {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  align-items: baseline;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.nan-entry-label {
+  color: var(--muted-foreground);
+}
+.nan-entry-value {
+  color: color-mix(in oklch, var(--foreground) 85%, var(--background));
+  overflow-wrap: anywhere;
+}
+.nan-entry[data-tone="error"] .nan-entry-label,
+.nan-entry[data-tone="error"] .nan-entry-value {
+  color: var(--destructive);
+}
+
+/* 长文本：一条左线代替底色盒子；过长则内部滚动 */
+.nan-entry-text {
+  max-height: 16rem;
+  margin: 0.125rem 0;
+  padding: 0.125rem 0 0.125rem 0.75rem;
+  border-left: 2px solid var(--border);
+  overflow: auto;
+  font-size: 0.75rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: color-mix(in oklch, var(--foreground) 80%, var(--background));
+}
+
+/* 失败信息：收起时也直接可见，最多两行 */
+.nan-inline-error {
+  padding: 0 0 0.25rem calc(var(--nan-gutter) + var(--nan-gap));
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--destructive);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------
+   step 流的节奏（thread.aui.tsx 的消息容器）
+   一个 assistant 消息 = 一个 step；连续的 step 读起来是一条流，
+   所以 step 之间只留小间距，而用户插话前后留出更大的呼吸。
+   ------------------------------------------------------------------ */
+
+.nan-stream {
+  display: flex;
+  flex-direction: column;
+}
+.nan-stream > * + * {
+  margin-top: 1.25rem;
+}
+.nan-stream > [data-role="assistant"] + [data-role="assistant"] {
+  margin-top: 0.5rem;
+}
+
+/* ------------------------------------------------------------------
+   暂停按钮（composer 操作行）
+   running：安静的文字按钮；pending：同款但带转圈；
+   paused：实心——系统停下了，下一步动作在你。
+   ------------------------------------------------------------------ */
+
+.nan-pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.75rem 0 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.8125rem;
+  line-height: 1;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+.nan-pause:hover {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
+}
+.nan-pause:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 80%, transparent);
+  outline-offset: 2px;
+}
+.nan-pause[data-state="pending"] {
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.nan-pause[data-state="paused"] {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+.nan-pause[data-state="paused"]:hover {
+  background: color-mix(in oklch, var(--primary) 88%, var(--background));
+}
+
+/* ------------------------------------------------------------------
+   减少动效
+   ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .nan-dot[data-state="running"]::before {
+    animation: none;
+    opacity: 0.25;
+    transform: scale(1.8);
+  }
+  .nan-collapse,
+  .nan-chevron,
+  .nan-title,
+  .nan-pause {
+    transition: none;
+  }
+}
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

@@ -136,7 +136,7 @@ describe("WsClient", () => {
     s2.message({ seq: 2, ts: 2, t: "output_started", content: {}, id: "e9" });
     // 重放重建：模型来自重放而非旧 socket 残留
     expect(store.getState().rounds).toHaveLength(1);
-    expect(store.getState().items["e9"]).toBeDefined();
+    expect(store.getState().lastSeq).toBe(2);
 
     s2.close();
     vi.advanceTimersByTime(1000); // 第二次退避 2s
