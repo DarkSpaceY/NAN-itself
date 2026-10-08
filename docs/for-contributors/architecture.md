@@ -18,7 +18,7 @@ NAN-itself/
 ├── builtin/              # Shipped tools / modules / skills
 ├── workspace/            # User-editable tools / modules / skills + persona
 ├── config/               # settings.yaml, searxng.yml
-├── frontend/             # Demo web UI (not covered here; likely to be rebuilt)
+├── frontend/             # Web UI (React + assistant-ui; see "frontend/" below)
 ├── infraend/             # Planned infra backend (not covered here)
 ├── models/               # Downloaded model weights (runtime-managed)
 ├── docs/                 # This documentation
@@ -207,9 +207,25 @@ format and runtime surface.
 ### gateway and events
 
 `gateway.py` serves the HTTP API on `gateway.host:gateway.port`
-(default `127.0.0.1:8765`) and bridges to the web UI in `frontend/`.
+(default `127.0.0.1:8765`) and bridges to the web UI in `frontend/`:
+agent activity is streamed as JSON envelopes over the `/ws`
+websocket, the same envelope history the bus keeps is replayed on
+connect.
 `events.py` implements the in-process pub/sub bus with bounded history
-and subscriber queues.
+and subscriber queues. The envelope types and their payloads are
+contracted in `frontend/src/protocol.ts` — the frontend is the
+renderer of structured data only, so that file (not the backend) is
+the reference for the wire protocol.
+
+### frontend/
+
+React + assistant-ui single-column conversation UI. Data flows one
+way: WS envelopes → `history/mapper.ts` folds them into
+persisted turns (IndexedDB, frontend-owned; the backend keeps no
+conversation state) → `convert.ts` maps turns to assistant-ui
+messages → `ui/` renders them. A `turn_started` envelope anchors
+each turn: everything after it belongs to that turn, so attribution
+never relies on timing heuristics.
 
 ## builtin/ and workspace/
 
