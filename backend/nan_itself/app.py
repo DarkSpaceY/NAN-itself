@@ -232,9 +232,10 @@ async def run_agent_process() -> None:
         # Shutdown.
         #
         # Best-effort cleanup that must run to completion: the
-        # steps below catch BaseException on purpose, so a
-        # cancellation arriving during shutdown cannot leave
-        # modules or providers running.
+        # gateway / modules / providers steps catch BaseException
+        # on purpose, so a cancellation arriving during shutdown
+        # cannot leave them running. The agent step only catches
+        # CancelledError / Exception.
         # ----------------------------------------------------------
 
         for sig in (

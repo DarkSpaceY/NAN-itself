@@ -17,6 +17,7 @@ from . import persistence as _persistence
 from nan_itself.utils import blocklist as _blocklist
 from nan_itself.utils import paths as _paths
 from .model import (
+    _MODULE_STOP_TIMEOUT,
     DataSpace,
     DuplicateModuleError,
     Module,
@@ -29,11 +30,9 @@ from .reload import (
 )
 
 
-# Grace period for one Module to honour a stop. A Module's stop()
-# and its start() task are user code: a blocking implementation, or
-# one that swallows cancellation, must not stall the supervisor
-# forever.
-_MODULE_STOP_TIMEOUT = 10.0
+# The stop budget itself lives in model.py (shared with the
+# hot-reload commit path, which cannot import it from here
+# without a cycle).
 
 
 # ============================================================================
@@ -58,32 +57,6 @@ class Facade:
         - Agent-turn DataSpace snapshots
         - Module querying
         - channel downlink routing (never raises)
-
-    Important isolation rule:
-
-        Dependency graph bookkeeping and Module instance binding
-        are separate operations.
-
-        Rebuilding the graph MUST NOT implicitly mutate every
-        Module instance.
-
-        A Module is bound:
-            - when its instance is first created
-            - when its replacement generation is created
-
-        Reloading Module A must not re-bind Module B, C, ...
-        even when A declares them in `requires`.
-
-        The only exception is a pair of targeted single-edge
-        operations, each triggered by an actual registration or
-        removal:
-
-            - registering a Module attaches the missing reader to
-              existing dependents that declare it
-            - removing a Module detaches that edge from every
-              remaining dependent
-
-        Neither operation re-binds unrelated Modules.
     """
 
     def __init__(
@@ -347,9 +320,6 @@ class Facade:
     ]:
         """
         Capture one detached global DataSpace snapshot.
-
-        The returned object can safely be shared by the Main Agent
-        and all descendant Subagents participating in the same turn.
         """
         snapshot = {
             module_id: record.data.snapshot()
@@ -372,8 +342,12 @@ class Facade:
         Query all RUNNING Modules against the turn's world.
 
         The turn carries the DataSpace snapshot captured when the
-        turn started, so the entire dispatch tree observes exactly
-        the same world state.
+        turn started, handed to each Module as `turn.world`.
+        Note: a Module that reads its dependencies through the
+        readers in `self.dependencies` observes their *live*
+        DataSpace state, not the frozen turn snapshot — the
+        snapshot is only guaranteed for code that reads
+        `turn.world` itself.
         """
         records = [
             record

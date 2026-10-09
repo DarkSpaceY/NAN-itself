@@ -134,7 +134,8 @@ class SpawnVerb:
                 "response when tasks are independent. "
                 "Each Subagent starts immediately and its "
                 "final report is delivered to this agent's "
-                "context automatically once it finishes."
+                "context automatically at a later turn "
+                "boundary."
             ),
             input_schema={
                 "type": "object",
@@ -751,7 +752,10 @@ class InvokeChannelsVerb:
             description=(
                 "Feed one payload into a module channel: "
                 "schema validation, then hand-down to the "
-                "module. Returns 'written' or 'rejected'."
+                "module. Returns 'written' on success, or a "
+                "rejection reason string (unknown or "
+                "non-running module, unknown channel, "
+                "schema violation)."
             ),
             input_schema={
                 "type": "object",

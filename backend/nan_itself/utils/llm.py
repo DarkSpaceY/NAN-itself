@@ -85,8 +85,8 @@ class LLMRequest(BaseModel):
     )
 
     # OpenAI-compatible JSON mode ({"type": "json_object"}).
-    # Used by structured machine-facing calls such as the memory
-    # module's REVIEW/MERGE operations; None for normal turns.
+    # Reserved for structured machine-facing calls; None for normal turns.
+    # Currently no caller in this codebase sets it.
     response_format: dict | None = None
 
 
@@ -287,7 +287,7 @@ class LLMProvider:
             if mapped is not None
         ]
 
-        logger.warning(
+        logger.debug(
             "\n========== OPENAI REQUEST {} ==========\n{}",
             len(messages),
             json.dumps(
@@ -806,35 +806,14 @@ class LLMProvider:
                     # cycle) contributes nothing visible.
                     continue
 
-                text_block = {
-                    "type": "text",
-                    "text": text,
-                }
-
-                # Anthropic requires strictly alternating roles.
-                # Injected subagent reports can produce consecutive
-                # user messages, so coalesce them into one message
-                # holding multiple text blocks.
-                previous = (
-                    result[-1]
-                    if result
-                    else None
-                )
-
-                if (
-                    previous is not None
-                    and previous.get("role")
-                    == "user"
-                ):
-                    previous["content"].append(
-                        text_block
-                    )
-
-                    continue
-
                 result.append({
                     "role": "user",
-                    "content": [text_block],
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": text,
+                        }
+                    ],
                 })
 
                 continue
@@ -897,7 +876,35 @@ class LLMProvider:
                 f"{message.role}"
             )
 
-        return system_prompt, result
+        # Anthropic requires strictly alternating roles and
+        # rejects consecutive same-role messages with 400.
+        # Tool results travel in user messages, so a batch of
+        # tool calls yields consecutive user messages; merge
+        # any adjacent user messages into one (content blocks
+        # concatenated, order preserved).
+        merged: list[dict[str, Any]] = []
+
+        for message in result:
+            previous = (
+                merged[-1]
+                if merged
+                else None
+            )
+
+            if (
+                previous is not None
+                and previous.get("role") == "user"
+                and message.get("role") == "user"
+            ):
+                previous["content"].extend(
+                    message["content"]
+                )
+
+                continue
+
+            merged.append(message)
+
+        return system_prompt, merged
 
     # ==================================================================
     # Normalization

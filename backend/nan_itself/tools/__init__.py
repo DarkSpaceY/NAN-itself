@@ -3,11 +3,13 @@ Tools package public surface.
 
 Layering (dependencies point downward only):
 
-    server ──> runtime ──> provider <── { mcp, local }
-                  │             │
-                  └──> results <── spec
+    server ──> runtime ──> { mcp, local } ──> provider
 
-        watcher: hot-reload bookkeeping used by runtime
+    shared leaves (imported by the layers above, import nothing
+    from siblings): spec, results, watcher
+        spec     <- provider, mcp, local, runtime
+        results  <- provider, local, runtime, server
+        watcher  <- runtime (hot-reload bookkeeping)
 
 Import from this package, never from sibling modules.
 """

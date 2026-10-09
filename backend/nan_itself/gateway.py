@@ -8,13 +8,15 @@ Server-authoritative stream:
 
     - on connect: hello + history replay
     - live: forward subscribed events
-    - inbound: {"t":"input","text"} -> on_input(text)
-              {"t":"pause"}         -> on_pause(True)
-              {"t":"resume"}        -> on_pause(False)
+    - inbound: {"t":"input","text","mid"} -> on_input(text, mid)
+               (mid dedup is handled here, bounded cache)
+              {"t":"pause"}             -> on_pause(True)
+              {"t":"resume"}            -> on_pause(False)
+              {"t":"ping"}              -> {"t":"pong"}
 
 The gateway owns nothing about agent semantics; it only formats
-the stream and inserts a date divider when the wall-clock date
-rolls over.
+the stream. Date dividers are rendered by the frontend from the
+events' timestamps.
 """
 
 from __future__ import annotations

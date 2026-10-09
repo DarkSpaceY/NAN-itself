@@ -1080,18 +1080,6 @@ class ProviderRuntime:
 
         self._mcp_workers.clear()
 
-        for name, provider in list(
-            self.providers.items()
-        ):
-            if (
-                provider.spec.kind
-                == PROVIDER_KIND_LOCAL
-            ):
-                self.providers.pop(
-                    name,
-                    None,
-                )
-
     async def _reap_dead_workers(
         self,
     ) -> None:
@@ -1790,26 +1778,14 @@ class ProviderRuntime:
         for name in (
             old_names - {provider_name}
         ):
-            stale = (
-                self.providers.pop(
-                    name,
-                    None,
-                )
+            self.providers.pop(
+                name,
+                None,
             )
-
-            _ = stale
-
-        old = (
-            self.providers.get(
-                provider_name
-            )
-        )
 
         self.providers[
             provider_name
         ] = candidate
-
-        _ = old
 
         self._local_sources[
             path

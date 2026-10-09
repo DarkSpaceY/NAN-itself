@@ -20,6 +20,14 @@ from pydantic import BaseModel
 
 MODULE_HEADER = "# @module"
 
+# Grace period for one Module to honour a stop. A Module's stop()
+# and its start() task are user code: a blocking implementation, or
+# one that swallows cancellation, must not stall the supervisor
+# forever. Shared by the supervised stop path and the hot-reload
+# commit path (defined here so runtime and reload can both import
+# it without a cycle).
+_MODULE_STOP_TIMEOUT = 10.0
+
 
 # ============================================================================
 # DataSpace
@@ -142,8 +150,10 @@ class Turn:
     dataclasses.replace().
 
     The history snapshot is cleared (empty tuple) whenever the
-    running character count exceeded the engine's limit: earlier
-    turns stay on record, but the broken chain starts fresh.
+    running character count exceeded the engine's limit. Clearing
+    is a full drop: earlier turns are not retained anywhere
+    (there is no persistent history), and the new turn starts
+    from an empty prior chain.
     """
 
     agent_hash: str

@@ -71,6 +71,7 @@ from loguru import logger
 
 from . import deps as _deps
 from .model import (
+    _MODULE_STOP_TIMEOUT,
     Module,
     ModuleRecord,
     ModuleState,
@@ -519,7 +520,21 @@ async def _hot_reload_locked(
     old_task = old.task
 
     try:
-        await old.instance.stop()
+        # Bounded like the supervised stop path: a hung stop()
+        # must not block the reload coroutine forever.
+        await asyncio.wait_for(
+            old.instance.stop(),
+            timeout=_MODULE_STOP_TIMEOUT,
+        )
+
+    except asyncio.TimeoutError:
+        logger.error(
+            "Old Module generation stop timed out after "
+            f"{_MODULE_STOP_TIMEOUT:g}s: "
+            "{}[generation={}]",
+            old.id,
+            old.generation,
+        )
 
     except Exception:
         logger.exception(

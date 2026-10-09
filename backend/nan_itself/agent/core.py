@@ -193,7 +193,10 @@ class Agent:
 
         The completed Turn is returned and delivered (to the
         Modules) exactly once, whether the turn succeeded, failed
-        or was cancelled.
+        or was cancelled. The only exception is a failure during
+        the observation phase itself, before the turn enters the
+        guarded body: such an error propagates and the turn is
+        never delivered.
         """
         # ----------------------------------------------------------
         # Skills hot reload.

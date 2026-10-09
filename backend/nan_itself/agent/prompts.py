@@ -73,6 +73,13 @@ def render_turn(
     per result. An in-flight or failed turn (empty flow) renders
     as the observation alone.
 
+    Results pair with calls positionally; if a call raised and
+    left its result unwritten, the zip truncates at the shorter
+    side and only the calls that have results are rendered.
+    (In practice a turn whose calls raised never enters any
+    history: the agent only appends turns whose call phase
+    completed.)
+
     Deterministic: the same turn always renders to the same
     messages -- the next turn's history derives its prefix
     cacheability from this.
