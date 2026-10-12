@@ -37,7 +37,6 @@ from .spec import (
     ProviderSpec,
 )
 
-
 # ============================================================================
 # Connection
 # ============================================================================
@@ -56,6 +55,7 @@ async def connect(
     so an unbounded handshake would hang forever on a
     server that starts but never answers.
     """
+
     async def bounded(aw):
         if timeout is None:
             return await aw
@@ -64,16 +64,13 @@ async def connect(
             aw,
             timeout=timeout,
         )
+
     command = spec.command
 
     if not command:
-        raise ValueError(
-            f"MCP '{spec.name}' is missing command"
-        )
+        raise ValueError(f"MCP '{spec.name}' is missing command")
 
-    resolved_command = (
-        shutil.which(command) or command
-    )
+    resolved_command = shutil.which(command) or command
 
     # Local-first tools run on the user's machine: inherit the
     # parent environment by default so npm/uv caches, proxies and
@@ -81,9 +78,7 @@ async def connect(
     env = dict(os.environ)
 
     if spec.env is not None:
-        env.update(
-            dict(spec.env)
-        )
+        env.update(dict(spec.env))
 
     server_params = StdioServerParameters(
         command=resolved_command,
@@ -102,37 +97,24 @@ async def connect(
     stack = AsyncExitStack()
 
     try:
-        read, write = (
-            await stack.enter_async_context(
-                stdio_client(server_params)
+        read, write = await stack.enter_async_context(stdio_client(server_params))
+
+        session = await stack.enter_async_context(
+            ClientSession(
+                read,
+                write,
             )
         )
 
-        session = (
-            await stack.enter_async_context(
-                ClientSession(
-                    read,
-                    write,
-                )
-            )
-        )
+        await bounded(session.initialize())
 
-        await bounded(
-            session.initialize()
-        )
-
-        result = await bounded(
-            session.list_tools()
-        )
+        result = await bounded(session.list_tools())
 
         provider = Provider(
             spec=spec,
             stack=stack,
             session=session,
-            tools={
-                tool.name: tool
-                for tool in result.tools
-            },
+            tools={tool.name: tool for tool in result.tools},
         )
 
         logger.info(
@@ -170,10 +152,7 @@ async def refresh_tools(
             timeout=timeout,
         )
 
-    provider.tools = {
-        tool.name: tool
-        for tool in result.tools
-    }
+    provider.tools = {tool.name: tool for tool in result.tools}
 
 
 # ============================================================================
@@ -188,17 +167,13 @@ def load_yaml(
         "r",
         encoding="utf-8",
     ) as file:
-        config = yaml.safe_load(
-            file
-        ) or {}
+        config = yaml.safe_load(file) or {}
 
     if not isinstance(
         config,
         dict,
     ):
-        raise ValueError(
-            f"Invalid YAML object: {path}"
-        )
+        raise ValueError(f"Invalid YAML object: {path}")
 
     return config
 
@@ -253,13 +228,8 @@ def parse_config(
         source.stem,
     )
 
-    if (
-        not isinstance(name, str)
-        or not name
-    ):
-        raise ValueError(
-            f"Invalid MCP name: {source}"
-        )
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Invalid MCP name: {source}")
 
     return [
         spec_from_mapping(
@@ -281,17 +251,10 @@ def spec_from_mapping(
     raw: dict[str, Any],
     source: str,
 ) -> ProviderSpec:
-    command = raw.get(
-        "command"
-    )
+    command = raw.get("command")
 
-    if (
-        not isinstance(command, str)
-        or not command
-    ):
-        raise ValueError(
-            f"MCP '{name}' is missing command"
-        )
+    if not isinstance(command, str) or not command:
+        raise ValueError(f"MCP '{name}' is missing command")
 
     args_raw = raw.get(
         "args",
@@ -302,59 +265,39 @@ def spec_from_mapping(
         args_raw,
         list,
     ):
-        raise ValueError(
-            f"MCP '{name}'.args must be a list"
-        )
+        raise ValueError(f"MCP '{name}'.args must be a list")
 
-    env_raw = raw.get(
-        "env"
-    )
+    env_raw = raw.get("env")
 
     if env_raw is not None:
         if not isinstance(
             env_raw,
             dict,
         ):
-            raise ValueError(
-                f"MCP '{name}'.env must be a mapping"
-            )
+            raise ValueError(f"MCP '{name}'.env must be a mapping")
 
-        env = MappingProxyType(
-            {
-                str(key): str(value)
-                for key, value in env_raw.items()
-            }
-        )
+        env = MappingProxyType({str(key): str(value) for key, value in env_raw.items()})
 
     else:
         env = None
 
-    cwd = raw.get(
-        "cwd"
-    )
+    cwd = raw.get("cwd")
 
     if cwd is not None:
-        cwd = str(
-            cwd
-        )
+        cwd = str(cwd)
 
         if not Path(cwd).is_absolute():
             # Relative cwd in an MCP config is repo-anchored,
             # never process-cwd-anchored: launching nan from
             # any directory must not move the server's
             # working directory (same rule as utils/paths.py).
-            cwd = str(
-                _paths.repo_root() / cwd
-            )
+            cwd = str(_paths.repo_root() / cwd)
 
     return ProviderSpec(
         name=name,
         kind=PROVIDER_KIND_MCP,
         command=command,
-        args=tuple(
-            str(value)
-            for value in args_raw
-        ),
+        args=tuple(str(value) for value in args_raw),
         env=env,
         cwd=cwd,
         source=source,

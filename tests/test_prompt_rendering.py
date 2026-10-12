@@ -41,15 +41,9 @@ def test_render_is_deterministic():
         reply="hi",
     )
 
-    assert (
-        build_messages(turn)
-        == build_messages(turn)
-    )
+    assert build_messages(turn) == build_messages(turn)
 
-    assert (
-        render_turn(turn)
-        == render_turn(turn)
-    )
+    assert render_turn(turn) == render_turn(turn)
 
 
 def test_in_flight_turn_renders_observation_only():
@@ -68,9 +62,7 @@ def test_in_flight_turn_renders_observation_only():
     rendered = render_turn(turn)
 
     # No flow yet: the observation alone.
-    assert [
-        m.role for m in rendered
-    ] == ["user"]
+    assert [m.role for m in rendered] == ["user"]
 
     content = rendered[0].content
 
@@ -90,9 +82,7 @@ def test_failed_turn_renders_observation_only():
         error="RuntimeError: boom",
     )
 
-    assert [
-        m.role for m in render_turn(turn)
-    ] == ["user"]
+    assert [m.role for m in render_turn(turn)] == ["user"]
 
 
 def test_reply_only_turn_renders_assistant_text():
@@ -103,9 +93,7 @@ def test_reply_only_turn_renders_assistant_text():
 
     rendered = render_turn(turn)
 
-    assert [
-        m.role for m in rendered
-    ] == ["user", "assistant"]
+    assert [m.role for m in rendered] == ["user", "assistant"]
 
     assert rendered[1].content == "done"
 
@@ -132,9 +120,7 @@ def test_calls_render_positional_tool_messages():
 
     rendered = render_turn(turn)
 
-    assert [
-        m.role for m in rendered
-    ] == ["user", "assistant", "tool", "tool"]
+    assert [m.role for m in rendered] == ["user", "assistant", "tool", "tool"]
 
     assistant = rendered[1]
 
@@ -174,9 +160,7 @@ def test_partial_results_render_truncated():
 
     rendered = render_turn(turn)
 
-    assert [
-        m.role for m in rendered
-    ] == ["user", "assistant", "tool"]
+    assert [m.role for m in rendered] == ["user", "assistant", "tool"]
 
 
 def test_next_request_extends_previous_exactly():
@@ -208,13 +192,9 @@ def test_next_request_extends_previous_exactly():
 
     second_request = build_messages(second)
 
-    assert second_request[
-        : len(first_request)
-    ] == first_request
+    assert second_request[: len(first_request)] == first_request
 
-    assert [
-        m.role for m in second_request
-    ] == [
+    assert [m.role for m in second_request] == [
         "system",
         "user",
         "assistant",

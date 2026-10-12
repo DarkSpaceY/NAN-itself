@@ -17,9 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from nan_itself.utils import paths as _paths
-
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -71,10 +69,7 @@ def test_facade_defaults_anchor_from_foreign_cwd(
 
     assert facade.data_dir == REPO / "data" / "modules"
 
-    assert (
-        facade.builtin_modules_dir
-        == REPO / "builtin" / "modules"
-    )
+    assert facade.builtin_modules_dir == REPO / "builtin" / "modules"
 
 
 def test_settings_yaml_found_from_foreign_cwd(
@@ -153,11 +148,9 @@ def test_builtin_modules_anchor_from_foreign_cwd(
     audio = _load_builtin_module("audio")
 
     assert (
-        vision.VisionModule().registry_path
-        == REPO / "data" / "databases" / "vision" / "faces.json"
+        vision.VisionModule().registry_path == REPO / "data" / "databases" / "vision" / "faces.json"
     )
 
     assert (
-        audio.AudioModule().registry_path
-        == REPO / "data" / "databases" / "audio" / "voices.json"
+        audio.AudioModule().registry_path == REPO / "data" / "databases" / "audio" / "voices.json"
     )

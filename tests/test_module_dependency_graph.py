@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from nan_itself.modules.model import (
     Module,
 )
@@ -152,9 +151,7 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
 
         dataspace_before = facade.dataspaces["a"]
 
-        readers_before = dict(
-            record_before.instance.dependencies
-        )
+        readers_before = dict(record_before.instance.dependencies)
 
         # Loading b completes the cycle.
         with pytest.raises(RuntimeError) as exc_info:
@@ -163,10 +160,7 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
                 facade._fingerprint(b_source),
             )
 
-        assert (
-            "Module dependency cycle detected"
-            in str(exc_info.value)
-        )
+        assert "Module dependency cycle detected" in str(exc_info.value)
 
         # Nothing was installed: the rejected id is absent and the
         # surviving record is the very same object.
@@ -176,16 +170,10 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
 
         assert set(facade.dataspaces) == {"a"}
 
-        assert (
-            facade.dataspaces["a"]
-            is dataspace_before
-        )
+        assert facade.dataspaces["a"] is dataspace_before
 
         # No reader was handed to a dependent either.
-        assert (
-            record_before.instance.dependencies
-            == readers_before
-        )
+        assert record_before.instance.dependencies == readers_before
 
         # The graph is still acyclic, so ordering -- and therefore
         # start(), stop() and _reconcile() -- keep working.
@@ -193,15 +181,10 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
 
         # Nothing durable was written for a Module that never
         # finished registering.
-        assert not (
-            facade.dataspace_dir / "b.json"
-        ).exists()
+        assert not (facade.dataspace_dir / "b.json").exists()
 
         # The rejected file left no synthetic import behind.
-        assert not any(
-            name.startswith("_dynamic_module_b")
-            for name in sys.modules
-        )
+        assert not any(name.startswith("_dynamic_module_b") for name in sys.modules)
 
         # Both ends of the lifecycle still work afterwards.
         await facade.start()
@@ -284,9 +267,7 @@ def test_acyclic_chain_stops_dependents_first(tmp_path, monkeypatch):
 
     async def scenario() -> None:
         for module_id in ("a", "b", "c"):
-            await facade._try_start(
-                facade.modules[module_id]
-            )
+            await facade._try_start(facade.modules[module_id])
 
         await facade.stop()
 

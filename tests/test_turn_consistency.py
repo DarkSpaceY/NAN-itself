@@ -1,16 +1,13 @@
-
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
 
 import pytest
-
 from nan_itself.agent.core import Agent
 from nan_itself.agent.model import SubagentLimitError
 from nan_itself.agent.prompts import render_turn
 from nan_itself.modules.model import DataSpace
-
 
 # ============================================================================
 # Async helper
@@ -53,9 +50,7 @@ class FakeModules:
             "state": self.space.snapshot(),
         }
 
-        self.snapshots.append(
-            snapshot
-        )
+        self.snapshots.append(snapshot)
 
         return snapshot
 
@@ -208,10 +203,7 @@ def test_dataspace_snapshot_is_detached():
 
     snapshot["nested"]["value"] = 999
 
-    assert (
-        space.snapshot()["nested"]["value"]
-        == 1
-    )
+    assert space.snapshot()["nested"]["value"] == 1
 
 
 def test_dataspace_revision_changes_when_published():
@@ -237,10 +229,7 @@ def test_dataspace_revision_changes_when_published():
 
     assert space.revision == 2
 
-    assert (
-        space.snapshot()["value"]
-        == 2
-    )
+    assert space.snapshot()["value"] == 2
 
 
 # ============================================================================
@@ -271,29 +260,15 @@ def test_agent_captures_exactly_one_world_snapshot_per_turn():
 
         await agent.run()
 
-        assert (
-            modules.snapshot_calls
-            == 1
-        )
+        assert modules.snapshot_calls == 1
 
-        assert (
-            len(engine.executions)
-            == 1
-        )
+        assert len(engine.executions) == 1
 
-        assert (
-            modules.query_calls
-            == 1
-        )
+        assert modules.query_calls == 1
 
-        assert (
-            skills.refresh_calls
-            == 1
-        )
+        assert skills.refresh_calls == 1
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_each_main_turn_gets_a_new_world_snapshot():
@@ -306,16 +281,9 @@ def test_each_main_turn_gets_a_new_world_snapshot():
 
         await agent.run()
 
-        first_turn = (
-            engine.executions[0].turn
-        )
+        first_turn = engine.executions[0].turn
 
-        assert (
-            first_turn.world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert first_turn.world["state"]["value"] == 1
 
         modules.space.publish(
             {
@@ -325,42 +293,19 @@ def test_each_main_turn_gets_a_new_world_snapshot():
 
         await agent.run()
 
-        second_turn = (
-            engine.executions[1].turn
-        )
+        second_turn = engine.executions[1].turn
 
-        assert (
-            first_turn.world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert first_turn.world["state"]["value"] == 1
 
-        assert (
-            second_turn.world[
-                "state"
-            ]["value"]
-            == 2
-        )
+        assert second_turn.world["state"]["value"] == 2
 
-        assert (
-            first_turn.world
-            is not second_turn.world
-        )
+        assert first_turn.world is not second_turn.world
 
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
+        assert modules.snapshot_calls == 2
 
-        assert (
-            skills.refresh_calls
-            == 2
-        )
+        assert skills.refresh_calls == 2
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -381,11 +326,7 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
         async def on_execute(
             turn,
         ):
-            observed["before"] = (
-                turn.world[
-                    "state"
-                ]["value"]
-            )
+            observed["before"] = turn.world["state"]["value"]
 
             # Mutate the live Module DataSpace while the Agent turn
             # is already executing.
@@ -395,55 +336,27 @@ def test_world_snapshot_remains_stable_when_dataspace_changes_mid_turn():
                 }
             )
 
-            observed["after"] = (
-                turn.world[
-                    "state"
-                ]["value"]
-            )
+            observed["after"] = turn.world["state"]["value"]
 
-            observed["live"] = (
-                modules.space.snapshot()[
-                    "value"
-                ]
-            )
+            observed["live"] = modules.space.snapshot()["value"]
 
-        engine.on_execute = (
-            on_execute
-        )
+        engine.on_execute = on_execute
 
         await agent.run()
 
-        assert (
-            observed["before"]
-            == 1
-        )
+        assert observed["before"] == 1
 
         # The current turn continues to observe the original snapshot.
-        assert (
-            observed["after"]
-            == 1
-        )
+        assert observed["after"] == 1
 
         # Live DataSpace has already moved forward.
-        assert (
-            observed["live"]
-            == 2
-        )
+        assert observed["live"] == 2
 
-        turn = (
-            engine.executions[0].turn
-        )
+        turn = engine.executions[0].turn
 
-        assert (
-            turn.world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert turn.world["state"]["value"] == 1
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -461,9 +374,7 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
 
         await agent.run()
 
-        first = (
-            engine.executions[0].turn
-        )
+        first = engine.executions[0].turn
 
         modules.space.publish(
             {
@@ -473,9 +384,7 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
 
         await agent.run()
 
-        second = (
-            engine.executions[1].turn
-        )
+        second = engine.executions[1].turn
 
         modules.space.publish(
             {
@@ -483,30 +392,13 @@ def test_old_turn_world_is_not_rewritten_by_next_turn():
             }
         )
 
-        assert (
-            first.world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert first.world["state"]["value"] == 1
 
-        assert (
-            second.world[
-                "state"
-            ]["value"]
-            == 2
-        )
+        assert second.world["state"]["value"] == 2
 
-        assert (
-            modules.space.snapshot()[
-                "value"
-            ]
-            == 3
-        )
+        assert modules.space.snapshot()["value"] == 3
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_dataspace_snapshot_provides_the_deep_detachment_contract():
@@ -530,10 +422,7 @@ def test_dataspace_snapshot_provides_the_deep_detachment_contract():
         }
     )
 
-    assert (
-        first["state"]["value"]
-        == 1
-    )
+    assert first["state"]["value"] == 1
 
 
 # ============================================================================
@@ -554,26 +443,15 @@ def test_root_agent_hash_is_stable_across_turns():
 
         # Same Agent instance, same identity, no rotation: both
         # turns carry the instance's own hash.
-        assert (
-            engine.executions[0].turn.agent_hash
-            == agent.agent_hash
-        )
+        assert engine.executions[0].turn.agent_hash == agent.agent_hash
 
-        assert (
-            engine.executions[1].turn.agent_hash
-            == agent.agent_hash
-        )
+        assert engine.executions[1].turn.agent_hash == agent.agent_hash
 
         assert engine.executions[0].turn.depth == 0
 
-        assert (
-            engine.executions[0].turn.parent_hash
-            is None
-        )
+        assert engine.executions[0].turn.parent_hash is None
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -595,10 +473,7 @@ def test_spawn_builds_a_homogeneous_child_tree():
 
         assert child.parent is root
 
-        assert (
-            child.parent_hash
-            == root.agent_hash
-        )
+        assert child.parent_hash == root.agent_hash
 
         assert child.task == "child task"
 
@@ -608,14 +483,9 @@ def test_spawn_builds_a_homogeneous_child_tree():
         assert child.tools is root.tools
         assert child.skills is root.skills
 
-        assert (
-            child.agent_hash
-            != root.agent_hash
-        )
+        assert child.agent_hash != root.agent_hash
 
-        assert child.max_subagent_depth == (
-            root.max_subagent_depth
-        )
+        assert child.max_subagent_depth == (root.max_subagent_depth)
 
         assert root.children == [child]
 
@@ -625,10 +495,7 @@ def test_spawn_builds_a_homogeneous_child_tree():
 
         assert grandchild.depth == 2
 
-        assert (
-            grandchild.parent_hash
-            == child.agent_hash
-        )
+        assert grandchild.parent_hash == child.agent_hash
 
         assert grandchild.task == "grandchild task"
 
@@ -643,9 +510,7 @@ def test_spawn_builds_a_homogeneous_child_tree():
             return_exceptions=True,
         )
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_spawn_rejects_beyond_max_subagent_depth():
@@ -667,9 +532,7 @@ def test_spawn_rejects_beyond_max_subagent_depth():
             return_exceptions=True,
         )
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -734,9 +597,7 @@ async def cascade_stop():
 
     engine.root = root
 
-    root_task = asyncio.create_task(
-        root.loop()
-    )
+    root_task = asyncio.create_task(root.loop())
 
     await asyncio.wait_for(
         engine.child_started.wait(),
@@ -767,9 +628,7 @@ def test_cascade_stop_cancels_a_blocked_child():
 
         assert child._task.done()
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_cancelled_child_reports_failure():
@@ -782,19 +641,11 @@ def test_cancelled_child_reports_failure():
 
         assert child.report.status == "failed"
 
-        assert (
-            child.report.body
-            == "error: cancelled"
-        )
+        assert child.report.body == "error: cancelled"
 
-        assert (
-            child.report.task
-            == "child task"
-        )
+        assert child.report.task == "child task"
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -819,21 +670,11 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together(
 
         await agent.run()
 
-        first = (
-            engine.executions[0]
-        )
+        first = engine.executions[0]
 
-        assert (
-            first.persona
-            == "persona-v1"
-        )
+        assert first.persona == "persona-v1"
 
-        assert (
-            first.turn.world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert first.turn.world["state"]["value"] == 1
 
         # Persona edits hot-reload: the file is re-read every turn.
         (tmp_path / "persona.md").write_text(
@@ -849,32 +690,14 @@ def test_turn_boundary_refreshes_skill_persona_and_world_together(
 
         await agent.run()
 
-        second = (
-            engine.executions[1]
-        )
+        second = engine.executions[1]
 
-        assert (
-            second.persona
-            == "persona-v2"
-        )
+        assert second.persona == "persona-v2"
 
-        assert (
-            second.turn.world[
-                "state"
-            ]["value"]
-            == 2
-        )
+        assert second.turn.world["state"]["value"] == 2
 
-        assert (
-            skills.refresh_calls
-            == 2
-        )
+        assert skills.refresh_calls == 2
 
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
+        assert modules.snapshot_calls == 2
 
-    run(
-        scenario()
-    )
+    run(scenario())

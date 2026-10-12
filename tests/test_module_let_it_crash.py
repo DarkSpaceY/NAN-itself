@@ -327,9 +327,7 @@ async def _feed_crash_channel_write(tmp_path: Path, monkeypatch) -> None:
 
     # A schema-invalid payload is a model input error, not a
     # crash: rejected at the boundary, module keeps running.
-    rejected = facade.write_module_channel(
-        "feed-crash", "goal", {"priority": 3}
-    )
+    rejected = facade.write_module_channel("feed-crash", "goal", {"priority": 3})
 
     assert rejected.startswith("rejected")
 
@@ -339,9 +337,7 @@ async def _feed_crash_channel_write(tmp_path: Path, monkeypatch) -> None:
 
     # A feed() exception crashes the module; the model still
     # gets a plain failure string naming the module.
-    result = facade.write_module_channel(
-        "feed-crash", "goal", {"text": "go"}
-    )
+    result = facade.write_module_channel("feed-crash", "goal", {"text": "go"})
 
     assert "crashed" in result
 

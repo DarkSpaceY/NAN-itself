@@ -22,9 +22,9 @@ import yaml
 from .model import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
+    NAME_RE,
     SKILL_FILENAME,
     SkillMetadata,
-    NAME_RE,
     SkillValidationError,
 )
 
@@ -41,9 +41,7 @@ def split_skill_file(
     lines = text.splitlines()
 
     if not lines or lines[0].strip() != "---":
-        raise SkillValidationError(
-            "SKILL.md must start with YAML frontmatter"
-        )
+        raise SkillValidationError("SKILL.md must start with YAML frontmatter")
 
     end_index: int | None = None
 
@@ -53,26 +51,16 @@ def split_skill_file(
             break
 
     if end_index is None:
-        raise SkillValidationError(
-            "SKILL.md frontmatter is not terminated"
-        )
+        raise SkillValidationError("SKILL.md frontmatter is not terminated")
 
-    frontmatter_text = "\n".join(
-        lines[1:end_index]
-    )
+    frontmatter_text = "\n".join(lines[1:end_index])
 
-    body = "\n".join(
-        lines[end_index + 1:]
-    )
+    body = "\n".join(lines[end_index + 1 :])
 
-    parsed = yaml.safe_load(
-        frontmatter_text
-    ) or {}
+    parsed = yaml.safe_load(frontmatter_text) or {}
 
     if not isinstance(parsed, dict):
-        raise SkillValidationError(
-            "SKILL.md frontmatter must be a mapping"
-        )
+        raise SkillValidationError("SKILL.md frontmatter must be a mapping")
 
     return parsed, body
 
@@ -83,9 +71,7 @@ def read_metadata(
     skill_file = root / SKILL_FILENAME
 
     if not skill_file.is_file():
-        raise SkillValidationError(
-            f"Missing {SKILL_FILENAME}: {root}"
-        )
+        raise SkillValidationError(f"Missing {SKILL_FILENAME}: {root}")
 
     text = skill_file.read_text(
         encoding="utf-8",
@@ -104,9 +90,7 @@ def read_metadata(
         name=name,
         description=description,
         source=skill_file,
-        frontmatter=MappingProxyType(
-            dict(frontmatter)
-        ),
+        frontmatter=MappingProxyType(dict(frontmatter)),
     )
 
 
@@ -127,25 +111,16 @@ def validate_name(
     path: Path,
 ) -> None:
     if not isinstance(name, str):
-        raise SkillValidationError(
-            f"Skill name must be a string: {path}"
-        )
+        raise SkillValidationError(f"Skill name must be a string: {path}")
 
     if not name:
-        raise SkillValidationError(
-            f"Skill name cannot be empty: {path}"
-        )
+        raise SkillValidationError(f"Skill name cannot be empty: {path}")
 
     if len(name) > MAX_NAME_LENGTH:
-        raise SkillValidationError(
-            f"Skill name exceeds "
-            f"{MAX_NAME_LENGTH} characters: {path}"
-        )
+        raise SkillValidationError(f"Skill name exceeds {MAX_NAME_LENGTH} characters: {path}")
 
     if NAME_RE.fullmatch(name) is None:
-        raise SkillValidationError(
-            f"Invalid Skill name '{name}': {path}"
-        )
+        raise SkillValidationError(f"Invalid Skill name '{name}': {path}")
 
 
 def validate_description(
@@ -153,19 +128,14 @@ def validate_description(
     path: Path,
 ) -> None:
     if not isinstance(description, str):
-        raise SkillValidationError(
-            f"Skill description must be a string: {path}"
-        )
+        raise SkillValidationError(f"Skill description must be a string: {path}")
 
     if not description.strip():
-        raise SkillValidationError(
-            f"Skill description cannot be empty: {path}"
-        )
+        raise SkillValidationError(f"Skill description cannot be empty: {path}")
 
     if len(description) > MAX_DESCRIPTION_LENGTH:
         raise SkillValidationError(
-            f"Skill description exceeds "
-            f"{MAX_DESCRIPTION_LENGTH} characters: {path}"
+            f"Skill description exceeds {MAX_DESCRIPTION_LENGTH} characters: {path}"
         )
 
 
@@ -193,11 +163,8 @@ def skill_files(
             for path in root.rglob("*")
             if path.is_file()
             and not any(
-                part.startswith(".")
-                or part == "__pycache__"
-                for part in path.relative_to(
-                    root
-                ).parts
+                part.startswith(".") or part == "__pycache__"
+                for part in path.relative_to(root).parts
             )
         )
     )

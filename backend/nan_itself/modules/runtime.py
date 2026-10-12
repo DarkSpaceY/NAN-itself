@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from loguru import logger
+
+from nan_itself.utils import blocklist as _blocklist
+from nan_itself.utils import paths as _paths
 
 from . import deps as _deps
 from . import loading as _loading
 from . import persistence as _persistence
-from nan_itself.utils import blocklist as _blocklist
-from nan_itself.utils import paths as _paths
 from .model import (
     _MODULE_STOP_TIMEOUT,
     DataSpace,
@@ -28,7 +31,6 @@ from .model import (
 from .reload import (
     hot_reload,
 )
-
 
 # The stop budget itself lives in model.py (shared with the
 # hot-reload commit path, which cannot import it from here
@@ -74,37 +76,19 @@ class Facade:
         # directory layouts and are scanned with exactly the same
         # hot-reload logic. Deleting a source file removes its
         # Module.
-        self.builtin_modules_dir = (
-            project_root
-            / "builtin"
-            / "modules"
-        ).resolve()
+        self.builtin_modules_dir = (project_root / "builtin" / "modules").resolve()
 
-        self.workspace_modules_dir = (
-            project_root
-            / "workspace"
-            / "modules"
-        ).resolve()
+        self.workspace_modules_dir = (project_root / "workspace" / "modules").resolve()
 
-        self.data_dir = (
-            _paths.data_dir() / "modules"
-        )
+        self.data_dir = _paths.data_dir() / "modules"
 
-        self.private_dir = (
-            self.data_dir / "private"
-        )
+        self.private_dir = self.data_dir / "private"
 
-        self.dataspace_dir = (
-            self.data_dir / "dataspace"
-        )
+        self.dataspace_dir = self.data_dir / "dataspace"
 
-        self.retry_interval = (
-            retry_interval
-        )
+        self.retry_interval = retry_interval
 
-        self.scan_interval = (
-            scan_interval
-        )
+        self.scan_interval = scan_interval
 
         self.modules: dict[
             str,
@@ -140,16 +124,12 @@ class Facade:
             BaseException,
         ] = {}
 
-        self._supervisor_task: (
-            asyncio.Task[None] | None
-        ) = None
+        self._supervisor_task: asyncio.Task[None] | None = None
 
         # Strong references to running fire-and-forget
         # delivery tasks so they are not garbage-collected
         # mid-flight.
-        self._delivery_tasks: set[
-            asyncio.Task[None]
-        ] = set()
+        self._delivery_tasks: set[asyncio.Task[None]] = set()
 
         self._wake = asyncio.Event()
 
@@ -173,11 +153,9 @@ class Facade:
         # It must not re-bind already existing instances.
         self._refresh_dependency_graph()
 
-        self._supervisor_task = (
-            asyncio.create_task(
-                self._supervisor(),
-                name="module-facade-supervisor",
-            )
+        self._supervisor_task = asyncio.create_task(
+            self._supervisor(),
+            name="module-facade-supervisor",
         )
 
         await self._reconcile()
@@ -195,26 +173,17 @@ class Facade:
         if supervisor is not None:
             supervisor.cancel()
 
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await supervisor
-
-            except asyncio.CancelledError:
-                pass
 
         # Stop dependents before dependencies.
         records = self.modules.copy()
 
-        for module_id in reversed(
-            self._topological_order()
-        ):
-            record = records.get(
-                module_id
-            )
+        for module_id in reversed(self._topological_order()):
+            record = records.get(module_id)
 
             if record is not None:
-                await self._stop_record(
-                    record
-                )
+                await self._stop_record(record)
 
         # Persist final state after Modules have stopped.
         self.save_state()
@@ -237,18 +206,13 @@ class Facade:
         A failing tell() crashes its module (DOWN + supervised
         restart); the failure never propagates to the agents.
         """
-        for module_record in list(
-            self.modules.values()
-        ):
+        for module_record in list(self.modules.values()):
             # Only a RUNNING module receives turns: ask() filters
             # the same way, and a module that has not finished
             # starting (or is being replaced / torn down) must not
             # crash from a delivery aimed at a service that was
             # never fully up.
-            if (
-                module_record.state
-                is not ModuleState.RUNNING
-            ):
+            if module_record.state is not ModuleState.RUNNING:
                 continue
 
             task = asyncio.create_task(
@@ -260,9 +224,7 @@ class Facade:
 
             self._delivery_tasks.add(task)
 
-            task.add_done_callback(
-                self._delivery_tasks.discard
-            )
+            task.add_done_callback(self._delivery_tasks.discard)
 
     async def _tell_module(
         self,
@@ -270,9 +232,7 @@ class Facade:
         turn,
     ) -> None:
         try:
-            await module_record.instance.tell(
-                turn
-            )
+            await module_record.instance.tell(turn)
 
         except asyncio.CancelledError:
             raise
@@ -297,17 +257,12 @@ class Facade:
         This is how the composition root reaches special Modules
         (e.g. the inbox) without importing them.
         """
-        record = self.modules.get(
-            module_id
-        )
+        record = self.modules.get(module_id)
 
         if record is None:
             return None
 
-        if (
-            record.state
-            is not ModuleState.RUNNING
-        ):
+        if record.state is not ModuleState.RUNNING:
             return None
 
         return record.instance
@@ -321,15 +276,9 @@ class Facade:
         """
         Capture one detached global DataSpace snapshot.
         """
-        snapshot = {
-            module_id: record.data.snapshot()
-            for module_id, record
-            in self.modules.items()
-        }
+        snapshot = {module_id: record.data.snapshot() for module_id, record in self.modules.items()}
 
-        return MappingProxyType(
-            snapshot
-        )
+        return MappingProxyType(snapshot)
 
     async def query_snapshot(
         self,
@@ -350,10 +299,7 @@ class Facade:
         `turn.world` itself.
         """
         records = [
-            record
-            for record in self.modules.values()
-            if record.state
-            is ModuleState.RUNNING
+            record for record in self.modules.values() if record.state is ModuleState.RUNNING
         ]
 
         async def run_one(
@@ -365,11 +311,7 @@ class Facade:
             started = time.time()
 
             try:
-                result = (
-                    await record.instance.ask(
-                        turn
-                    )
-                )
+                result = await record.instance.ask(turn)
                 failed = False
 
             except asyncio.CancelledError:
@@ -400,18 +342,10 @@ class Facade:
             return result
 
         results = await asyncio.gather(
-            *(
-                run_one(record)
-                for record in records
-            ),
+            *(run_one(record) for record in records),
         )
 
-        return [
-            result
-            for result in results
-            if result is not None
-            and result != ""
-        ]
+        return [result for result in results if result is not None and result != ""]
 
     # ==================================================================
     # Channel downlink routing
@@ -431,12 +365,8 @@ class Facade:
             if record.state is not ModuleState.RUNNING:
                 continue
 
-            for name in (
-                record.instance.channels
-            ):
-                lines.append(
-                    f"{record.id}/{name}"
-                )
+            for name in record.instance.channels:
+                lines.append(f"{record.id}/{name}")
 
         if not lines:
             return (
@@ -458,32 +388,19 @@ class Facade:
         record = self.modules.get(module_id)
 
         if record is None:
-            return (
-                f"Unknown module '{module_id}'. "
-                "Use list_channels to see "
-                "available channels."
-            )
+            return f"Unknown module '{module_id}'. Use list_channels to see available channels."
 
         if record.state is not ModuleState.RUNNING:
-            return (
-                f"Module '{module_id}' is not "
-                "RUNNING."
-            )
+            return f"Module '{module_id}' is not RUNNING."
 
         channels = record.instance.channels
 
         if not channels:
-            return (
-                f"Module '{module_id}' exposes "
-                "no channels."
-            )
+            return f"Module '{module_id}' exposes no channels."
 
         if channel is not None:
             if channel not in channels:
-                return (
-                    f"Unknown channel "
-                    f"'{module_id}/{channel}'."
-                )
+                return f"Unknown channel '{module_id}/{channel}'."
 
             selected = {channel: channels[channel]}
 
@@ -527,43 +444,24 @@ class Facade:
         record = self.modules.get(module_id)
 
         if record is None:
-            return (
-                f"Unknown module '{module_id}'. "
-                "Use list_channels to see "
-                "available channels."
-            )
+            return f"Unknown module '{module_id}'. Use list_channels to see available channels."
 
         if record.state is not ModuleState.RUNNING:
-            return (
-                f"Module '{module_id}' is not "
-                "RUNNING; payload not delivered."
-            )
+            return f"Module '{module_id}' is not RUNNING; payload not delivered."
 
         channels = record.instance.channels
 
         if not channels:
-            return (
-                f"Module '{module_id}' exposes "
-                "no channels."
-            )
+            return f"Module '{module_id}' exposes no channels."
 
         if channel not in channels:
-            return (
-                f"Unknown channel "
-                f"'{module_id}/{channel}'. "
-                "Use show_channels for schemas."
-            )
+            return f"Unknown channel '{module_id}/{channel}'. Use show_channels for schemas."
 
-        validated, error = channels[
-            channel
-        ].validate(payload)
+        validated, error = channels[channel].validate(payload)
 
         if error is not None:
             return (
-                f"rejected: payload failed "
-                f"schema validation for "
-                f"'{module_id}/{channel}': "
-                f"{error}"
+                f"rejected: payload failed schema validation for '{module_id}/{channel}': {error}"
             )
 
         try:
@@ -580,11 +478,7 @@ class Facade:
             # supervisor; the model only sees a failure string.
             self._crash_module(record, exc)
 
-            return (
-                f"Module '{module_id}' crashed "
-                "while accepting the write; "
-                "it will be restarted."
-            )
+            return f"Module '{module_id}' crashed while accepting the write; it will be restarted."
 
     # ==================================================================
     # Persistence
@@ -595,15 +489,10 @@ class Facade:
     ) -> None:
         for record in self.modules.values():
             try:
-                self._save_record_state(
-                    record
-                )
+                self._save_record_state(record)
 
             except Exception:
-                logger.exception(
-                    f"Failed to persist Module state: "
-                    f"{record.id}"
-                )
+                logger.exception(f"Failed to persist Module state: {record.id}")
 
     def _restore_record_state(
         self,
@@ -635,10 +524,7 @@ class Facade:
         # The initial scan+reconcile happens in start()
         # before this task runs, so the first periodic
         # scan is one full interval away.
-        next_scan = (
-            time.monotonic()
-            + self.scan_interval
-        )
+        next_scan = time.monotonic() + self.scan_interval
 
         while not self._stopping:
             now = time.monotonic()
@@ -651,27 +537,19 @@ class Facade:
                     self._refresh_dependency_graph()
 
                 except Exception:
-                    logger.exception(
-                        "Module reconciliation scan failed"
-                    )
+                    logger.exception("Module reconciliation scan failed")
 
-                next_scan = (
-                    time.monotonic()
-                    + self.scan_interval
-                )
+                next_scan = time.monotonic() + self.scan_interval
 
             try:
                 await self._reconcile()
 
             except Exception:
-                logger.exception(
-                    "Module reconcile failed"
-                )
+                logger.exception("Module reconcile failed")
 
             timeout = min(
                 max(
-                    next_scan
-                    - time.monotonic(),
+                    next_scan - time.monotonic(),
                     0.0,
                 ),
                 self.retry_interval,
@@ -683,7 +561,7 @@ class Facade:
                     timeout=timeout,
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
             finally:
@@ -694,12 +572,8 @@ class Facade:
     ) -> None:
         now = time.monotonic()
 
-        for module_id in (
-            self._topological_order()
-        ):
-            record = self.modules.get(
-                module_id
-            )
+        for module_id in self._topological_order():
+            record = self.modules.get(module_id)
 
             if record is None:
                 continue
@@ -713,9 +587,7 @@ class Facade:
             if record.retry_at > now:
                 continue
 
-            await self._try_start(
-                record
-            )
+            await self._try_start(record)
 
     async def _try_start(
         self,
@@ -732,15 +604,11 @@ class Facade:
         # This is required because a Module might be retried after
         # construction, and this method is also the lifecycle entry
         # point for that exact record.
-        self._bind_instance(
-            record
-        )
+        self._bind_instance(record)
 
         record.error = None
 
-        record.state = (
-            ModuleState.STARTING
-        )
+        record.state = ModuleState.STARTING
 
         started = asyncio.Event()
 
@@ -749,11 +617,7 @@ class Facade:
                 record,
                 started,
             ),
-            name=(
-                f"module:"
-                f"{record.id}:"
-                f"{record.generation}"
-            ),
+            name=(f"module:{record.id}:{record.generation}"),
         )
 
         # A task cancelled before its first step never runs its
@@ -761,9 +625,7 @@ class Facade:
         # this callback guarantees the wait below terminates
         # whatever happened to the task (done callbacks always
         # run). Double-set on the success path is harmless.
-        record.task.add_done_callback(
-            lambda _task: started.set()
-        )
+        record.task.add_done_callback(lambda _task: started.set())
 
         await started.wait()
 
@@ -786,27 +648,15 @@ class Facade:
         """
         record.error = exc
 
-        record.state = (
-            ModuleState.DOWN
-        )
+        record.state = ModuleState.DOWN
 
-        record.retry_at = (
-            time.monotonic()
-            + self.retry_interval
-        )
+        record.retry_at = time.monotonic() + self.retry_interval
 
-        logger.exception(
-            f"Module crashed: "
-            f"{record.id}"
-            f"[generation={record.generation}]"
-        )
+        logger.exception(f"Module crashed: {record.id}[generation={record.generation}]")
 
         task = record.task
 
-        if (
-            task is not None
-            and not task.done()
-        ):
+        if task is not None and not task.done():
             task.cancel()
 
         self._wake.set()
@@ -816,9 +666,7 @@ class Facade:
         record: ModuleRecord,
         started: asyncio.Event | None = None,
     ) -> None:
-        record.state = (
-            ModuleState.RUNNING
-        )
+        record.state = ModuleState.RUNNING
 
         if started is not None:
             started.set()
@@ -827,76 +675,46 @@ class Facade:
             await record.instance.start()
 
         except asyncio.CancelledError:
-            if not self._stopping:
-                # A crash already recorded by _crash_module()
-                # must survive this cleanup: only a plain
-                # unexpected cancel (no recorded error) writes
-                # the default fields.
-                if record.error is None:
-                    record.state = (
-                        ModuleState.DOWN
-                    )
+            # A crash already recorded by _crash_module() must survive
+            # this cleanup: only a plain unexpected cancel (no recorded
+            # error) writes the default fields.
+            if not self._stopping and record.error is None:
+                record.state = ModuleState.DOWN
 
-                    record.error = None
+                record.error = None
 
-                    record.retry_at = (
-                        time.monotonic()
-                        + self.retry_interval
-                    )
+                record.retry_at = time.monotonic() + self.retry_interval
 
-                    logger.warning(
-                        f"Module cancelled unexpectedly: "
-                        f"{record.id}"
-                    )
+                logger.warning(f"Module cancelled unexpectedly: {record.id}")
 
-                    self._wake.set()
+                self._wake.set()
 
             raise
 
         except Exception as exc:
-            record.state = (
-                ModuleState.DOWN
-            )
+            record.state = ModuleState.DOWN
 
             record.error = exc
 
-            record.retry_at = (
-                time.monotonic()
-                + self.retry_interval
-            )
+            record.retry_at = time.monotonic() + self.retry_interval
 
-            logger.exception(
-                f"Module crashed: "
-                f"{record.id}"
-                f"[generation={record.generation}]"
-            )
+            logger.exception(f"Module crashed: {record.id}[generation={record.generation}]")
 
             self._wake.set()
 
         else:
-            record.state = (
-                ModuleState.DOWN
-            )
+            record.state = ModuleState.DOWN
 
             record.error = None
 
-            record.retry_at = (
-                time.monotonic()
-                + self.retry_interval
-            )
+            record.retry_at = time.monotonic() + self.retry_interval
 
-            logger.info(
-                f"Module exited normally: "
-                f"{record.id}"
-                f"[generation={record.generation}]"
-            )
+            logger.info(f"Module exited normally: {record.id}[generation={record.generation}]")
 
             self._wake.set()
 
         finally:
-            current_task = (
-                asyncio.current_task()
-            )
+            current_task = asyncio.current_task()
 
             if record.task is current_task:
                 record.task = None
@@ -905,9 +723,7 @@ class Facade:
         self,
         record: ModuleRecord,
     ) -> None:
-        record.state = (
-            ModuleState.STOPPING
-        )
+        record.state = ModuleState.STOPPING
 
         try:
             await asyncio.wait_for(
@@ -915,7 +731,7 @@ class Facade:
                 timeout=_MODULE_STOP_TIMEOUT,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 f"Module stop timed out after "
                 f"{_MODULE_STOP_TIMEOUT:g}s: "
@@ -926,18 +742,11 @@ class Facade:
         except Exception as exc:
             record.error = exc
 
-            logger.exception(
-                f"Module stop failed: "
-                f"{record.id}"
-                f"[generation={record.generation}]"
-            )
+            logger.exception(f"Module stop failed: {record.id}[generation={record.generation}]")
 
         task = record.task
 
-        if (
-            task is not None
-            and not task.done()
-        ):
+        if task is not None and not task.done():
             task.cancel()
 
             try:
@@ -946,7 +755,7 @@ class Facade:
                     timeout=_MODULE_STOP_TIMEOUT,
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error(
                     f"Module task did not exit after "
                     f"cancellation: "
@@ -958,27 +767,17 @@ class Facade:
                 pass
 
             except Exception:
-                logger.exception(
-                    f"Module task crashed "
-                    f"during stop: {record.id}"
-                )
+                logger.exception(f"Module task crashed during stop: {record.id}")
 
         record.task = None
 
         if self._stopping:
-            record.state = (
-                ModuleState.STOPPING
-            )
+            record.state = ModuleState.STOPPING
 
         else:
-            record.state = (
-                ModuleState.DOWN
-            )
+            record.state = ModuleState.DOWN
 
-            record.retry_at = (
-                time.monotonic()
-                + self.retry_interval
-            )
+            record.retry_at = time.monotonic() + self.retry_interval
 
     # ==================================================================
     # Discovery / loading
@@ -987,13 +786,9 @@ class Facade:
     async def _scan_modules(
         self,
     ) -> None:
-        await self._scan_module_root(
-            self.builtin_modules_dir
-        )
+        await self._scan_module_root(self.builtin_modules_dir)
 
-        await self._scan_module_root(
-            self.workspace_modules_dir
-        )
+        await self._scan_module_root(self.workspace_modules_dir)
 
     async def _scan_module_root(
         self,
@@ -1001,111 +796,64 @@ class Facade:
     ) -> None:
         # Blocked names never enter the candidate set (which also
         # unloads an already-loaded one, as a plain removal).
-        blocked_names = _blocklist.blocked(
-            "modules"
-        )
+        blocked_names = _blocklist.blocked("modules")
 
         # One resolved-source index for the whole scan. Both the
         # removal lookup and the already-loaded lookup below would
         # otherwise walk every record once per file.
-        by_source = {
-            Path(
-                record.source
-            ).resolve(): record
-            for record in self.modules.values()
-        }
+        by_source = {Path(record.source).resolve(): record for record in self.modules.values()}
 
         current_files = {
             path.resolve()
-            for path in (
-                root.rglob(
-                    "*.py"
-                )
-            )
+            for path in (root.rglob("*.py"))
             if (
                 path.is_file()
                 and not path.name.startswith("_")
                 and path.stem not in blocked_names
-                and _loading.has_module_header(
-                    path
-                )
+                and _loading.has_module_header(path)
             )
         }
 
-        known_files = {
-            source
-            for source in by_source
-            if source.is_relative_to(
-                root
-            )
-        }
+        known_files = {source for source in by_source if source.is_relative_to(root)}
 
         # --------------------------------------------------------------
         # Removed files
         # --------------------------------------------------------------
 
-        for removed in (
-            known_files - current_files
-        ):
-            record = by_source.get(
-                removed
-            )
+        for removed in known_files - current_files:
+            record = by_source.get(removed)
 
             if record is not None:
-                await self._remove_record(
-                    record
-                )
+                await self._remove_record(record)
 
         # --------------------------------------------------------------
         # New / changed files
         # --------------------------------------------------------------
 
-        for path in sorted(
-            current_files
-        ):
+        for path in sorted(current_files):
             # The file can disappear between the rglob above
             # and the stat here; treat it as already removed
             # and let the next scan finalize the cleanup.
             try:
-                fingerprint = self._fingerprint(
-                    path
-                )
+                fingerprint = self._fingerprint(path)
 
             except OSError:
                 continue
 
-            previous = (
-                self._source_fingerprints.get(
-                    path
-                )
-            )
+            previous = self._source_fingerprints.get(path)
 
-            previous_error = (
-                self._source_load_errors.get(
-                    path
-                )
-            )
+            previous_error = self._source_load_errors.get(path)
 
             # Don't repeatedly retry an unchanged broken file.
-            if (
-                previous == fingerprint
-                and previous_error is not None
-            ):
+            if previous == fingerprint and previous_error is not None:
                 continue
 
-            existing = by_source.get(
-                path
-            )
+            existing = by_source.get(path)
 
-            if (
-                previous == fingerprint
-                and existing is not None
-            ):
+            if previous == fingerprint and existing is not None:
                 continue
 
-            self._source_fingerprints[
-                path
-            ] = fingerprint
+            self._source_fingerprints[path] = fingerprint
 
             self._source_load_errors.pop(
                 path,
@@ -1119,14 +867,9 @@ class Facade:
                 )
 
             except Exception as exc:
-                self._source_load_errors[
-                    path
-                ] = exc
+                self._source_load_errors[path] = exc
 
-                logger.exception(
-                    f"Failed to load Module file: "
-                    f"{path}"
-                )
+                logger.exception(f"Failed to load Module file: {path}")
 
                 self._wake.set()
 
@@ -1135,21 +878,15 @@ class Facade:
         path: Path,
         fingerprint: tuple[int, int],
     ) -> None:
-        old = self._find_record_by_source(
-            path
-        )
+        old = self._find_record_by_source(path)
 
         (
             cls,
             imported_name,
             _,
-        ) = _loading.import_module_class(
-            path
-        )
+        ) = _loading.import_module_class(path)
 
-        _loading.validate_module_class(
-            cls
-        )
+        _loading.validate_module_class(cls)
 
         if old is None:
             try:
@@ -1160,12 +897,8 @@ class Facade:
                 self._register_module_class(
                     cls,
                     source=str(path),
-                    source_fingerprint=(
-                        fingerprint
-                    ),
-                    imported_module_name=(
-                        imported_name
-                    ),
+                    source_fingerprint=(fingerprint),
+                    imported_module_name=(imported_name),
                 )
 
             except Exception:
@@ -1185,11 +918,7 @@ class Facade:
             return
 
         if old.id != cls.id:
-            raise RuntimeError(
-                f"hot reload changed Module id "
-                f"in {path}: "
-                f"{old.id!r} -> {cls.id!r}"
-            )
+            raise RuntimeError(f"hot reload changed Module id in {path}: {old.id!r} -> {cls.id!r}")
 
         await hot_reload(
             self,
@@ -1204,14 +933,8 @@ class Facade:
         cls: type[Module],
         *,
         source: str,
-        source_fingerprint: (
-            tuple[int, int]
-            | None
-        ) = None,
-        imported_module_name: (
-            str
-            | None
-        ) = None,
+        source_fingerprint: (tuple[int, int] | None) = None,
+        imported_module_name: (str | None) = None,
     ) -> ModuleRecord:
         """
         Validate one new Module, then install it.
@@ -1249,10 +972,7 @@ class Facade:
         cls: type[Module],
         *,
         source: str,
-        imported_module_name: (
-            str
-            | None
-        ) = None,
+        imported_module_name: (str | None) = None,
     ) -> ModuleRecord:
         """
         Build one ModuleRecord without touching the live tables.
@@ -1261,32 +981,21 @@ class Facade:
         readers; nothing shared is written. A record built here can
         therefore still be discarded once validation rejects it.
         """
-        _loading.validate_module_class(
-            cls
-        )
+        _loading.validate_module_class(cls)
 
         module_id = cls.id
 
         if module_id in self.modules:
-            existing = self.modules[
-                module_id
-            ]
+            existing = self.modules[module_id]
 
             raise DuplicateModuleError(
-                f"duplicate Module id "
-                f"{module_id!r}: "
-                f"{existing.source} "
-                f"and {source}"
+                f"duplicate Module id {module_id!r}: {existing.source} and {source}"
             )
 
-        data = self.dataspaces.get(
-            module_id
-        )
+        data = self.dataspaces.get(module_id)
 
         if data is None:
-            data = DataSpace(
-                owner=module_id
-            )
+            data = DataSpace(owner=module_id)
 
         instance = cls()
 
@@ -1299,16 +1008,12 @@ class Facade:
             data=data,
             source=source,
             generation=0,
-            imported_module_name=(
-                imported_module_name
-            ),
+            imported_module_name=(imported_module_name),
         )
 
         # Bind the new instance: it receives its own `data` and
         # one reader per declared dependency.
-        self._bind_instance(
-            record
-        )
+        self._bind_instance(record)
 
         return record
 
@@ -1316,10 +1021,7 @@ class Facade:
         self,
         record: ModuleRecord,
         *,
-        source_fingerprint: (
-            tuple[int, int]
-            | None
-        ) = None,
+        source_fingerprint: (tuple[int, int] | None) = None,
     ) -> None:
         """
         Commit a validated record into the live tables.
@@ -1330,17 +1032,11 @@ class Facade:
         """
         module_id = record.id
 
-        self.dataspaces[
-            module_id
-        ] = record.data
+        self.dataspaces[module_id] = record.data
 
-        self.modules[
-            module_id
-        ] = record
+        self.modules[module_id] = record
 
-        self._restore_record_state(
-            record
-        )
+        self._restore_record_state(record)
 
         # Attach this Module to already-registered dependents
         # that declare it and currently lack the reader. This is
@@ -1360,11 +1056,7 @@ class Facade:
             )
 
         if source_fingerprint is not None:
-            self._source_fingerprints[
-                Path(
-                    record.source
-                ).resolve()
-            ] = source_fingerprint
+            self._source_fingerprints[Path(record.source).resolve()] = source_fingerprint
 
     def _bind_instance(
         self,
@@ -1382,12 +1074,7 @@ class Facade:
         path = path.resolve()
 
         for record in self.modules.values():
-            if (
-                Path(
-                    record.source
-                ).resolve()
-                == path
-            ):
+            if Path(record.source).resolve() == path:
                 return record
 
         return None
@@ -1396,9 +1083,7 @@ class Facade:
         self,
         path: Path,
     ) -> tuple[int, int]:
-        return _loading.fingerprint(
-            path
-        )
+        return _loading.fingerprint(path)
 
     # ==================================================================
     # Dependency graph
@@ -1429,9 +1114,7 @@ class Facade:
         (
             self.dependencies,
             self.dependents,
-        ) = _deps.build_dependency_maps(
-            self.modules
-        )
+        ) = _deps.build_dependency_maps(self.modules)
 
     def _topological_order(
         self,
@@ -1450,29 +1133,19 @@ class Facade:
         self,
         record: ModuleRecord,
     ) -> None:
-        logger.info(
-            f"Removing Module: "
-            f"{record.id}"
-        )
+        logger.info(f"Removing Module: {record.id}")
 
-        await self._stop_record(
-            record
-        )
+        await self._stop_record(record)
 
         # Persist this record's state before releasing it, so a
         # later re-add restores the state as of this moment.
         # Best effort: a serialization failure must not abort
         # removal.
         try:
-            self._save_record_state(
-                record
-            )
+            self._save_record_state(record)
 
         except Exception:
-            logger.exception(
-                f"Failed to persist Module state: "
-                f"{record.id}"
-            )
+            logger.exception(f"Failed to persist Module state: {record.id}")
 
         # The destructive part follows awaits, during which a hot
         # reload may have installed a new generation for this id.
@@ -1481,8 +1154,7 @@ class Facade:
         # while this exact record is still the installed one.
         if self.modules.get(record.id) is not record:
             logger.warning(
-                "Ignoring stale removal of Module {} "
-                "(generation={})",
+                "Ignoring stale removal of Module {} (generation={})",
                 record.id,
                 record.generation,
             )
@@ -1506,9 +1178,7 @@ class Facade:
                 None,
             )
 
-        source_path = Path(
-            record.source
-        ).resolve()
+        source_path = Path(record.source).resolve()
 
         self._source_fingerprints.pop(
             source_path,

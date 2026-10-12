@@ -12,7 +12,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
-
 PROVIDER_KIND_MCP = "mcp"
 PROVIDER_KIND_LOCAL = "local"
 

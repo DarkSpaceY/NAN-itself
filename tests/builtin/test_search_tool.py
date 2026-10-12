@@ -15,15 +15,12 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from nan_itself.tools import local
 from nan_itself.tools.provider import Provider
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-SEARCH_FILE = (
-    PROJECT_ROOT / "builtin" / "tools" / "local" / "search.py"
-)
+SEARCH_FILE = PROJECT_ROOT / "builtin" / "tools" / "local" / "search.py"
 
 
 def _build_provider(cls: type) -> Provider:
@@ -36,6 +33,7 @@ def _build_provider(cls: type) -> Provider:
         cls,
     )
 
+
 FAKE_PAYLOAD = {
     "query": "test query",
     "results": [
@@ -47,9 +45,7 @@ FAKE_PAYLOAD = {
             "score": 1.0,
         }
     ],
-    "engine_stats": {
-        "bing": {"elapsed_sec": 0.5, "error": None}
-    },
+    "engine_stats": {"bing": {"elapsed_sec": 0.5, "error": None}},
     "elapsed_sec": 0.5,
     "result_count": 1,
 }
@@ -80,9 +76,7 @@ def _load_module() -> tuple[
     ModuleType,
     type,
 ]:
-    cls, module_name = local.load_class_from_file(
-        SEARCH_FILE
-    )
+    cls, module_name = local.load_class_from_file(SEARCH_FILE)
 
     return sys.modules[module_name], cls
 
@@ -94,15 +88,11 @@ def _install_fake_exec(
     stderr: bytes = b"",
     returncode: int = 0,
 ) -> tuple[_FakeProcess, dict]:
-    process = _FakeProcess(
-        stdout, stderr, returncode
-    )
+    process = _FakeProcess(stdout, stderr, returncode)
 
     capture: dict = {}
 
-    async def fake_exec(
-        *argv: str, **kwargs: object
-    ) -> _FakeProcess:
+    async def fake_exec(*argv: str, **kwargs: object) -> _FakeProcess:
         capture["argv"] = argv
         capture["env"] = kwargs.get("env")
 
@@ -132,9 +122,7 @@ def test_loads_single_provider() -> None:
 
     instance = cls()
 
-    assert instance.tool_names() == (
-        "web_search",
-    )
+    assert instance.tool_names() == ("web_search",)
 
 
 def test_web_search_input_schema() -> None:
@@ -144,23 +132,15 @@ def test_web_search_input_schema() -> None:
 
     tools = instance.build_tools()
 
-    schema = tools[
-        "web_search"
-    ].inputSchema
+    schema = tools["web_search"].inputSchema
 
     assert schema["required"] == ["query"]
 
     properties = schema["properties"]
 
-    assert (
-        properties["max_results"]["default"]
-        == 10
-    )
+    assert properties["max_results"]["default"] == 10
 
-    assert (
-        properties["language"]["default"]
-        == "all"
-    )
+    assert properties["language"]["default"] == "all"
 
 
 @pytest.mark.asyncio
@@ -188,9 +168,7 @@ async def test_web_search_parses_cli_json(
 
     _, capture = _install_fake_exec(
         monkeypatch,
-        stdout=json.dumps(
-            FAKE_PAYLOAD
-        ).encode("utf-8"),
+        stdout=json.dumps(FAKE_PAYLOAD).encode("utf-8"),
     )
 
     provider = _build_provider(cls)
@@ -206,16 +184,11 @@ async def test_web_search_parses_cli_json(
 
     assert not result.isError
 
-    payload = json.loads(
-        result.content[0].text
-    )
+    payload = json.loads(result.content[0].text)
 
     assert payload["result_count"] == 1
 
-    assert (
-        payload["results"][0]["title"]
-        == "Example Result"
-    )
+    assert payload["results"][0]["title"] == "Example Result"
 
     argv = capture["argv"]
 
@@ -237,9 +210,7 @@ async def test_web_search_parses_cli_json(
 
     env = capture["env"]
 
-    assert env["SEARXNG_CLI_SETTINGS"] == str(
-        settings
-    )
+    assert env["SEARXNG_CLI_SETTINGS"] == str(settings)
 
 
 @pytest.mark.asyncio
@@ -266,9 +237,7 @@ async def test_web_search_error_on_nonzero_exit(
 
     assert result.isError
 
-    assert "engine boom" in (
-        result.content[0].text
-    )
+    assert "engine boom" in (result.content[0].text)
 
 
 @pytest.mark.asyncio
@@ -293,9 +262,7 @@ async def test_web_search_invalid_json(
 
     assert result.isError
 
-    assert "invalid JSON" in (
-        result.content[0].text
-    )
+    assert "invalid JSON" in (result.content[0].text)
 
 
 def test_settings_file_resolution() -> None:
@@ -305,6 +272,4 @@ def test_settings_file_resolution() -> None:
 
     assert resolved is not None
 
-    assert resolved.endswith(
-        "config/searxng.yml"
-    )
+    assert resolved.endswith("config/searxng.yml")

@@ -46,17 +46,18 @@ schema). Override it only to store or act on the payload:
 def feed(self, channel: str, payload) -> str:
     if channel != "goal":
         return "rejected"
-    self._queue.append(payload)   # module-private storage
+    self._queue.append(payload)  # module-private storage
     return "written"
+
 
 async def start(self) -> None:
     while True:
         if self._queue:
             payload = self._queue.popleft()
             try:
-                ...                            # act on payload
+                ...  # act on payload
             except Exception as exc:
-                self._events.append(           # one-shot feedback
+                self._events.append(  # one-shot feedback
                     f"goal failed: {exc}"
                 )
         await asyncio.sleep(self.tick_interval)

@@ -42,9 +42,7 @@ def warn(message: str) -> None:
 
 
 def check(root: Path) -> bool:
-    skill_file = (
-        root if root.is_file() else root / "SKILL.md"
-    )
+    skill_file = root if root.is_file() else root / "SKILL.md"
 
     ok = True
 
@@ -88,21 +86,14 @@ def check(root: Path) -> bool:
         ok = False
     else:
         if len(name) > MAX_NAME:
-            fail(
-                f"{skill_file}: 'name' exceeds {MAX_NAME} characters"
-            )
+            fail(f"{skill_file}: 'name' exceeds {MAX_NAME} characters")
             ok = False
 
         if NAME_RE.fullmatch(name) is None:
-            fail(
-                f"{skill_file}: 'name' is not kebab-case "
-                f"(^[a-z0-9]+(-[a-z0-9]+)*$): {name!r}"
-            )
+            fail(f"{skill_file}: 'name' is not kebab-case (^[a-z0-9]+(-[a-z0-9]+)*$): {name!r}")
             ok = False
         elif root.is_dir() and root.name != name:
-            warn(
-                f"{root}: directory name {root.name!r} != name {name!r}"
-            )
+            warn(f"{root}: directory name {root.name!r} != name {name!r}")
 
     description = frontmatter.get("description")
 
@@ -110,13 +101,10 @@ def check(root: Path) -> bool:
         fail(f"{skill_file}: 'description' must be a non-empty string")
         ok = False
     elif len(description) > MAX_DESCRIPTION:
-        fail(
-            f"{skill_file}: 'description' exceeds "
-            f"{MAX_DESCRIPTION} characters"
-        )
+        fail(f"{skill_file}: 'description' exceeds {MAX_DESCRIPTION} characters")
         ok = False
 
-    body = "\n".join(lines[end_index + 1:]).strip()
+    body = "\n".join(lines[end_index + 1 :]).strip()
 
     if not body:
         warn(f"{skill_file}: body is empty")
@@ -134,24 +122,14 @@ def check(root: Path) -> bool:
 
                 relative = path.relative_to(directory)
 
-                if any(
-                    part.startswith(".")
-                    for part in relative.parts
-                ):
-                    warn(
-                        f"{path}: hidden files are excluded from resources"
-                    )
+                if any(part.startswith(".") for part in relative.parts):
+                    warn(f"{path}: hidden files are excluded from resources")
                     continue
 
-                if group == "scripts" and path.suffix.lower() not in (
-                    KNOWN_SCRIPT_SUFFIXES
-                ):
+                if group == "scripts" and path.suffix.lower() not in (KNOWN_SCRIPT_SUFFIXES):
                     resolved = path.resolve()
 
-                    if not (
-                        path.suffix == ""
-                        and resolved.stat().st_mode & 0o111
-                    ):
+                    if not (path.suffix == "" and resolved.stat().st_mode & 0o111):
                         warn(
                             f"{path}: extension is not in the interpreter "
                             "table and the file is not executable "

@@ -14,13 +14,11 @@ Keeps the internal import graph honest:
 
 from __future__ import annotations
 
-import asyncio
 import subprocess
 import sys
 
 from nan_itself.events import EventBus
 from nan_itself.gateway import Gateway
-
 
 # ============================================================================
 # Agent -> modules import discipline
@@ -51,10 +49,7 @@ def test_agent_engine_does_not_load_modules_runtime():
         check=True,
     )
 
-    assert (
-        "modules_runtime_loaded: False"
-        in out.stdout
-    )
+    assert "modules_runtime_loaded: False" in out.stdout
 
 
 # ============================================================================

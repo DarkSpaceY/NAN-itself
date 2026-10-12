@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 
 from nan_itself.modules import deps as deps_module
-from nan_itself.modules.runtime import Facade
 from nan_itself.modules.model import (
     Module,
     ModuleState,
@@ -12,6 +11,7 @@ from nan_itself.modules.model import (
 from nan_itself.modules.reload import (
     hot_reload,
 )
+from nan_itself.modules.runtime import Facade
 from nan_itself.tools import local as local_backend
 from nan_itself.tools.runtime import (
     ProviderRuntime,
@@ -55,14 +55,10 @@ def _install_module(
             1,
             1,
         ),
-        imported_module_name=(
-            f"module-{module_cls.id}"
-        ),
+        imported_module_name=(f"module-{module_cls.id}"),
     )
 
-    record.state = (
-        ModuleState.RUNNING
-    )
+    record.state = ModuleState.RUNNING
 
     return record
 
@@ -97,13 +93,9 @@ def test_concurrent_reload_of_independent_modules_isolated(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = (
-        modules_dir / "a.py"
-    )
+    a_source = modules_dir / "a.py"
 
-    b_source = (
-        modules_dir / "b.py"
-    )
+    b_source = modules_dir / "b.py"
 
     class AOld(Module):
         id = "a"
@@ -157,17 +149,13 @@ def test_concurrent_reload_of_independent_modules_isolated(
 
     bind_calls = []
 
-    original_bind = (
-        deps_module.bind_instance
-    )
+    original_bind = deps_module.bind_instance
 
     def spy_bind(
         record,
         dataspaces,
     ):
-        bind_calls.append(
-            record.id
-        )
+        bind_calls.append(record.id)
 
         return original_bind(
             record,
@@ -184,18 +172,14 @@ def test_concurrent_reload_of_independent_modules_isolated(
         record,
         started=None,
     ):
-        record.state = (
-            ModuleState.RUNNING
-        )
+        record.state = ModuleState.RUNNING
 
         if started is not None:
             started.set()
 
         await asyncio.Event().wait()
 
-    facade._run_module = (
-        fake_run_module
-    )
+    facade._run_module = fake_run_module
 
     async def scenario():
         await asyncio.gather(
@@ -224,47 +208,27 @@ def test_concurrent_reload_of_independent_modules_isolated(
         new_a = facade.modules["a"]
         new_b = facade.modules["b"]
 
-        assert (
-            new_a.instance
-            is not old_a.instance
-        )
+        assert new_a.instance is not old_a.instance
 
-        assert (
-            new_b.instance
-            is not old_b.instance
-        )
+        assert new_b.instance is not old_b.instance
 
-        assert (
-            new_a.generation
-            == 1
-        )
+        assert new_a.generation == 1
 
-        assert (
-            new_b.generation
-            == 1
-        )
+        assert new_b.generation == 1
 
-        assert (
-            new_a.instance.restored
-            == {
-                "value": "a-old",
-            }
-        )
+        assert new_a.instance.restored == {
+            "value": "a-old",
+        }
 
-        assert (
-            new_b.instance.restored
-            == {
-                "value": "b-old",
-            }
-        )
+        assert new_b.instance.restored == {
+            "value": "b-old",
+        }
 
         # Only A's transaction binds A and only B's transaction binds B.
         assert bind_calls.count("a") == 1
         assert bind_calls.count("b") == 1
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_concurrent_reload_same_module_does_not_stop_old_twice(
@@ -289,9 +253,7 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = (
-        modules_dir / "module.py"
-    )
+    source = modules_dir / "module.py"
 
     class OldModule(Module):
         id = "example"
@@ -326,18 +288,14 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
         record,
         started=None,
     ):
-        record.state = (
-            ModuleState.RUNNING
-        )
+        record.state = ModuleState.RUNNING
 
         if started is not None:
             started.set()
 
         await asyncio.Event().wait()
 
-    facade._run_module = (
-        fake_run_module
-    )
+    facade._run_module = fake_run_module
 
     async def scenario():
         await asyncio.gather(
@@ -363,30 +321,17 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
             ),
         )
 
-        active = facade.modules[
-            "example"
-        ]
+        active = facade.modules["example"]
 
-        assert (
-            active.generation
-            == 1
-        )
+        assert active.generation == 1
 
         # Same old generation may only be stopped once.
-        assert (
-            old.instance.stop_calls
-            == 1
-        )
+        assert old.instance.stop_calls == 1
 
         # One successful replacement only.
-        assert (
-            active.instance
-            is not old.instance
-        )
+        assert active.instance is not old.instance
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_reload_candidate_becomes_active_before_old_stop_finishes(
@@ -408,17 +353,11 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = (
-        modules_dir / "module.py"
-    )
+    source = modules_dir / "module.py"
 
-    entered_stop = (
-        asyncio.Event()
-    )
+    entered_stop = asyncio.Event()
 
-    release_stop = (
-        asyncio.Event()
-    )
+    release_stop = asyncio.Event()
 
     class OldModule(Module):
         id = "example"
@@ -446,18 +385,14 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
         record,
         started=None,
     ):
-        record.state = (
-            ModuleState.RUNNING
-        )
+        record.state = ModuleState.RUNNING
 
         if started is not None:
             started.set()
 
         await asyncio.Event().wait()
 
-    facade._run_module = (
-        fake_run_module
-    )
+    facade._run_module = fake_run_module
 
     async def scenario():
         reload_task = asyncio.create_task(
@@ -475,33 +410,20 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
 
         await entered_stop.wait()
 
-        assert (
-            old.instance.stop_calls
-            == 1
-        )
+        assert old.instance.stop_calls == 1
 
         # Candidate already owns the active slot.
-        assert (
-            facade.modules["example"]
-            is not old
-        )
+        assert facade.modules["example"] is not old
 
-        candidate = (
-            facade.modules["example"]
-        )
+        candidate = facade.modules["example"]
 
-        assert (
-            candidate.generation
-            == old.generation + 1
-        )
+        assert candidate.generation == old.generation + 1
 
         release_stop.set()
 
         await reload_task
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -526,17 +448,11 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    entered = (
-        asyncio.Event()
-    )
+    entered = asyncio.Event()
 
-    release = (
-        asyncio.Event()
-    )
+    release = asyncio.Event()
 
-    class OldProvider(
-        local_backend.ToolSet
-    ):
+    class OldProvider(local_backend.ToolSet):
         id = "example"
 
         @local_backend.tool
@@ -548,13 +464,9 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
 
             await release.wait()
 
-            return (
-                "old:" + text
-            )
+            return "old:" + text
 
-    class NewProvider(
-        local_backend.ToolSet
-    ):
+    class NewProvider(local_backend.ToolSet):
         id = "example"
 
         @local_backend.tool
@@ -562,36 +474,27 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
             self,
             text: str,
         ) -> str:
-            return (
-                "new:" + text
-            )
+            return "new:" + text
 
     runtime = ProviderRuntime()
 
-    old_provider = (
-        local_backend.build_provider(
-            local_backend.local_provider_spec(
-                name="example",
-                source="<old>",
-            ),
-            OldProvider,
-        )
+    old_provider = local_backend.build_provider(
+        local_backend.local_provider_spec(
+            name="example",
+            source="<old>",
+        ),
+        OldProvider,
     )
 
-    new_provider = (
-        local_backend.build_provider(
-            local_backend.local_provider_spec(
-                name="example",
-                source="<new>",
-            ),
-            NewProvider,
-        )
+    new_provider = local_backend.build_provider(
+        local_backend.local_provider_spec(
+            name="example",
+            source="<new>",
+        ),
+        NewProvider,
     )
 
-    runtime.providers[
-        "example"
-    ] = old_provider
-
+    runtime.providers["example"] = old_provider
 
     async def scenario():
         inflight = asyncio.create_task(
@@ -607,41 +510,27 @@ def test_local_tool_inflight_call_finishes_on_old_provider_after_swap(
         await entered.wait()
 
         # Simulate the exact provider replacement performed by reload.
-        runtime.providers[
-            "example"
-        ] = new_provider
+        runtime.providers["example"] = new_provider
 
         # Old call must remain on old provider.
         release.set()
 
-        old_result = (
-            await inflight
-        )
+        old_result = await inflight
 
-        assert (
-            result_text(old_result)
-            == "old:hello"
-        )
+        assert result_text(old_result) == "old:hello"
 
         # New call must use new provider.
-        new_result = (
-            await runtime.call_tool(
-                "example",
-                "echo",
-                {
-                    "text": "hello",
-                },
-            )
+        new_result = await runtime.call_tool(
+            "example",
+            "echo",
+            {
+                "text": "hello",
+            },
         )
 
-        assert (
-            result_text(new_result)
-            == "new:hello"
-        )
+        assert result_text(new_result) == "new:hello"
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
@@ -654,9 +543,7 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    class AlphaV1(
-        local_backend.ToolSet
-    ):
+    class AlphaV1(local_backend.ToolSet):
         id = "alpha"
 
         @local_backend.tool
@@ -664,13 +551,9 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             self,
             text: str,
         ) -> str:
-            return (
-                "alpha-v1:" + text
-            )
+            return "alpha-v1:" + text
 
-    class AlphaV2(
-        local_backend.ToolSet
-    ):
+    class AlphaV2(local_backend.ToolSet):
         id = "alpha"
 
         @local_backend.tool
@@ -678,13 +561,9 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             self,
             text: str,
         ) -> str:
-            return (
-                "alpha-v2:" + text
-            )
+            return "alpha-v2:" + text
 
-    class Beta(
-        local_backend.ToolSet
-    ):
+    class Beta(local_backend.ToolSet):
         id = "beta"
 
         @local_backend.tool
@@ -692,78 +571,45 @@ def test_reloading_one_tool_provider_does_not_mutate_unrelated_provider(
             self,
             text: str,
         ) -> str:
-            return (
-                "beta:" + text
-            )
+            return "beta:" + text
 
     runtime = ProviderRuntime()
 
-    alpha_v1 = (
-        local_backend.build_provider(
-            local_backend.local_provider_spec(
-                name="alpha",
-                source="<alpha-v1>",
-            ),
-            AlphaV1,
-        )
+    alpha_v1 = local_backend.build_provider(
+        local_backend.local_provider_spec(
+            name="alpha",
+            source="<alpha-v1>",
+        ),
+        AlphaV1,
     )
 
-    alpha_v2 = (
-        local_backend.build_provider(
-            local_backend.local_provider_spec(
-                name="alpha",
-                source="<alpha-v2>",
-            ),
-            AlphaV2,
-        )
+    alpha_v2 = local_backend.build_provider(
+        local_backend.local_provider_spec(
+            name="alpha",
+            source="<alpha-v2>",
+        ),
+        AlphaV2,
     )
 
-    beta = (
-        local_backend.build_provider(
-            local_backend.local_provider_spec(
-                name="beta",
-                source="<beta>",
-            ),
-            Beta,
-        )
+    beta = local_backend.build_provider(
+        local_backend.local_provider_spec(
+            name="beta",
+            source="<beta>",
+        ),
+        Beta,
     )
 
-    runtime.providers[
-        "alpha"
-    ] = alpha_v1
+    runtime.providers["alpha"] = alpha_v1
 
-    runtime.providers[
-        "beta"
-    ] = beta
+    runtime.providers["beta"] = beta
 
-    beta_before = (
-        runtime.get_provider(
-            "beta"
-        )
-    )
+    beta_before = runtime.get_provider("beta")
 
     # Replace alpha only.
-    runtime.providers[
-        "alpha"
-    ] = alpha_v2
+    runtime.providers["alpha"] = alpha_v2
 
-    assert (
-        runtime.get_provider(
-            "alpha"
-        )
-        is alpha_v2
-    )
+    assert runtime.get_provider("alpha") is alpha_v2
 
-    assert (
-        runtime.get_provider(
-            "alpha"
-        )
-        is not alpha_v1
-    )
+    assert runtime.get_provider("alpha") is not alpha_v1
 
-    assert (
-        runtime.get_provider(
-            "beta"
-        )
-        is beta_before
-    )
+    assert runtime.get_provider("beta") is beta_before

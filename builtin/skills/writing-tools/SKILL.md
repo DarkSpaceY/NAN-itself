@@ -36,7 +36,6 @@ from typing import Any
 
 
 class MyProvider(ToolSet):
-
     id = "<name>"
 
     @tool

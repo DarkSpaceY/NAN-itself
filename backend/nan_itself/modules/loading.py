@@ -25,15 +25,11 @@ def has_module_header(
     path: Path,
 ) -> bool:
     try:
-        text = path.read_text(
-            encoding="utf-8"
-        )
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return False
 
-    head = "\n".join(
-        text.splitlines()[:20]
-    )
+    head = "\n".join(text.splitlines()[:20])
 
     return MODULE_HEADER in head
 
@@ -62,16 +58,10 @@ def validate_module_class(
         module_id,
         str,
     ):
-        raise TypeError(
-            f"Module {cls.__name__} "
-            "must define a string id"
-        )
+        raise TypeError(f"Module {cls.__name__} must define a string id")
 
     if not module_id:
-        raise ValueError(
-            f"Module {cls.__name__} "
-            "has empty id"
-        )
+        raise ValueError(f"Module {cls.__name__} has empty id")
 
     requires = getattr(
         cls,
@@ -83,10 +73,7 @@ def validate_module_class(
         requires,
         tuple,
     ):
-        raise TypeError(
-            f"Module {module_id!r}.requires "
-            "must be tuple[str, ...]"
-        )
+        raise TypeError(f"Module {module_id!r}.requires must be tuple[str, ...]")
 
     if any(
         not isinstance(
@@ -96,18 +83,10 @@ def validate_module_class(
         or not item
         for item in requires
     ):
-        raise TypeError(
-            f"Module {module_id!r}.requires "
-            "contains invalid ids"
-        )
+        raise TypeError(f"Module {module_id!r}.requires contains invalid ids")
 
-    if len(
-        set(requires)
-    ) != len(requires):
-        raise ValueError(
-            f"Module {module_id!r}.requires "
-            "contains duplicates"
-        )
+    if len(set(requires)) != len(requires):
+        raise ValueError(f"Module {module_id!r}.requires contains duplicates")
 
 
 def import_module_class(
@@ -129,11 +108,7 @@ def import_module_class(
         usedforsecurity=False,
     ).hexdigest()[:12]
 
-    module_name = (
-        f"_dynamic_module_"
-        f"{path.stem}_"
-        f"{digest}"
-    )
+    module_name = f"_dynamic_module_{path.stem}_{digest}"
 
     sys.modules.pop(
         module_name,
@@ -146,9 +121,7 @@ def import_module_class(
     # character change within the same timestamp tick) would
     # silently execute STALE code. Hot reload must never do that.
     try:
-        source = path.read_text(
-            encoding="utf-8"
-        )
+        source = path.read_text(encoding="utf-8")
 
         code = compile(
             source,
@@ -174,9 +147,7 @@ def import_module_class(
 
     module.__dict__["Turn"] = Turn
 
-    sys.modules[
-        module_name
-    ] = module
+    sys.modules[module_name] = module
 
     try:
         exec(
@@ -198,8 +169,7 @@ def import_module_class(
             inspect.isclass,
         )
         if (
-            cls.__module__
-            == module.__name__
+            cls.__module__ == module.__name__
             and issubclass(cls, Module)
             and cls is not Module
             and not inspect.isabstract(cls)
@@ -213,9 +183,7 @@ def import_module_class(
         )
 
         raise RuntimeError(
-            f"{path} must contain exactly "
-            f"one concrete Module; "
-            f"found {len(candidates)}"
+            f"{path} must contain exactly one concrete Module; found {len(candidates)}"
         )
 
     return (

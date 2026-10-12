@@ -31,33 +31,21 @@ DEFAULT_TIMEOUT_S = 30.0
 
 
 def _settings_file() -> str | None:
-    default = (
-        _paths.repo_root()
-        / "config"
-        / "searxng.yml"
-    )
+    default = _paths.repo_root() / "config" / "searxng.yml"
 
-    return (
-        str(default)
-        if default.is_file()
-        else None
-    )
+    return str(default) if default.is_file() else None
 
 
 def _uvx_command() -> str:
     resolved = shutil.which("uvx")
 
     if not resolved:
-        raise RuntimeError(
-            "uvx executable not found on PATH; "
-            "install uv to use the search tool"
-        )
+        raise RuntimeError("uvx executable not found on PATH; install uv to use the search tool")
 
     return resolved
 
 
 class SearchProvider(ToolSet):
-
     id = "search"
 
     @tool
@@ -131,23 +119,17 @@ class SearchProvider(ToolSet):
         settings = _settings_file()
 
         if settings:
-            env["SEARXNG_CLI_SETTINGS"] = (
-                settings
-            )
+            env["SEARXNG_CLI_SETTINGS"] = settings
 
-        process = (
-            await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
         try:
-            stdout, stderr = (
-                await process.communicate()
-            )
+            stdout, stderr = await process.communicate()
 
         except asyncio.CancelledError:
             process.kill()
@@ -155,24 +137,14 @@ class SearchProvider(ToolSet):
             raise
 
         if process.returncode != 0:
-            detail = stderr.decode(
-                "utf-8", "replace"
-            ).strip()
+            detail = stderr.decode("utf-8", "replace").strip()
 
-            raise RuntimeError(
-                f"searxng-cli exited with "
-                f"{process.returncode}: {detail}"
-            )
+            raise RuntimeError(f"searxng-cli exited with {process.returncode}: {detail}")
 
         try:
-            payload = json.loads(
-                stdout.decode("utf-8", "replace")
-            )
+            payload = json.loads(stdout.decode("utf-8", "replace"))
 
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"searxng-cli produced invalid "
-                f"JSON: {exc}"
-            ) from exc
+            raise RuntimeError(f"searxng-cli produced invalid JSON: {exc}") from exc
 
         return payload

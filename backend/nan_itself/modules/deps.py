@@ -7,14 +7,15 @@ DataSpaceReader handles. Pure functions over plain maps.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from loguru import logger
 
-from typing import Any, Mapping
-
 from .model import (
+    DataSpace,
     DataSpaceReader,
 )
-
 
 
 def build_dependency_maps(
@@ -23,40 +24,24 @@ def build_dependency_maps(
     dict[str, set[str]],
     dict[str, set[str]],
 ]:
-    dependencies = {
-        module_id: set(
-            record.cls.requires
-        )
-        for module_id, record
-        in modules.items()
-    }
+    dependencies = {module_id: set(record.cls.requires) for module_id, record in modules.items()}
 
-    dependents = {
-        module_id: set()
-        for module_id in modules
-    }
+    dependents = {module_id: set() for module_id in modules}
 
     for (
         module_id,
         required_ids,
     ) in dependencies.items():
         for dependency_id in required_ids:
-            if (
-                dependency_id
-                in dependents
-            ):
-                dependents[
-                    dependency_id
-                ].add(
-                    module_id
-                )
+            if dependency_id in dependents:
+                dependents[dependency_id].add(module_id)
 
     return dependencies, dependents
 
 
 def bind_instance(
     record,
-    dataspaces: Mapping[str, "DataSpace"],
+    dataspaces: Mapping[str, DataSpace],
 ) -> None:
     record.instance.data = record.data
 
@@ -65,23 +50,15 @@ def bind_instance(
         DataSpaceReader,
     ] = {}
 
-    for dependency_id in (
-        record.cls.requires
-    ):
-        space = dataspaces.get(
-            dependency_id
-        )
+    for dependency_id in record.cls.requires:
+        space = dataspaces.get(dependency_id)
 
         if space is None:
             # Missing dependencies are allowed at bind time.
             # Facade may still start this Module.
             continue
 
-        dependencies[
-            dependency_id
-        ] = DataSpaceReader(
-            space
-        )
+        dependencies[dependency_id] = DataSpaceReader(space)
 
     record.instance.dependencies = dependencies
 
@@ -90,7 +67,7 @@ def attach_dependency(
     record,
     dependency_id: str,
     *,
-    dataspaces: Mapping[str, "DataSpace"],
+    dataspaces: Mapping[str, DataSpace],
 ) -> None:
     """
     Attach one dependency edge to an already-bound instance.
@@ -103,9 +80,7 @@ def attach_dependency(
     if dependency_id not in record.cls.requires:
         return
 
-    space = dataspaces.get(
-        dependency_id
-    )
+    space = dataspaces.get(dependency_id)
 
     if space is None:
         return
@@ -122,11 +97,7 @@ def attach_dependency(
     if dependency_id in dependencies:
         return
 
-    dependencies[
-        dependency_id
-    ] = DataSpaceReader(
-        space
-    )
+    dependencies[dependency_id] = DataSpaceReader(space)
 
 
 def detach_dependency(
@@ -159,41 +130,26 @@ def topological_order(
     dependencies: Mapping[str, set[str]],
     dependents: Mapping[str, set[str]],
 ) -> list[str]:
-    indegree = {
-        module_id: 0
-        for module_id in modules
-    }
+    indegree = {module_id: 0 for module_id in modules}
 
     for (
         module_id,
         required_ids,
     ) in dependencies.items():
         for dependency_id in required_ids:
-            if (
-                dependency_id
-                in indegree
-            ):
-                indegree[
-                    module_id
-                ] += 1
+            if dependency_id in indegree:
+                indegree[module_id] += 1
             else:
-                logger.warning(f'''Module {module_id} requires missing Module {dependency_id}''')
+                logger.warning(f"""Module {module_id} requires missing Module {dependency_id}""")
 
-    queue = sorted(
-        module_id
-        for module_id, degree
-        in indegree.items()
-        if degree == 0
-    )
+    queue = sorted(module_id for module_id, degree in indegree.items() if degree == 0)
 
     result: list[str] = []
 
     while queue:
         current = queue.pop(0)
 
-        result.append(
-            current
-        )
+        result.append(current)
 
         for dependent in sorted(
             dependents.get(
@@ -201,36 +157,17 @@ def topological_order(
                 (),
             )
         ):
-            indegree[
-                dependent
-            ] -= 1
+            indegree[dependent] -= 1
 
-            if (
-                indegree[dependent]
-                == 0
-            ):
-                queue.append(
-                    dependent
-                )
+            if indegree[dependent] == 0:
+                queue.append(dependent)
 
         queue.sort()
 
-    if len(result) != len(
-        modules
-    ):
-        remaining = sorted(
-            module_id
-            for module_id in modules
-            if module_id not in result
-        )
+    if len(result) != len(modules):
+        remaining = sorted(module_id for module_id in modules if module_id not in result)
 
-        raise RuntimeError(
-            "Module dependency cycle "
-            "detected: "
-            + " -> ".join(
-                remaining
-            )
-        )
+        raise RuntimeError("Module dependency cycle detected: " + " -> ".join(remaining))
 
     return result
 
@@ -250,18 +187,14 @@ def validate_addition(
     A record that replaces an existing id is validated as a
     replacement, since the trial copy overwrites that entry.
     """
-    trial = dict(
-        modules
-    )
+    trial = dict(modules)
 
     trial[record.id] = record
 
     (
         dependencies,
         dependents,
-    ) = build_dependency_maps(
-        trial
-    )
+    ) = build_dependency_maps(trial)
 
     topological_order(
         trial,

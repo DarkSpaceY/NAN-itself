@@ -22,17 +22,18 @@ events' timestamps.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-import socket
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from loguru import logger
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from loguru import logger
 
 from .events import EventBus
 
@@ -146,10 +147,7 @@ class Gateway:
             try:
                 await ws.close()
             except Exception:
-                logger.exception(
-                    "WebSocket close failed "
-                    "during gateway shutdown"
-                )
+                logger.exception("WebSocket close failed during gateway shutdown")
 
         logger.info("Gateway closed")
 
@@ -223,10 +221,12 @@ class Gateway:
                 # 带超时获取事件，避免永久阻塞
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # 超时检查连接状态
                     if websocket.client_state.name != "CONNECTED":
-                        logger.warning(f"Forwarder: WebSocket not connected for {client_id}, stopping")
+                        logger.warning(
+                            f"Forwarder: WebSocket not connected for {client_id}, stopping"
+                        )
                         break
                     continue
 
@@ -245,17 +245,19 @@ class Gateway:
         finally:
             logger.debug(f"Forwarder stopped for {client_id} (processed {counter} events)")
 
-    async def _monitor_forwarder(self, websocket: WebSocket, forwarder: asyncio.Task, client_id: str) -> None:
+    async def _monitor_forwarder(
+        self, websocket: WebSocket, forwarder: asyncio.Task, client_id: str
+    ) -> None:
         """监控 forwarder 是否意外退出，若退出则主动关闭连接"""
         try:
             while True:
                 await asyncio.sleep(3)
                 if forwarder.done():
-                    logger.error(f"Monitor: forwarder unexpectedly done for {client_id}, closing connection")
-                    try:
+                    logger.error(
+                        f"Monitor: forwarder unexpectedly done for {client_id}, closing connection"
+                    )
+                    with contextlib.suppress(Exception):
                         await websocket.close(code=1011, reason="Forwarder died")
-                    except Exception:
-                        pass
                     break
                 # 如果连接已断开，也退出
                 if websocket.client_state.name != "CONNECTED":
@@ -326,9 +328,7 @@ class Gateway:
         self._seen_mids[mid] = None
 
         if len(self._seen_mids) > self.dedup_cache_size:
-            for key in list(self._seen_mids)[
-                : max(1, self.dedup_cache_size // 2)
-            ]:
+            for key in list(self._seen_mids)[: max(1, self.dedup_cache_size // 2)]:
                 self._seen_mids.pop(key, None)
 
         return True
@@ -356,10 +356,8 @@ class Gateway:
 
     async def _safe_send(self, websocket: WebSocket, payload: dict) -> None:
         """安全发送（忽略异常，用于 ping 响应）"""
-        try:
+        with contextlib.suppress(Exception):
             await self._send(websocket, payload)
-        except Exception:
-            pass
 
     def _hello_payload(self) -> dict:
         state = {}

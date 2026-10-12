@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
-
-import pytest
 
 from nan_itself.modules import deps as deps_module
-from nan_itself.modules.runtime import Facade
 from nan_itself.modules.model import (
     Module,
     ModuleState,
@@ -15,6 +11,7 @@ from nan_itself.modules.model import (
 from nan_itself.modules.reload import (
     hot_reload,
 )
+from nan_itself.modules.runtime import Facade
 from nan_itself.skills.model import (
     SkillMetadata,
 )
@@ -71,21 +68,13 @@ def test_local_tool_reload_replaces_only_one_provider(
 ):
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    alpha = (
-        tool_dir / "alpha.py"
-    )
+    alpha = tool_dir / "alpha.py"
 
-    beta = (
-        tool_dir / "beta.py"
-    )
+    beta = tool_dir / "beta.py"
 
     _write_tool(
         alpha,
@@ -101,28 +90,19 @@ def test_local_tool_reload_replaces_only_one_provider(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    beta_before = (
-        runtime.get_provider("beta")
-    )
+    beta_before = runtime.get_provider("beta")
 
     first = run(
         runtime.call_tool(
             "alpha",
             "echo",
-            {
-                "text": "hello"
-            },
+            {"text": "hello"},
         )
     )
 
-    assert (
-        result_text(first)
-        == "v1:hello"
-    )
+    assert result_text(first) == "v1:hello"
 
     _write_tool(
         alpha,
@@ -130,34 +110,22 @@ def test_local_tool_reload_replaces_only_one_provider(
         value="v2",
     )
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    beta_after = (
-        runtime.get_provider("beta")
-    )
+    beta_after = runtime.get_provider("beta")
 
     # Reload alpha must not replace beta.
-    assert (
-        beta_after
-        is beta_before
-    )
+    assert beta_after is beta_before
 
     second = run(
         runtime.call_tool(
             "alpha",
             "echo",
-            {
-                "text": "hello"
-            },
+            {"text": "hello"},
         )
     )
 
-    assert (
-        result_text(second)
-        == "v2:hello"
-    )
+    assert result_text(second) == "v2:hello"
 
 
 def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
@@ -166,17 +134,11 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 ):
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    source = (
-        tool_dir / "one.py"
-    )
+    source = tool_dir / "one.py"
 
     _write_tool(
         source,
@@ -186,19 +148,11 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    assert (
-        runtime.get_provider("alpha")
-        is not None
-    )
+    assert runtime.get_provider("alpha") is not None
 
-    assert (
-        runtime.get_provider("beta")
-        is None
-    )
+    assert runtime.get_provider("beta") is None
 
     _write_tool(
         source,
@@ -206,25 +160,14 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
         value="beta",
     )
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
     # One file owns one provider only.
-    assert (
-        runtime.get_provider("alpha")
-        is None
-    )
+    assert runtime.get_provider("alpha") is None
 
-    assert (
-        runtime.get_provider("beta")
-        is not None
-    )
+    assert runtime.get_provider("beta") is not None
 
-    assert (
-        runtime.provider_names()
-        == ("beta",)
-    )
+    assert runtime.provider_names() == ("beta",)
 
 
 def test_removed_local_tool_disappears_completely(
@@ -233,17 +176,11 @@ def test_removed_local_tool_disappears_completely(
 ):
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    source = (
-        tool_dir / "one.py"
-    )
+    source = tool_dir / "one.py"
 
     _write_tool(
         source,
@@ -253,25 +190,15 @@ def test_removed_local_tool_disappears_completely(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    assert (
-        runtime.get_provider("alpha")
-        is not None
-    )
+    assert runtime.get_provider("alpha") is not None
 
     source.unlink()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    assert (
-        runtime.get_provider("alpha")
-        is None
-    )
+    assert runtime.get_provider("alpha") is None
 
 
 # ============================================================================
@@ -285,27 +212,17 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
 ):
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    beta = (
-        root / "beta"
-    )
+    beta = root / "beta"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
-    beta.mkdir(
-        parents=True
-    )
+    beta.mkdir(parents=True)
 
     (alpha / "SKILL.md").write_text(
         "alpha",
@@ -320,18 +237,12 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
     def fake_read_metadata(
         skill_root,
     ):
-        name = (
-            skill_root / "SKILL.md"
-        ).read_text(
-            encoding="utf-8"
-        ).strip()
+        name = (skill_root / "SKILL.md").read_text(encoding="utf-8").strip()
 
         return SkillMetadata(
             name=name,
             description=name,
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -350,11 +261,7 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
         "beta",
     )
 
-    beta_before = (
-        runtime._registry.get_record(
-            "beta"
-        )
-    )
+    beta_before = runtime._registry.get_record("beta")
 
     assert beta_before is not None
 
@@ -373,27 +280,14 @@ def test_skill_refresh_isolated_and_does_not_leave_stale_name(
 
     # Strict 1:1 source binding:
     # the old Skill record must disappear.
-    assert (
-        runtime.get_metadata("alpha")
-        is None
-    )
+    assert runtime.get_metadata("alpha") is None
 
-    beta_after = (
-        runtime._registry.get_record(
-            "beta"
-        )
-    )
+    beta_after = runtime._registry.get_record("beta")
 
     # Reloading alpha must not mutate beta.
-    assert (
-        beta_after
-        is beta_before
-    )
+    assert beta_after is beta_before
 
-    assert (
-        beta_after.generation
-        == 0
-    )
+    assert beta_after.generation == 0
 
 
 def test_skill_reload_preserves_generation(
@@ -402,19 +296,13 @@ def test_skill_reload_preserves_generation(
 ):
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
     (alpha / "SKILL.md").write_text(
         "alpha",
@@ -427,9 +315,7 @@ def test_skill_reload_preserves_generation(
         return SkillMetadata(
             name="alpha",
             description="alpha",
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -443,11 +329,7 @@ def test_skill_reload_preserves_generation(
 
     runtime.refresh()
 
-    first = (
-        runtime._registry.get_record(
-            "alpha"
-        )
-    )
+    first = runtime._registry.get_record("alpha")
 
     assert first is not None
     assert first.generation == 0
@@ -459,11 +341,7 @@ def test_skill_reload_preserves_generation(
 
     runtime.refresh()
 
-    second = (
-        runtime._registry.get_record(
-            "alpha"
-        )
-    )
+    second = runtime._registry.get_record("alpha")
 
     assert second is not None
     assert second.generation == 1
@@ -476,19 +354,13 @@ def test_removed_skill_disappears_completely(
 ):
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
     (alpha / "SKILL.md").write_text(
         "alpha",
@@ -501,9 +373,7 @@ def test_removed_skill_disappears_completely(
         return SkillMetadata(
             name="alpha",
             description="alpha",
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -517,10 +387,7 @@ def test_removed_skill_disappears_completely(
 
     runtime.refresh()
 
-    assert (
-        runtime.get_metadata("alpha")
-        is not None
-    )
+    assert runtime.get_metadata("alpha") is not None
 
     import shutil
 
@@ -528,15 +395,9 @@ def test_removed_skill_disappears_completely(
 
     runtime.refresh()
 
-    assert (
-        runtime.get_metadata("alpha")
-        is None
-    )
+    assert runtime.get_metadata("alpha") is None
 
-    assert (
-        "alpha"
-        not in runtime.names()
-    )
+    assert "alpha" not in runtime.names()
 
 
 # ============================================================================
@@ -557,17 +418,11 @@ def test_facade_workspace_module_reload_call_signature(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    workspace = (
-        tmp_path / "workspace" / "modules"
-    )
+    workspace = tmp_path / "workspace" / "modules"
 
-    workspace.mkdir(
-        parents=True
-    )
+    workspace.mkdir(parents=True)
 
-    source = (
-        workspace / "example.py"
-    )
+    source = workspace / "example.py"
 
     source.write_text(
         """# @module
@@ -584,9 +439,7 @@ class Example(Module):
 
     facade = Facade()
 
-    first_fp = facade._fingerprint(
-        source
-    )
+    first_fp = facade._fingerprint(source)
 
     run(
         facade._load_or_reload_file(
@@ -595,9 +448,7 @@ class Example(Module):
         )
     )
 
-    first = facade._find_record_by_source(
-        source
-    )
+    first = facade._find_record_by_source(source)
 
     assert first is not None
 
@@ -617,9 +468,7 @@ class Example(Module):
         encoding="utf-8",
     )
 
-    second_fp = facade._fingerprint(
-        source
-    )
+    second_fp = facade._fingerprint(source)
 
     # This must enter hot_reload() successfully.
     run(
@@ -629,9 +478,7 @@ class Example(Module):
         )
     )
 
-    second = facade._find_record_by_source(
-        source
-    )
+    second = facade._find_record_by_source(source)
 
     assert second is not None
     assert second.generation == 1
@@ -665,13 +512,9 @@ def test_module_reload_does_not_rebind_unrelated_module(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = (
-        modules_dir / "a.py"
-    )
+    a_source = modules_dir / "a.py"
 
-    b_source = (
-        modules_dir / "b.py"
-    )
+    b_source = modules_dir / "b.py"
 
     a_source.write_text(
         "# placeholder",
@@ -690,9 +533,7 @@ def test_module_reload_does_not_rebind_unrelated_module(
         def serialize_state(
             self,
         ):
-            return {
-                "counter": 7
-            }
+            return {"counter": 7}
 
     class ANew(Module):
         id = "a"
@@ -707,61 +548,47 @@ def test_module_reload_does_not_rebind_unrelated_module(
     class B(Module):
         id = "b"
 
-    old_a = (
-        facade._register_module_class(
-            AOld,
-            source=str(a_source),
-            source_fingerprint=(
-                1,
-                1,
-            ),
-            imported_module_name="old-a",
-        )
+    old_a = facade._register_module_class(
+        AOld,
+        source=str(a_source),
+        source_fingerprint=(
+            1,
+            1,
+        ),
+        imported_module_name="old-a",
     )
 
-    b_record = (
-        facade._register_module_class(
-            B,
-            source=str(b_source),
-            source_fingerprint=(
-                1,
-                1,
-            ),
-            imported_module_name="old-b",
-        )
+    b_record = facade._register_module_class(
+        B,
+        source=str(b_source),
+        source_fingerprint=(
+            1,
+            1,
+        ),
+        imported_module_name="old-b",
     )
 
     facade._rebuild_dependency_graph()
 
-    b_instance = (
-        b_record.instance
-    )
+    b_instance = b_record.instance
 
     b_task = object()
 
     b_record.task = b_task
 
-    b_dependencies = (
-        b_instance.dependencies
-    )
+    b_dependencies = b_instance.dependencies
 
-    b_generation = (
-        b_record.generation
-    )
+    b_generation = b_record.generation
 
     bind_calls = []
 
-    original_bind = (
-        deps_module.bind_instance
-    )
+    original_bind = deps_module.bind_instance
 
     def spy_bind(
         record,
         dataspaces,
     ):
-        bind_calls.append(
-            record.id
-        )
+        bind_calls.append(record.id)
 
         return original_bind(
             record,
@@ -778,16 +605,12 @@ def test_module_reload_does_not_rebind_unrelated_module(
         record,
         started=None,
     ):
-        record.state = (
-            ModuleState.RUNNING
-        )
+        record.state = ModuleState.RUNNING
 
         if started is not None:
             started.set()
 
-    facade._run_module = (
-        fake_run_module
-    )
+    facade._run_module = fake_run_module
 
     run(
         hot_reload(
@@ -808,61 +631,29 @@ def test_module_reload_does_not_rebind_unrelated_module(
     # A changed exactly as expected.
     # ------------------------------------------------------------------
 
-    assert (
-        new_a.instance
-        is not old_a.instance
-    )
+    assert new_a.instance is not old_a.instance
 
-    assert (
-        new_a.generation
-        == old_a.generation + 1
-    )
+    assert new_a.generation == old_a.generation + 1
 
-    assert (
-        new_a.data
-        is old_a.data
-    )
+    assert new_a.data is old_a.data
 
-    assert (
-        facade.dataspaces["a"]
-        is old_a.data
-    )
+    assert facade.dataspaces["a"] is old_a.data
 
-    assert (
-        new_a.instance.restored
-        == {
-            "counter": 7
-        }
-    )
+    assert new_a.instance.restored == {"counter": 7}
 
     # ------------------------------------------------------------------
     # B must be completely untouched.
     # ------------------------------------------------------------------
 
-    assert (
-        facade.modules["b"]
-        is b_record
-    )
+    assert facade.modules["b"] is b_record
 
-    assert (
-        b_record.instance
-        is b_instance
-    )
+    assert b_record.instance is b_instance
 
-    assert (
-        b_record.task
-        is b_task
-    )
+    assert b_record.task is b_task
 
-    assert (
-        b_record.generation
-        == b_generation
-    )
+    assert b_record.generation == b_generation
 
-    assert (
-        b_instance.dependencies
-        is b_dependencies
-    )
+    assert b_instance.dependencies is b_dependencies
 
     # ------------------------------------------------------------------
     # Strongest isolation assertion.

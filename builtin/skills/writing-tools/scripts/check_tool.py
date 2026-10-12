@@ -32,7 +32,6 @@ DECORATOR = "tool"
 
 
 class Report:
-
     def __init__(self, path: Path) -> None:
         self.path = path
         self.errors: list[str] = []
@@ -79,9 +78,7 @@ def check(path: Path) -> Report:
     head = "\n".join(text.splitlines()[:SCAN_LINES])
 
     if HEADER not in head:
-        report.error(
-            f"missing '{HEADER}' header within the first {SCAN_LINES} lines"
-        )
+        report.error(f"missing '{HEADER}' header within the first {SCAN_LINES} lines")
 
     try:
         tree = ast.parse(text)
@@ -94,22 +91,14 @@ def check(path: Path) -> Report:
         for node in tree.body
         if isinstance(node, ast.ClassDef)
         and any(
-            (
-                isinstance(base, ast.Name) and base.id == BASE_CLASS
-            )
-            or (
-                isinstance(base, ast.Attribute)
-                and base.attr == BASE_CLASS
-            )
+            (isinstance(base, ast.Name) and base.id == BASE_CLASS)
+            or (isinstance(base, ast.Attribute) and base.attr == BASE_CLASS)
             for base in node.bases
         )
     ]
 
     if len(subclasses) != 1:
-        report.error(
-            f"expected exactly one {BASE_CLASS} subclass, "
-            f"found {len(subclasses)}"
-        )
+        report.error(f"expected exactly one {BASE_CLASS} subclass, found {len(subclasses)}")
 
         return report
 
@@ -118,17 +107,15 @@ def check(path: Path) -> Report:
     module_id = None
 
     for node in cls.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "id"
-            for target in node.targets
-        ):
-            module_id = node.value
-
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.target.id == "id"
-            and node.value is not None
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "id" for target in node.targets)
+            or (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "id"
+                and node.value is not None
+            )
         ):
             module_id = node.value
 
@@ -172,22 +159,13 @@ def check(path: Path) -> Report:
                 "var args are not supported by the tool loader"
             )
 
-        positional = [
-            arg
-            for arg in tool.args.args
-            if arg.arg != "self"
-        ]
+        positional = [arg for arg in tool.args.args if arg.arg != "self"]
 
-        annotated = sum(
-            1
-            for arg in positional
-            if arg.annotation is not None
-        )
+        annotated = sum(1 for arg in positional if arg.annotation is not None)
 
         if annotated != len(positional):
             report.error(
-                f"`{name}` has un-annotated parameters "
-                "(the JSON schema derives from annotations)"
+                f"`{name}` has un-annotated parameters (the JSON schema derives from annotations)"
             )
 
     return report

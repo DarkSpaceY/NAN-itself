@@ -59,8 +59,7 @@ class MCPFacade:
         """
         return {
             name: provider.session
-            for name, provider
-            in self.runtime.providers.items()
+            for name, provider in self.runtime.providers.items()
             if provider.session is not None
         }
 
@@ -71,11 +70,7 @@ class MCPFacade:
         """
         Compatibility view for the previous MCPFacade API.
         """
-        return {
-            name: provider.tools
-            for name, provider
-            in self.runtime.providers.items()
-        }
+        return {name: provider.tools for name, provider in self.runtime.providers.items()}
 
     async def start(self) -> None:
         await self.runtime.start()
@@ -88,20 +83,14 @@ class MCPFacade:
     async def close(self) -> None:
         await self.runtime.stop()
 
-        logger.info(
-            "MCPFacade stopped"
-        )
+        logger.info("MCPFacade stopped")
 
     def _register_handlers(self) -> None:
         @self.server.list_tools()
         async def list_tools() -> list[types.Tool]:
             return [
-                tool.model_copy(
-                    update={"name": f"{provider}/{tool.name}"}
-                )
-                for provider, tool in (
-                    self.runtime.list_all_tools()
-                )
+                tool.model_copy(update={"name": f"{provider}/{tool.name}"})
+                for provider, tool in (self.runtime.list_all_tools())
             ]
 
         @self.server.call_tool()
@@ -109,26 +98,15 @@ class MCPFacade:
             name: str,
             arguments: dict[str, Any] | None = None,
         ) -> types.CallToolResult:
-            provider_name, _, tool_name = (
-                name.partition("/")
-            )
+            provider_name, _, tool_name = name.partition("/")
 
             if not tool_name:
-                return error_result(
-                    f"Tool name must be 'provider/tool': "
-                    f"{name}"
-                )
+                return error_result(f"Tool name must be 'provider/tool': {name}")
 
-            resolved = (
-                await self.runtime.resolve_tool(
-                    name
-                )
-            )
+            resolved = await self.runtime.resolve_tool(name)
 
             if resolved is None:
-                return error_result(
-                    f"Unknown tool: {name}"
-                )
+                return error_result(f"Unknown tool: {name}")
 
             provider, tool = resolved
 

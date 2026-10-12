@@ -89,9 +89,7 @@ def _reject(
     Without this, a rejected reload is skipped silently forever
     because the fingerprint has already been updated.
     """
-    facade._source_load_errors[
-        Path(old.source).resolve()
-    ] = reason
+    facade._source_load_errors[Path(old.source).resolve()] = reason
 
 
 def _evict_import(
@@ -127,9 +125,7 @@ def _reload_lock(
         locks = {}
         facade._reload_locks = locks
 
-    lock = locks.get(
-        module_id
-    )
+    lock = locks.get(module_id)
 
     if lock is None:
         lock = asyncio.Lock()
@@ -158,10 +154,7 @@ async def _stop_candidate(
             pass
 
         except Exception:
-            logger.exception(
-                f"Module task crashed during "
-                f"hot-reload stop: {candidate.id}"
-            )
+            logger.exception(f"Module task crashed during hot-reload stop: {candidate.id}")
 
 
 async def _candidate_failed_early(
@@ -183,10 +176,7 @@ async def _candidate_failed_early(
     if not candidate_task.done():
         return False
 
-    return (
-        candidate.state
-        is not ModuleState.RUNNING
-    )
+    return candidate.state is not ModuleState.RUNNING
 
 
 async def _hot_reload_locked(
@@ -211,21 +201,16 @@ async def _hot_reload_locked(
     # generation is allowed to start a reload transaction.
     # --------------------------------------------------------------
 
-    current = facade.modules.get(
-        old.id
-    )
+    current = facade.modules.get(old.id)
 
     if current is not old:
         logger.warning(
-            "Ignoring stale hot reload transaction for Module {} "
-            "(generation={})",
+            "Ignoring stale hot reload transaction for Module {} (generation={})",
             old.id,
             old.generation,
         )
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -241,14 +226,11 @@ async def _hot_reload_locked(
     # --------------------------------------------------------------
 
     try:
-        private_state = (
-            old.instance.serialize_state()
-        )
+        private_state = old.instance.serialize_state()
 
     except Exception as exc:
         logger.exception(
-            "Hot reload rejected for Module {}: "
-            "failed to serialize current private state",
+            "Hot reload rejected for Module {}: failed to serialize current private state",
             old.id,
         )
 
@@ -258,9 +240,7 @@ async def _hot_reload_locked(
             exc,
         )
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -273,8 +253,7 @@ async def _hot_reload_locked(
 
     except Exception as exc:
         logger.exception(
-            "Hot reload rejected for Module {}: "
-            "failed to construct candidate",
+            "Hot reload rejected for Module {}: failed to construct candidate",
             old.id,
         )
 
@@ -284,15 +263,11 @@ async def _hot_reload_locked(
             exc,
         )
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
-    candidate_instance.llm = (
-        facade.llm
-    )
+    candidate_instance.llm = facade.llm
 
     candidate = ModuleRecord(
         id=old.id,
@@ -300,12 +275,8 @@ async def _hot_reload_locked(
         instance=candidate_instance,
         data=old.data,
         source=old.source,
-        generation=(
-            old.generation + 1
-        ),
-        imported_module_name=(
-            imported_name
-        ),
+        generation=(old.generation + 1),
+        imported_module_name=(imported_name),
     )
 
     # --------------------------------------------------------------
@@ -313,14 +284,11 @@ async def _hot_reload_locked(
     # --------------------------------------------------------------
 
     try:
-        facade._bind_instance(
-            candidate
-        )
+        facade._bind_instance(candidate)
 
     except Exception as exc:
         logger.exception(
-            "Hot reload rejected for Module {}: "
-            "failed to bind candidate",
+            "Hot reload rejected for Module {}: failed to bind candidate",
             old.id,
         )
 
@@ -330,9 +298,7 @@ async def _hot_reload_locked(
             exc,
         )
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -341,16 +307,11 @@ async def _hot_reload_locked(
     # --------------------------------------------------------------
 
     try:
-        candidate.instance.restore_state(
-            deepcopy(
-                private_state
-            )
-        )
+        candidate.instance.restore_state(deepcopy(private_state))
 
     except Exception as exc:
         logger.exception(
-            "Hot reload rejected for Module {}: "
-            "failed to restore private state",
+            "Hot reload rejected for Module {}: failed to restore private state",
             old.id,
         )
 
@@ -360,9 +321,7 @@ async def _hot_reload_locked(
             exc,
         )
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -375,21 +334,14 @@ async def _hot_reload_locked(
 
     started = asyncio.Event()
 
-    candidate.state = (
-        ModuleState.STARTING
-    )
+    candidate.state = ModuleState.STARTING
 
     candidate_task = asyncio.create_task(
         facade._run_module(
             candidate,
             started,
         ),
-        name=(
-            f"module:"
-            f"{candidate.id}:"
-            f"{candidate.generation}:"
-            f"candidate"
-        ),
+        name=(f"module:{candidate.id}:{candidate.generation}:candidate"),
     )
 
     candidate.task = candidate_task
@@ -400,14 +352,10 @@ async def _hot_reload_locked(
         candidate,
         candidate_task,
     ):
-        reason = RuntimeError(
-            "hot reload rejected: "
-            "candidate failed during startup"
-        )
+        reason = RuntimeError("hot reload rejected: candidate failed during startup")
 
         logger.error(
-            "Hot reload rejected for Module {}: "
-            "candidate failed during startup",
+            "Hot reload rejected for Module {}: candidate failed during startup",
             old.id,
         )
 
@@ -417,13 +365,9 @@ async def _hot_reload_locked(
             reason,
         )
 
-        await _stop_candidate(
-            candidate
-        )
+        await _stop_candidate(candidate)
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -431,18 +375,13 @@ async def _hot_reload_locked(
     # Unexpected candidate state.
     # --------------------------------------------------------------
 
-    if candidate.state is not (
-        ModuleState.RUNNING
-    ):
+    if candidate.state is not (ModuleState.RUNNING):
         reason = RuntimeError(
-            "hot reload rejected: "
-            f"candidate entered unexpected state "
-            f"{candidate.state}"
+            f"hot reload rejected: candidate entered unexpected state {candidate.state}"
         )
 
         logger.error(
-            "Hot reload candidate entered "
-            "unexpected state: {} -> {}",
+            "Hot reload candidate entered unexpected state: {} -> {}",
             old.id,
             candidate.state,
         )
@@ -453,13 +392,9 @@ async def _hot_reload_locked(
             reason,
         )
 
-        await _stop_candidate(
-            candidate
-        )
+        await _stop_candidate(candidate)
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         return
 
@@ -480,17 +415,12 @@ async def _hot_reload_locked(
         )
 
     except Exception as exc:
-        await _stop_candidate(
-            candidate
-        )
+        await _stop_candidate(candidate)
 
-        _evict_import(
-            imported_name
-        )
+        _evict_import(imported_name)
 
         logger.exception(
-            "Hot reload rejected for Module {}: "
-            "invalid dependency graph",
+            "Hot reload rejected for Module {}: invalid dependency graph",
             old.id,
         )
 
@@ -502,9 +432,7 @@ async def _hot_reload_locked(
 
         return
 
-    facade.modules[
-        old.id
-    ] = candidate
+    facade.modules[old.id] = candidate
 
     # Validation already proved the graph acyclic, so this is pure
     # graph bookkeeping and cannot fail.
@@ -527,7 +455,7 @@ async def _hot_reload_locked(
             timeout=_MODULE_STOP_TIMEOUT,
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "Old Module generation stop timed out after "
             f"{_MODULE_STOP_TIMEOUT:g}s: "
@@ -538,16 +466,12 @@ async def _hot_reload_locked(
 
     except Exception:
         logger.exception(
-            "Old Module generation stop failed: "
-            "{}[generation={}]",
+            "Old Module generation stop failed: {}[generation={}]",
             old.id,
             old.generation,
         )
 
-    if (
-        old_task is not None
-        and not old_task.done()
-    ):
+    if old_task is not None and not old_task.done():
         old_task.cancel()
 
         try:
@@ -557,31 +481,18 @@ async def _hot_reload_locked(
             pass
 
         except Exception:
-            logger.exception(
-                f"Old module generation crashed "
-                f"during hot-reload swap: {old.id}"
-            )
+            logger.exception(f"Old module generation crashed during hot-reload swap: {old.id}")
 
-    if (
-        old.imported_module_name
-        and old.imported_module_name
-        != imported_name
-    ):
+    if old.imported_module_name and old.imported_module_name != imported_name:
         sys.modules.pop(
             old.imported_module_name,
             None,
         )
 
-    facade._source_fingerprints[
-        Path(
-            old.source
-        ).resolve()
-    ] = fingerprint
+    facade._source_fingerprints[Path(old.source).resolve()] = fingerprint
 
     facade._source_load_errors.pop(
-        Path(
-            old.source
-        ).resolve(),
+        Path(old.source).resolve(),
         None,
     )
 

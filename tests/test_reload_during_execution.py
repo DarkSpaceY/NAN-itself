@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
 from nan_itself.tools import mcp as mcp_backend
@@ -15,7 +13,6 @@ from nan_itself.tools.results import text_result
 from nan_itself.tools.runtime import ProviderRuntime
 from nan_itself.utils import paths as _paths
 from nan_itself.utils.llm import ToolCall
-
 
 # ============================================================================
 # Generic helpers
@@ -55,23 +52,13 @@ async def wait_until(
     timeout=2.0,
     interval=0.005,
 ):
-    deadline = (
-        asyncio.get_running_loop().time()
-        + timeout
-    )
+    deadline = asyncio.get_running_loop().time() + timeout
 
     while not predicate():
-        if (
-            asyncio.get_running_loop().time()
-            >= deadline
-        ):
-            raise AssertionError(
-                "Condition was not satisfied before timeout."
-            )
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError("Condition was not satisfied before timeout.")
 
-        await asyncio.sleep(
-            interval
-        )
+        await asyncio.sleep(interval)
 
 
 def request_text(
@@ -131,9 +118,7 @@ class EmptySkills:
         self,
         name,
     ):
-        raise AssertionError(
-            "Unexpected Skill activation."
-        )
+        raise AssertionError("Unexpected Skill activation.")
 
 
 class QueueLLM:
@@ -154,45 +139,29 @@ class QueueLLM:
         *,
         block_first=False,
     ):
-        self.responses = list(
-            responses
-        )
+        self.responses = list(responses)
 
         self.requests = []
 
-        self.block_first = (
-            block_first
-        )
+        self.block_first = block_first
 
-        self.first_request_started = (
-            asyncio.Event()
-        )
+        self.first_request_started = asyncio.Event()
 
-        self.release_first = (
-            asyncio.Event()
-        )
+        self.release_first = asyncio.Event()
 
     async def generate_complete(
         self,
         request,
     ):
-        self.requests.append(
-            request
-        )
+        self.requests.append(request)
 
-        if (
-            self.block_first
-            and len(self.requests)
-            == 1
-        ):
+        if self.block_first and len(self.requests) == 1:
             self.first_request_started.set()
 
             await self.release_first.wait()
 
         if not self.responses:
-            raise AssertionError(
-                "LLM received more requests than expected."
-            )
+            raise AssertionError("LLM received more requests than expected.")
 
         await asyncio.sleep(0)
 
@@ -288,17 +257,11 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    workspace = (
-        tmp_path / "workspace" / "modules"
-    )
+    workspace = tmp_path / "workspace" / "modules"
 
-    workspace.mkdir(
-        parents=True
-    )
+    workspace.mkdir(parents=True)
 
-    source = (
-        workspace / "example.py"
-    )
+    source = workspace / "example.py"
 
     source.write_text(
         MODULE_V1,
@@ -318,12 +281,8 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
     llm = QueueLLM(
         [
-            make_response(
-                content="turn one complete"
-            ),
-            make_response(
-                content="turn two complete"
-            ),
+            make_response(content="turn one complete"),
+            make_response(content="turn two complete"),
         ],
         block_first=True,
     )
@@ -344,26 +303,20 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
     query_calls = []
 
-    original_query_snapshot = (
-        modules.query_snapshot
-    )
+    original_query_snapshot = modules.query_snapshot
 
     async def tracked_query_snapshot(
         turn,
         **kwargs,
     ):
-        query_calls.append(
-            turn
-        )
+        query_calls.append(turn)
 
         return await original_query_snapshot(
             turn,
             **kwargs,
         )
 
-    modules.query_snapshot = (
-        tracked_query_snapshot
-    )
+    modules.query_snapshot = tracked_query_snapshot
 
     try:
         # --------------------------------------------------------------
@@ -374,28 +327,16 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
         await wait_until(
             lambda: (
-                "example"
-                in modules.modules
-                and modules.modules[
-                    "example"
-                ].data.snapshot().get(
-                    "version"
-                )
-                == 1
+                "example" in modules.modules
+                and modules.modules["example"].data.snapshot().get("version") == 1
             )
         )
 
-        old_record = (
-            modules.modules["example"]
-        )
+        old_record = modules.modules["example"]
 
-        old_generation = (
-            old_record.generation
-        )
+        old_generation = old_record.generation
 
-        old_dataspace = (
-            old_record.data
-        )
+        old_dataspace = old_record.data
 
         # --------------------------------------------------------------
         # Start Turn 1.
@@ -423,29 +364,14 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
         # The Module query has already happened before the first LLM
         # request is blocked.
-        assert (
-            len(query_calls)
-            == 1
-        )
+        assert len(query_calls) == 1
 
-        first_turn = (
-            query_calls[0]
-        )
+        first_turn = query_calls[0]
 
-        assert (
-            first_turn.world[
-                "example"
-            ]["version"]
-            == 1
-        )
+        assert first_turn.world["example"]["version"] == 1
 
         # The Module's own query projection was based on v1.
-        assert (
-            "module-version:1"
-            in request_text(
-                llm.requests[0]
-            )
-        )
+        assert "module-version:1" in request_text(llm.requests[0])
 
         # --------------------------------------------------------------
         # Reload while Turn 1 is still blocked.
@@ -456,15 +382,9 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
             encoding="utf-8",
         )
 
-        await asyncio.sleep(
-            0
-        )
+        await asyncio.sleep(0)
 
-        new_fingerprint = (
-            modules._fingerprint(
-                source
-            )
-        )
+        new_fingerprint = modules._fingerprint(source)
 
         await asyncio.wait_for(
             modules._load_or_reload_file(
@@ -474,30 +394,17 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
             timeout=1.0,
         )
 
-        new_record = (
-            modules.modules["example"]
-        )
+        new_record = modules.modules["example"]
 
-        assert (
-            new_record
-            is not old_record
-        )
+        assert new_record is not old_record
 
-        assert (
-            new_record.generation
-            == old_generation + 1
-        )
+        assert new_record.generation == old_generation + 1
 
         # DataSpace is owned by the Module id, not its generation.
-        assert (
-            new_record.data
-            is old_dataspace
-        )
+        assert new_record.data is old_dataspace
 
         # Give the replacement generation one scheduler turn.
-        await asyncio.sleep(
-            0
-        )
+        await asyncio.sleep(0)
 
         # --------------------------------------------------------------
         # Critical invariant:
@@ -505,19 +412,9 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # Turn 1's already captured snapshot cannot change.
         # --------------------------------------------------------------
 
-        assert (
-            first_turn.world[
-                "example"
-            ]["version"]
-            == 1
-        )
+        assert first_turn.world["example"]["version"] == 1
 
-        assert (
-            "module-version:1"
-            in request_text(
-                llm.requests[0]
-            )
-        )
+        assert "module-version:1" in request_text(llm.requests[0])
 
         # --------------------------------------------------------------
         # Finish Turn 1.
@@ -525,32 +422,18 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
         llm.release_first.set()
 
-        first_result = (
-            await asyncio.wait_for(
-                first_task,
-                timeout=1.0,
-            )
+        first_result = await asyncio.wait_for(
+            first_task,
+            timeout=1.0,
         )
 
-        assert (
-            reply_text(first_result)
-            == "turn one complete"
-        )
+        assert reply_text(first_result) == "turn one complete"
 
         # --------------------------------------------------------------
         # The live runtime should now expose v2.
         # --------------------------------------------------------------
 
-        await wait_until(
-            lambda: (
-                modules.snapshot()[
-                    "example"
-                ].get(
-                    "version"
-                )
-                == 2
-            )
-        )
+        await wait_until(lambda: modules.snapshot()["example"].get("version") == 2)
 
         # --------------------------------------------------------------
         # Start Turn 2.
@@ -558,69 +441,36 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # This must create a completely new world snapshot.
         # --------------------------------------------------------------
 
-        second_result = (
-            await asyncio.wait_for(
-                agent.run(),
-                timeout=1.0,
-            )
+        second_result = await asyncio.wait_for(
+            agent.run(),
+            timeout=1.0,
         )
 
-        assert (
-            reply_text(second_result)
-            == "turn two complete"
-        )
+        assert reply_text(second_result) == "turn two complete"
 
         # There must now have been exactly two Module query calls:
         #
         #   query_calls[0] -> Turn 1 / v1
         #   query_calls[1] -> Turn 2 / v2
         #
-        assert (
-            len(query_calls)
-            == 2
-        )
+        assert len(query_calls) == 2
 
-        second_turn = (
-            query_calls[1]
-        )
+        second_turn = query_calls[1]
 
-        assert (
-            second_turn.world[
-                "example"
-            ]["version"]
-            == 2
-        )
+        assert second_turn.world["example"]["version"] == 2
 
         # The new LLM request was generated from v2.
-        assert (
-            "module-version:2"
-            in request_text(
-                llm.requests[1]
-            )
-        )
+        assert "module-version:2" in request_text(llm.requests[1])
 
         # --------------------------------------------------------------
         # Final turn consistency check.
         # --------------------------------------------------------------
 
-        assert (
-            query_calls[0].world[
-                "example"
-            ]["version"]
-            == 1
-        )
+        assert query_calls[0].world["example"]["version"] == 1
 
-        assert (
-            query_calls[1].world[
-                "example"
-            ]["version"]
-            == 2
-        )
+        assert query_calls[1].world["example"]["version"] == 2
 
-        assert (
-            len(llm.requests)
-            == 2
-        )
+        assert len(llm.requests) == 2
 
     finally:
         llm.release_first.set()
@@ -690,20 +540,12 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     local_dir = tmp_path / "workspace" / "tools" / "local"
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    source = (
-        local_dir / "calc.py"
-    )
+    source = local_dir / "calc.py"
 
-    marker = (
-        tmp_path / "started.txt"
-    )
+    marker = tmp_path / "started.txt"
 
     source.write_text(
-        LOCAL_TOOL_V1_TEMPLATE.format(
-            marker=str(
-                marker
-            )
-        ),
+        LOCAL_TOOL_V1_TEMPLATE.format(marker=str(marker)),
         encoding="utf-8",
     )
 
@@ -715,15 +557,9 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     try:
         await runtime.start()
 
-        old_provider = (
-            runtime.get_provider(
-                "calc"
-            )
-        )
+        old_provider = runtime.get_provider("calc")
 
-        assert (
-            old_provider is not None
-        )
+        assert old_provider is not None
 
         # ----------------------------------------------------------
         # Start in-flight old call.
@@ -737,9 +573,7 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
             )
         )
 
-        await wait_until(
-            marker.exists
-        )
+        await wait_until(marker.exists)
 
         # ----------------------------------------------------------
         # Reload local tool while call is still running.
@@ -750,26 +584,13 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
             encoding="utf-8",
         )
 
-        await asyncio.sleep(
-            0.01
-        )
+        await asyncio.sleep(0.01)
 
-        fingerprint = (
-            runtime._local_tracker.fingerprints.get(
-                source.resolve()
-            )
-        )
+        fingerprint = runtime._local_tracker.fingerprints.get(source.resolve())
 
-        new_fingerprint = (
-            runtime._local_tracker.fingerprints.get(
-                source.resolve()
-            )
-        )
+        new_fingerprint = runtime._local_tracker.fingerprints.get(source.resolve())
 
-        assert (
-            new_fingerprint
-            == fingerprint
-        )
+        assert new_fingerprint == fingerprint
 
         await runtime._reload_local_source(
             source,
@@ -782,63 +603,38 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
             ),
         )
 
-        new_provider = (
-            runtime.get_provider(
-                "calc"
-            )
-        )
+        new_provider = runtime.get_provider("calc")
 
-        assert (
-            new_provider is not None
-        )
+        assert new_provider is not None
 
-        assert (
-            new_provider
-            is not old_provider
-        )
+        assert new_provider is not old_provider
 
         # ----------------------------------------------------------
         # Old in-flight call must still complete against v1.
         # ----------------------------------------------------------
 
-        old_result = (
-            await asyncio.wait_for(
-                old_call,
-                timeout=2.0,
-            )
+        old_result = await asyncio.wait_for(
+            old_call,
+            timeout=2.0,
         )
 
-        assert (
-            old_result.isError
-            is False
-        )
+        assert old_result.isError is False
 
-        assert (
-            old_result.content[0].text
-            == "v1"
-        )
+        assert old_result.content[0].text == "v1"
 
         # ----------------------------------------------------------
         # New call must use the replacement provider.
         # ----------------------------------------------------------
 
-        new_result = (
-            await runtime.call_tool(
-                "calc",
-                "slow",
-                {},
-            )
+        new_result = await runtime.call_tool(
+            "calc",
+            "slow",
+            {},
         )
 
-        assert (
-            new_result.isError
-            is False
-        )
+        assert new_result.isError is False
 
-        assert (
-            new_result.content[0].text
-            == "v2"
-        )
+        assert new_result.content[0].text == "v2"
 
     finally:
         await runtime.stop()
@@ -856,9 +652,7 @@ class FakeMCPStack:
 
     async def aclose(self):
         self.closed = True
-        self.closed_by = (
-            asyncio.current_task()
-        )
+        self.closed_by = asyncio.current_task()
 
 
 class InflightMCPSession:
@@ -915,9 +709,7 @@ class InflightMCPSession:
         if self.release is not None:
             await self.release.wait()
 
-        return text_result(
-            f"{self.value}:{arguments['key']}"
-        )
+        return text_result(f"{self.value}:{arguments['key']}")
 
 
 def write_mcp_source(
@@ -958,29 +750,17 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    workspace = (
-        tmp_path / "workspace" / "tools" / "mcps"
-    )
+    workspace = tmp_path / "workspace" / "tools" / "mcps"
 
-    workspace.mkdir(
-        parents=True
-    )
+    workspace.mkdir(parents=True)
 
-    source = (
-        workspace / "example.yaml"
-    )
+    source = workspace / "example.yaml"
 
-    write_mcp_source(
-        source
-    )
+    write_mcp_source(source)
 
-    old_started = (
-        asyncio.Event()
-    )
+    old_started = asyncio.Event()
 
-    old_release = (
-        asyncio.Event()
-    )
+    old_release = asyncio.Event()
 
     sessions = []
 
@@ -989,9 +769,7 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
         *,
         timeout=None,
     ):
-        generation = len(
-            sessions
-        ) + 1
+        generation = len(sessions) + 1
 
         if generation == 1:
             session = InflightMCPSession(
@@ -1005,22 +783,15 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
                 value="new",
             )
 
-        sessions.append(
-            session
-        )
+        sessions.append(session)
 
-        result = (
-            await session.list_tools()
-        )
+        result = await session.list_tools()
 
         return Provider(
             spec=spec,
             stack=FakeMCPStack(),
             session=session,
-            tools={
-                tool.name: tool
-                for tool in result.tools
-            },
+            tools={tool.name: tool for tool in result.tools},
         )
 
     monkeypatch.setattr(
@@ -1037,15 +808,9 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
     try:
         await runtime.start()
 
-        old_provider = (
-            runtime.get_provider(
-                "example"
-            )
-        )
+        old_provider = runtime.get_provider("example")
 
-        assert (
-            old_provider is not None
-        )
+        assert old_provider is not None
 
         # ----------------------------------------------------------
         # Start old in-flight call.
@@ -1066,16 +831,9 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
             timeout=1.0,
         )
 
-        old_worker = (
-            runtime._mcp_workers[
-                "example"
-            ]
-        )
+        old_worker = runtime._mcp_workers["example"]
 
-        assert (
-            old_worker.active_calls
-            == 1
-        )
+        assert old_worker.active_calls == 1
 
         # ----------------------------------------------------------
         # Start reload concurrently.
@@ -1097,59 +855,33 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
         # The candidate must replace the live mapping before the old
         # worker is allowed to finish draining.
         await wait_until(
-            lambda: (
-                len(sessions)
-                == 2
-                and runtime.get_provider(
-                    "example"
-                )
-                is not old_provider
-            )
+            lambda: len(sessions) == 2 and runtime.get_provider("example") is not old_provider
         )
 
-        new_provider = (
-            runtime.get_provider(
-                "example"
-            )
-        )
+        new_provider = runtime.get_provider("example")
 
-        assert (
-            new_provider is not None
-        )
+        assert new_provider is not None
 
-        assert (
-            new_provider
-            is not old_provider
-        )
+        assert new_provider is not old_provider
 
         # Reload cannot finish yet because old active_calls == 1.
-        assert (
-            not reload_task.done()
-        )
+        assert not reload_task.done()
 
         # ----------------------------------------------------------
         # New calls already use the new provider.
         # ----------------------------------------------------------
 
-        new_result = (
-            await runtime.call_tool(
-                "example",
-                "lookup",
-                {
-                    "key": "y",
-                },
-            )
+        new_result = await runtime.call_tool(
+            "example",
+            "lookup",
+            {
+                "key": "y",
+            },
         )
 
-        assert (
-            new_result.isError
-            is False
-        )
+        assert new_result.isError is False
 
-        assert (
-            new_result.content[0].text
-            == "new:y"
-        )
+        assert new_result.content[0].text == "new:y"
 
         # ----------------------------------------------------------
         # Let old in-flight call drain.
@@ -1157,22 +889,14 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
 
         old_release.set()
 
-        old_result = (
-            await asyncio.wait_for(
-                old_call,
-                timeout=2.0,
-            )
+        old_result = await asyncio.wait_for(
+            old_call,
+            timeout=2.0,
         )
 
-        assert (
-            old_result.isError
-            is False
-        )
+        assert old_result.isError is False
 
-        assert (
-            old_result.content[0].text
-            == "old:x"
-        )
+        assert old_result.content[0].text == "old:x"
 
         await asyncio.wait_for(
             reload_task,
@@ -1183,16 +907,9 @@ async def test_mcp_reload_keeps_inflight_call_on_old_provider_and_new_calls_on_n
         # Old worker is no longer the live worker.
         # ----------------------------------------------------------
 
-        current_worker = (
-            runtime._mcp_workers[
-                "example"
-            ]
-        )
+        current_worker = runtime._mcp_workers["example"]
 
-        assert (
-            current_worker
-            is not old_worker
-        )
+        assert current_worker is not old_worker
 
     finally:
         old_release.set()

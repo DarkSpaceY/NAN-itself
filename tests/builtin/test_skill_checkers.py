@@ -14,44 +14,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO = Path(__file__).resolve().parents[2]
 
-CHECK_MODULE = (
-    REPO
-    / "builtin"
-    / "skills"
-    / "writing-modules"
-    / "scripts"
-    / "check_module.py"
-)
+CHECK_MODULE = REPO / "builtin" / "skills" / "writing-modules" / "scripts" / "check_module.py"
 
-CHECK_TOOL = (
-    REPO
-    / "builtin"
-    / "skills"
-    / "writing-tools"
-    / "scripts"
-    / "check_tool.py"
-)
+CHECK_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "scripts" / "check_tool.py"
 
 EXAMPLE_MODULE = (
-    REPO
-    / "builtin"
-    / "skills"
-    / "writing-modules"
-    / "references"
-    / "example-module.py"
+    REPO / "builtin" / "skills" / "writing-modules" / "references" / "example-module.py"
 )
 
-EXAMPLE_TOOL = (
-    REPO
-    / "builtin"
-    / "skills"
-    / "writing-tools"
-    / "references"
-    / "example-tool.py"
-)
+EXAMPLE_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "references" / "example-tool.py"
 
 
 def _run(

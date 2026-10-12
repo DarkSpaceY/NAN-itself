@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
 from loguru import logger
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
-
 
 ProviderName = Literal["openai", "anthropic"]
 
@@ -201,9 +201,7 @@ class LLMProvider:
         Stream normalized model events.
         """
         if self._closed:
-            raise RuntimeError(
-                "LLMProvider is already closed"
-            )
+            raise RuntimeError("LLMProvider is already closed")
 
         if self.provider == "openai":
             async for event in self._stream_openai(request):
@@ -232,18 +230,14 @@ class LLMProvider:
 
             elif event.kind == "tool_call":
                 if event.tool_call is not None:
-                    tool_calls.append(
-                        event.tool_call
-                    )
+                    tool_calls.append(event.tool_call)
 
             elif event.kind == "done":
                 if event.usage is not None:
                     usage = event.usage
 
                 if event.finish_reason is not None:
-                    finish_reason = (
-                        event.finish_reason
-                    )
+                    finish_reason = event.finish_reason
 
         content = "".join(text_parts)
 
@@ -261,9 +255,7 @@ class LLMProvider:
             return
 
         logger.info(
-            "Closing LLMProvider: "
-            f"provider={self.provider}, "
-            f"model={self.model}",
+            f"Closing LLMProvider: provider={self.provider}, model={self.model}",
         )
 
         await self.client.close()
@@ -280,10 +272,7 @@ class LLMProvider:
     ) -> AsyncIterator[LLMStreamEvent]:
         messages = [
             mapped
-            for mapped in (
-                self._openai_message(message)
-                for message in request.messages
-            )
+            for mapped in (self._openai_message(message) for message in request.messages)
             if mapped is not None
         ]
 
@@ -327,13 +316,9 @@ class LLMProvider:
             kwargs["tools"] = tools
 
         if request.response_format is not None:
-            kwargs["response_format"] = (
-                request.response_format
-            )
+            kwargs["response_format"] = request.response_format
 
-        stream = await self.client.chat.completions.create(
-            **kwargs
-        )
+        stream = await self.client.chat.completions.create(**kwargs)
 
         tool_buffers: dict[
             int,
@@ -346,12 +331,8 @@ class LLMProvider:
         async for chunk in stream:
             if chunk.usage is not None:
                 usage = Usage(
-                    prompt_tokens=(
-                        chunk.usage.prompt_tokens
-                    ),
-                    completion_tokens=(
-                        chunk.usage.completion_tokens
-                    ),
+                    prompt_tokens=(chunk.usage.prompt_tokens),
+                    completion_tokens=(chunk.usage.completion_tokens),
                 )
 
             if not chunk.choices:
@@ -368,9 +349,7 @@ class LLMProvider:
 
             if delta.tool_calls:
                 for tool_delta in delta.tool_calls:
-                    index = (
-                        tool_delta.index
-                    )
+                    index = tool_delta.index
 
                     buffer = tool_buffers.setdefault(
                         index,
@@ -382,32 +361,16 @@ class LLMProvider:
                     )
 
                     if tool_delta.id:
-                        buffer["id"] = (
-                            tool_delta.id
-                        )
+                        buffer["id"] = tool_delta.id
 
-                    if (
-                        tool_delta.function
-                        and tool_delta.function.name
-                    ):
-                        buffer["name"] = (
-                            tool_delta.function.name
-                        )
+                    if tool_delta.function and tool_delta.function.name:
+                        buffer["name"] = tool_delta.function.name
 
-                    if (
-                        tool_delta.function
-                        and tool_delta.function.arguments
-                    ):
-                        buffer["arguments"] += (
-                            tool_delta.function.arguments
-                        )
+                    if tool_delta.function and tool_delta.function.arguments:
+                        buffer["arguments"] += tool_delta.function.arguments
 
             if choice.finish_reason:
-                finish_reason = (
-                    self._normalize_openai_finish_reason(
-                        choice.finish_reason
-                    )
-                )
+                finish_reason = self._normalize_openai_finish_reason(choice.finish_reason)
 
         for index in sorted(tool_buffers):
             buffer = tool_buffers[index]
@@ -483,25 +446,15 @@ class LLMProvider:
 
         if message.role == "tool":
             if message.tool_call_id is None:
-                raise ValueError(
-                    "tool message requires "
-                    "tool_call_id"
-                )
+                raise ValueError("tool message requires tool_call_id")
 
             return {
                 "role": "tool",
-                "tool_call_id": (
-                    message.tool_call_id
-                ),
-                "content": (
-                    message.content or ""
-                ),
+                "tool_call_id": (message.tool_call_id),
+                "content": (message.content or ""),
             }
 
-        raise ValueError(
-            f"Unsupported message role: "
-            f"{message.role}"
-        )
+        raise ValueError(f"Unsupported message role: {message.role}")
 
     # ==================================================================
     # Anthropic
@@ -511,11 +464,7 @@ class LLMProvider:
         self,
         request: LLMRequest,
     ) -> AsyncIterator[LLMStreamEvent]:
-        system_prompt, messages = (
-            self._anthropic_messages(
-                request.messages
-            )
-        )
+        system_prompt, messages = self._anthropic_messages(request.messages)
 
         tools = (
             [
@@ -540,9 +489,7 @@ class LLMProvider:
         if tools:
             kwargs["tools"] = tools
 
-        async with self.client.messages.stream(
-            **kwargs
-        ) as stream:
+        async with self.client.messages.stream(**kwargs) as stream:
             current_tool_id: str | None = None
             current_tool_name: str | None = None
             current_tool_json = ""
@@ -608,38 +555,24 @@ class LLMProvider:
                                 text=text,
                             )
 
-                    elif (
-                        delta_type
-                        == "input_json_delta"
-                    ):
+                    elif delta_type == "input_json_delta":
                         partial_json = getattr(
                             delta,
                             "partial_json",
                             "",
                         )
 
-                        current_tool_json += (
-                            partial_json
-                        )
+                        current_tool_json += partial_json
 
                 elif event_type == "content_block_stop":
-                    if (
-                        current_tool_id
-                        and current_tool_name
-                    ):
+                    if current_tool_id and current_tool_name:
                         yield LLMStreamEvent(
                             kind="tool_call",
                             tool_call=(
                                 self._build_tool_call(
-                                    tool_id=(
-                                        current_tool_id
-                                    ),
-                                    name=(
-                                        current_tool_name
-                                    ),
-                                    raw_arguments=(
-                                        current_tool_json
-                                    ),
+                                    tool_id=(current_tool_id),
+                                    name=(current_tool_name),
+                                    raw_arguments=(current_tool_json),
                                 )
                             ),
                         )
@@ -662,11 +595,7 @@ class LLMProvider:
                     )
 
                     if stop_reason:
-                        finish_reason = (
-                            self._normalize_anthropic_finish_reason(
-                                stop_reason
-                            )
-                        )
+                        finish_reason = self._normalize_anthropic_finish_reason(stop_reason)
                     else:
                         finish_reason = "unknown"
 
@@ -678,9 +607,7 @@ class LLMProvider:
 
                     if usage_data is not None:
                         usage = Usage(
-                            prompt_tokens=(
-                                0
-                            ),
+                            prompt_tokens=(0),
                             completion_tokens=(
                                 getattr(
                                     usage_data,
@@ -694,9 +621,7 @@ class LLMProvider:
 
                     # Anthropic's final input-token usage is most
                     # reliably obtained from the final message.
-                    final_message = (
-                        await stream.get_final_message()
-                    )
+                    final_message = await stream.get_final_message()
 
                     if final_message.usage:
                         usage = Usage(
@@ -725,9 +650,7 @@ class LLMProvider:
                     return
 
             # Defensive fallback.
-            final_message = (
-                await stream.get_final_message()
-            )
+            final_message = await stream.get_final_message()
 
             usage = Usage(
                 prompt_tokens=(
@@ -750,15 +673,13 @@ class LLMProvider:
                 ),
             )
 
-            finish_reason = (
-                self._normalize_anthropic_finish_reason(
-                    getattr(
-                        final_message,
-                        "stop_reason",
-                        None,
-                    )
-                    or "unknown"
+            finish_reason = self._normalize_anthropic_finish_reason(
+                getattr(
+                    final_message,
+                    "stop_reason",
+                    None,
                 )
+                or "unknown"
             )
 
             yield LLMStreamEvent(
@@ -774,23 +695,12 @@ class LLMProvider:
         str | None,
         list[dict[str, Any]],
     ]:
-        system_messages = [
-            message
-            for message in messages
-            if message.role == "system"
-        ]
+        system_messages = [message for message in messages if message.role == "system"]
 
         if len(system_messages) > 1:
-            raise ValueError(
-                "Anthropic adapter supports at most "
-                "one system message."
-            )
+            raise ValueError("Anthropic adapter supports at most one system message.")
 
-        system_prompt = (
-            system_messages[0].content
-            if system_messages
-            else None
-        )
+        system_prompt = system_messages[0].content if system_messages else None
 
         result: list[dict[str, Any]] = []
 
@@ -806,15 +716,17 @@ class LLMProvider:
                     # cycle) contributes nothing visible.
                     continue
 
-                result.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": text,
-                        }
-                    ],
-                })
+                result.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": text,
+                            }
+                        ],
+                    }
+                )
 
                 continue
 
@@ -827,54 +739,52 @@ class LLMProvider:
                     continue
 
                 if message.content:
-                    blocks.append({
-                        "type": "text",
-                        "text": message.content,
-                    })
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": message.content,
+                        }
+                    )
 
                 for tool_call in message.tool_calls:
-                    blocks.append({
-                        "type": "tool_use",
-                        "id": tool_call.id,
-                        "name": tool_call.name,
-                        "input": tool_call.arguments,
-                    })
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "input": tool_call.arguments,
+                        }
+                    )
 
-                result.append({
-                    "role": "assistant",
-                    "content": blocks,
-                })
+                result.append(
+                    {
+                        "role": "assistant",
+                        "content": blocks,
+                    }
+                )
 
                 continue
 
             if message.role == "tool":
                 if message.tool_call_id is None:
-                    raise ValueError(
-                        "tool message requires "
-                        "tool_call_id"
-                    )
+                    raise ValueError("tool message requires tool_call_id")
 
-                result.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": (
-                                message.tool_call_id
-                            ),
-                            "content": (
-                                message.content or ""
-                            ),
-                        }
-                    ],
-                })
+                result.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": (message.tool_call_id),
+                                "content": (message.content or ""),
+                            }
+                        ],
+                    }
+                )
 
                 continue
 
-            raise ValueError(
-                f"Unsupported message role: "
-                f"{message.role}"
-            )
+            raise ValueError(f"Unsupported message role: {message.role}")
 
         # Anthropic requires strictly alternating roles and
         # rejects consecutive same-role messages with 400.
@@ -885,20 +795,14 @@ class LLMProvider:
         merged: list[dict[str, Any]] = []
 
         for message in result:
-            previous = (
-                merged[-1]
-                if merged
-                else None
-            )
+            previous = merged[-1] if merged else None
 
             if (
                 previous is not None
                 and previous.get("role") == "user"
                 and message.get("role") == "user"
             ):
-                previous["content"].extend(
-                    message["content"]
-                )
+                previous["content"].extend(message["content"])
 
                 continue
 
@@ -918,35 +822,24 @@ class LLMProvider:
         raw_arguments: str,
     ) -> ToolCall:
         if not tool_id:
-            raise ValueError(
-                "Model returned a Tool call without id"
-            )
+            raise ValueError("Model returned a Tool call without id")
 
         if not name:
-            raise ValueError(
-                "Model returned a Tool call without name"
-            )
+            raise ValueError("Model returned a Tool call without name")
 
         if not raw_arguments:
             arguments: dict[str, Any] = {}
 
         else:
             try:
-                parsed = json.loads(
-                    raw_arguments
-                )
+                parsed = json.loads(raw_arguments)
             except json.JSONDecodeError as exc:
                 raise ValueError(
-                    "Model returned invalid Tool "
-                    f"arguments for '{name}': "
-                    f"{raw_arguments!r}"
+                    f"Model returned invalid Tool arguments for '{name}': {raw_arguments!r}"
                 ) from exc
 
             if not isinstance(parsed, dict):
-                raise ValueError(
-                    f"Tool arguments for '{name}' "
-                    "must be a JSON object."
-                )
+                raise ValueError(f"Tool arguments for '{name}' must be a JSON object.")
 
             arguments = parsed
 

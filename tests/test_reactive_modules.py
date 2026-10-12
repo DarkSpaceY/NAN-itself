@@ -17,8 +17,11 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from pydantic import BaseModel
-
+from nan_itself.agent.verbs import (
+    InvokeChannelsVerb,
+    ListChannelsVerb,
+    ShowChannelsVerb,
+)
 from nan_itself.modules.model import (
     ChannelSpec,
     Module,
@@ -27,12 +30,8 @@ from nan_itself.modules.model import (
 from nan_itself.modules.runtime import (
     Facade,
 )
-from nan_itself.agent.verbs import (
-    InvokeChannelsVerb,
-    ListChannelsVerb,
-    ShowChannelsVerb,
-)
 from nan_itself.utils import paths as _paths
+from pydantic import BaseModel
 
 
 def run(coro):
@@ -61,13 +60,9 @@ def test_channel_spec_schema_and_validation():
 
     assert "title" not in schema
 
-    assert schema["properties"]["text"] == {
-        "type": "string"
-    }
+    assert schema["properties"]["text"] == {"type": "string"}
 
-    payload, error = spec.validate(
-        {"text": "go", "priority": 2}
-    )
+    payload, error = spec.validate({"text": "go", "priority": 2})
 
     assert error is None
 
@@ -179,15 +174,9 @@ def test_facade_routing_failure_modes(tmp_path, monkeypatch):
     facade = _facade(tmp_path, monkeypatch)
 
     # Unknown module: never raises.
-    assert "Unknown module" in (
-        facade.write_module_channel(
-            "ghost", "goal", {"text": "x"}
-        )
-    )
+    assert "Unknown module" in (facade.write_module_channel("ghost", "goal", {"text": "x"}))
 
-    assert "Unknown module" in (
-        facade.show_module_channel("ghost")
-    )
+    assert "Unknown module" in (facade.show_module_channel("ghost"))
 
     # A channel-free Module exposes no channels.
     plain = Module()
@@ -210,15 +199,9 @@ def test_facade_routing_failure_modes(tmp_path, monkeypatch):
 
     facade.modules["plain"] = record
 
-    assert "exposes no channels" in (
-        facade.write_module_channel(
-            "plain", "goal", {"text": "x"}
-        )
-    )
+    assert "exposes no channels" in (facade.write_module_channel("plain", "goal", {"text": "x"}))
 
-    assert "exposes no channels" in (
-        facade.show_module_channel("plain")
-    )
+    assert "exposes no channels" in (facade.show_module_channel("plain"))
 
 
 # ============================================================================
@@ -292,9 +275,7 @@ async def _full_chain(tmp_path, monkeypatch):
     assert "depth" not in listing
 
     # show: description + schema only.
-    detail = facade.show_module_channel(
-        "probe", "goal"
-    )
+    detail = facade.show_module_channel("probe", "goal")
 
     assert "Navigation goal" in detail
 
@@ -306,23 +287,11 @@ async def _full_chain(tmp_path, monkeypatch):
 
     # invoke: every validated feed is 'written' (the module's
     # consumption policy is private now).
-    assert (
-        facade.write_module_channel(
-            "probe", "goal", {"text": "a"}
-        )
-        == "written"
-    )
+    assert facade.write_module_channel("probe", "goal", {"text": "a"}) == "written"
 
-    assert (
-        facade.write_module_channel(
-            "probe", "goal", {"text": "b"}
-        )
-        == "written"
-    )
+    assert facade.write_module_channel("probe", "goal", {"text": "b"}) == "written"
 
-    rejected = facade.write_module_channel(
-        "probe", "goal", {"priority": 3}
-    )
+    rejected = facade.write_module_channel("probe", "goal", {"priority": 3})
 
     assert rejected.startswith("rejected")
 
@@ -334,11 +303,7 @@ async def _full_chain(tmp_path, monkeypatch):
     ]
 
     # Unknown channel on a known module.
-    assert "Unknown channel" in (
-        facade.write_module_channel(
-            "probe", "nope", {"x": 1}
-        )
-    )
+    assert "Unknown channel" in (facade.write_module_channel("probe", "nope", {"x": 1}))
 
     return facade, instance
 
@@ -398,9 +363,7 @@ async def _verb_chain(tmp_path, monkeypatch):
 
     assert result == "written"
 
-    assert instance.fed == [
-        ("goal", {"text": "go home", "priority": 1})
-    ]
+    assert instance.fed == [("goal", {"text": "go home", "priority": 1})]
 
     # Argument validation failures are plain strings.
     missing = await InvokeChannelsVerb().execute(

@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nan_itself.utils import blocklist
-from nan_itself.utils import paths
+from nan_itself.utils import blocklist, paths
 
 CONFIG_DIR = "config"
 
@@ -66,10 +65,7 @@ def test_parses_the_three_lists(
 ) -> None:
     _write_config(
         tmp_path,
-        "block:\n"
-        "  modules: [audio, vision]\n"
-        "  tools: [calculation]\n"
-        "  skills: [writing-modules]\n",
+        "block:\n  modules: [audio, vision]\n  tools: [calculation]\n  skills: [writing-modules]\n",
     )
 
     _point_repo_root_at(monkeypatch, tmp_path)
@@ -160,11 +156,7 @@ def _write_skill(
     directory.mkdir()
 
     (directory / "SKILL.md").write_text(
-        "---\n"
-        f"name: {name}\n"
-        "description: a test skill\n"
-        "---\n"
-        "body\n",
+        f"---\nname: {name}\ndescription: a test skill\n---\nbody\n",
         encoding="utf-8",
     )
 

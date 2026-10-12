@@ -79,7 +79,38 @@ Issues = "https://github.com/DarkSpaceY/NAN-itself/issues"
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.14.0",
 ]
+
+[tool.ruff]
+line-length = 100
+# Names injected into hot-reloadable builtin modules by the framework loader.
+builtins = ["Module", "Turn", "ToolSet", "tool"]
+# First-party code only; vendored/experimental trees are excluded.
+extend-exclude = [
+    "models",
+    "paper_search",
+    "workspace",
+    "data",
+    "frontend",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # long lines: let the formatter handle them, don't fail CI on them
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
 
 [project.scripts]
 nan-itself = "nan_itself:main"

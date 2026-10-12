@@ -29,13 +29,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .model import (
-    Report,
-)
 from ..utils.llm import (
     Message,
 )
-
+from .model import (
+    Report,
+)
 
 _MODULE_TAG = "module"
 
@@ -56,9 +55,7 @@ def build_messages(
     turn's rendering.
     """
     return [
-        _system_message(
-            turn.persona or ""
-        ),
+        _system_message(turn.persona or ""),
         *turn.history,
         *_render_turn(turn),
     ]
@@ -95,9 +92,7 @@ def render_turn(
 def _render_turn(
     turn,
 ) -> tuple[Message, ...]:
-    messages: list[Message] = [
-        _observation_message(turn)
-    ]
+    messages: list[Message] = [_observation_message(turn)]
 
     if turn.reply is None and not turn.calls:
         return tuple(messages)
@@ -113,6 +108,7 @@ def _render_turn(
     for call, result in zip(
         turn.calls,
         turn.results,
+        strict=False,
     ):
         messages.append(
             _tool_message(
@@ -136,22 +132,13 @@ def _observation_message(
 
     section = _render_section(
         _MODULE_TAG,
-        "\n\n".join(
-            [_AMBIENT_PREAMBLE, *turn.ambient]
-        )
-        if turn.ambient
-        else "",
+        "\n\n".join([_AMBIENT_PREAMBLE, *turn.ambient]) if turn.ambient else "",
     )
 
     if section:
-        parts.append(
-            section
-        )
+        parts.append(section)
 
-    parts.extend(
-        _render_report(report)
-        for report in turn.reports
-    )
+    parts.extend(_render_report(report) for report in turn.reports)
 
     task_section = _render_section(
         "task",
@@ -159,15 +146,11 @@ def _observation_message(
     )
 
     if task_section:
-        parts.append(
-            task_section
-        )
+        parts.append(task_section)
 
     return Message(
         role="user",
-        content="\n\n".join(
-            parts
-        ),
+        content="\n\n".join(parts),
     )
 
 

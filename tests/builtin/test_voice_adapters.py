@@ -74,9 +74,7 @@ def test_sanitize_instruct_drops_hallucinated_directive():
 
 
 def test_sanitize_instruct_trims_and_empty():
-    assert sanitize_instruct(f"  {ALLOWED_INSTRUCTS[1]}  ") == (
-        ALLOWED_INSTRUCTS[1]
-    )
+    assert sanitize_instruct(f"  {ALLOWED_INSTRUCTS[1]}  ") == (ALLOWED_INSTRUCTS[1])
 
     assert sanitize_instruct("") == ""
 
@@ -167,9 +165,7 @@ def _slm(tmp_path: Path) -> SmallDialogue:
 
 
 def test_extract_json_takes_first_to_last_braces(tmp_path: Path):
-    assert _slm(tmp_path)._extract_json(
-        '前言 {"answer": "你好"} 后记'
-    ) == {"answer": "你好"}
+    assert _slm(tmp_path)._extract_json('前言 {"answer": "你好"} 后记') == {"answer": "你好"}
 
     assert _slm(tmp_path)._extract_json("没有大括号") is None
 
@@ -195,9 +191,10 @@ def test_compose_parses_task_to_utterance(tmp_path: Path, monkeypatch):
         lambda *a, **k: '{"instruct": "用开心的语气说", "text": "好嘞，马上来！"}',
     )
 
-    assert slm.compose(
-        {"intent": "confirm", "key_points": "马上来", "tone": "轻快"}
-    ) == {"instruct": "用开心的语气说", "text": "好嘞，马上来！"}
+    assert slm.compose({"intent": "confirm", "key_points": "马上来", "tone": "轻快"}) == {
+        "instruct": "用开心的语气说",
+        "text": "好嘞，马上来！",
+    }
 
 
 def test_compose_returns_instruct_verbatim(tmp_path: Path, monkeypatch):
@@ -216,20 +213,14 @@ def test_compose_returns_instruct_verbatim(tmp_path: Path, monkeypatch):
     }
 
 
-def test_compose_returns_none_on_unusable_output(
-    tmp_path: Path, monkeypatch
-):
+def test_compose_returns_none_on_unusable_output(tmp_path: Path, monkeypatch):
     slm = _slm(tmp_path)
 
-    monkeypatch.setattr(
-        slm, "_generate", lambda *a, **k: "我觉得应该 escalate"
-    )
+    monkeypatch.setattr(slm, "_generate", lambda *a, **k: "我觉得应该 escalate")
 
     assert slm.compose({"intent": "confirm"}) is None
 
-    monkeypatch.setattr(
-        slm, "_generate", lambda *a, **k: '{"instruct": "用开心的语气说"}'
-    )
+    monkeypatch.setattr(slm, "_generate", lambda *a, **k: '{"instruct": "用开心的语气说"}')
 
     # JSON fine but no text: nothing to speak.
     assert slm.compose({"intent": "confirm"}) is None
@@ -254,8 +245,6 @@ def test_fast_reply_answers_or_escalates(tmp_path: Path, monkeypatch):
 
     assert slm.fast_reply("帮我订机票") is None
 
-    monkeypatch.setattr(
-        slm, "_generate", lambda *a, **k: "糟糕，输出坏了"
-    )
+    monkeypatch.setattr(slm, "_generate", lambda *a, **k: "糟糕，输出坏了")
 
     assert slm.fast_reply("你好") is None

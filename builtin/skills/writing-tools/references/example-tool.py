@@ -19,7 +19,6 @@ from typing import Any
 
 
 class DigestProvider(ToolSet):
-
     id = "digest"
 
     @tool
@@ -63,6 +62,4 @@ class DigestProvider(ToolSet):
         Args:
             text: the text to hash.
         """
-        return {
-            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()
-        }
+        return {"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}

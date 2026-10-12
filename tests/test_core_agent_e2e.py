@@ -5,13 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
 from nan_itself.agent.prompts import render_turn
 from nan_itself.tools.results import text_result
 from nan_itself.utils.llm import ToolCall
-
 
 # ============================================================================
 # Generic helpers
@@ -80,11 +78,7 @@ def tool_messages(turn):
     The turn's tool-result messages, rendered by the prompt
     assembly.
     """
-    return [
-        message
-        for message in render_turn(turn)
-        if getattr(message, "role", None) == "tool"
-    ]
+    return [message for message in render_turn(turn) if getattr(message, "role", None) == "tool"]
 
 
 # ============================================================================
@@ -98,14 +92,7 @@ def _load_inbox():
     """
     from nan_itself.modules.loading import import_module_class
 
-    path = (
-        Path(__file__)
-        .resolve()
-        .parents[1]
-        / "builtin"
-        / "modules"
-        / "inbox.py"
-    )
+    path = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox.py"
 
     cls, _, _ = import_module_class(path)
 
@@ -145,9 +132,7 @@ class FakeModules:
             }
         }
 
-        self.snapshot_values.append(
-            snapshot
-        )
+        self.snapshot_values.append(snapshot)
 
         return snapshot
 
@@ -158,27 +143,19 @@ class FakeModules:
     ):
         self.query_snapshot_calls += 1
 
-        self.query_turns.append(
-            turn
-        )
+        self.query_turns.append(turn)
 
-        self.query_snapshots.append(
-            turn.world
-        )
+        self.query_snapshots.append(turn.world)
 
         ambient = []
 
         # Real inbox module: the observation carries whatever
         # is queued (user input).
         if self.inbox is not None:
-            body = await self.inbox.ask(
-                turn
-            )
+            body = await self.inbox.ask(turn)
 
             if body:
-                ambient.append(
-                    body
-                )
+                ambient.append(body)
 
         return ambient
 
@@ -186,9 +163,7 @@ class FakeModules:
         self,
         record,
     ):
-        self.delivered_turns.append(
-            record
-        )
+        self.delivered_turns.append(record)
 
 
 # ============================================================================
@@ -248,7 +223,7 @@ class FakeProviderRuntime:
                             "additionalProperties": False,
                         },
                     )
-                }
+                },
             )
         }
 
@@ -256,9 +231,7 @@ class FakeProviderRuntime:
         self.refresh_calls = []
 
     def provider_names(self):
-        return tuple(
-            self.providers
-        )
+        return tuple(self.providers)
 
     async def resolve_tool(
         self,
@@ -267,20 +240,14 @@ class FakeProviderRuntime:
         """
         Resolve a 'provider/tool' composite name.
         """
-        provider_name, _, tool_name = (
-            name.partition("/")
-        )
+        provider_name, _, tool_name = name.partition("/")
 
-        provider = self.providers.get(
-            provider_name
-        )
+        provider = self.providers.get(provider_name)
 
         if provider is None or not tool_name:
             return None
 
-        tool = provider.tools.get(
-            tool_name
-        )
+        tool = provider.tools.get(tool_name)
 
         if tool is None:
             return None
@@ -294,17 +261,13 @@ class FakeProviderRuntime:
         self,
         name,
     ):
-        return self.providers.get(
-            name
-        )
+        return self.providers.get(name)
 
     async def refresh_provider_tools(
         self,
         name,
     ):
-        self.refresh_calls.append(
-            name
-        )
+        self.refresh_calls.append(name)
 
     async def call_tool(
         self,
@@ -320,21 +283,10 @@ class FakeProviderRuntime:
             )
         )
 
-        if (
-            provider_name == "calc"
-            and tool_name == "add"
-        ):
-            return text_result(
-                str(
-                    arguments["x"]
-                    + arguments["y"]
-                )
-            )
+        if provider_name == "calc" and tool_name == "add":
+            return text_result(str(arguments["x"] + arguments["y"]))
 
-        raise AssertionError(
-            "Unexpected tool call: "
-            f"{provider_name}.{tool_name}"
-        )
+        raise AssertionError(f"Unexpected tool call: {provider_name}.{tool_name}")
 
     async def start(self):
         pass
@@ -363,9 +315,7 @@ class QueueLLM:
         self,
         responses,
     ):
-        self.responses = list(
-            responses
-        )
+        self.responses = list(responses)
 
         self.requests = []
 
@@ -373,16 +323,12 @@ class QueueLLM:
         self,
         request,
     ):
-        self.requests.append(
-            request
-        )
+        self.requests.append(request)
 
         await asyncio.sleep(0)
 
         if not self.responses:
-            raise AssertionError(
-                "LLM received more requests than expected."
-            )
+            raise AssertionError("LLM received more requests than expected.")
 
         return self.responses.pop(0)
 
@@ -418,9 +364,7 @@ async def cancel_children(agent):
     for child in list(agent.children):
         child.request_stop()
 
-        await Agent._cancel_and_suppress(
-            child._task
-        )
+        await Agent._cancel_and_suppress(child._task)
 
 
 # ============================================================================
@@ -430,9 +374,7 @@ async def cancel_children(agent):
 
 @pytest.mark.asyncio
 async def test_agent_runs_real_route_tool_final_chain(tmp_path):
-    modules = FakeModules(
-        initial_value=7
-    )
+    modules = FakeModules(initial_value=7)
 
     providers = FakeProviderRuntime()
 
@@ -449,7 +391,6 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
             # Step 1:
             # invoke the provider tool directly
             # ------------------------------------------------------
-
             make_response(
                 tool_calls=[
                     make_tool_call(
@@ -465,15 +406,11 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
                     )
                 ]
             ),
-
             # ------------------------------------------------------
             # Step 2:
             # final
             # ------------------------------------------------------
-
-            make_response(
-                content="42"
-            ),
+            make_response(content="42"),
         ]
     )
 
@@ -509,15 +446,9 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
         # Agent turn boundary.
         # ----------------------------------------------------------
 
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
+        assert modules.snapshot_calls == 2
 
-        assert (
-            skills.refresh_calls
-            == 2
-        )
+        assert skills.refresh_calls == 2
 
         # ----------------------------------------------------------
         # World snapshot crosses into Turn / StepEngine.
@@ -527,98 +458,57 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
         # which passes it to modules.query_snapshot().
         # ----------------------------------------------------------
 
-        assert (
-            modules.query_snapshot_calls
-            == 2
-        )
+        assert modules.query_snapshot_calls == 2
 
-        assert (
-            modules.query_snapshots[0][
-                "state"
-            ]["value"]
-            == 7
-        )
+        assert modules.query_snapshots[0]["state"]["value"] == 7
 
-        assert (
-            modules.query_turns[0].world[
-                "state"
-            ]["value"]
-            == 7
-        )
+        assert modules.query_turns[0].world["state"]["value"] == 7
 
         # ----------------------------------------------------------
         # Persona is rendered into the system message.
         # ----------------------------------------------------------
 
-        first_request = (
-            llm.requests[0]
-        )
+        first_request = llm.requests[0]
 
-        assert (
-            "persona-v1"
-            in first_request.messages[0].content
-        )
+        assert "persona-v1" in first_request.messages[0].content
 
         # ----------------------------------------------------------
         # Tool exposure: the 8 verbs are always visible; provider
         # tools are never exposed directly (invoke_tool only).
         # ----------------------------------------------------------
 
-        first_tools = {
-            tool.name
-            for tool in first_request.tools
-        }
+        first_tools = {tool.name for tool in first_request.tools}
 
-        assert (
-            "invoke_tool"
-            in first_tools
-        )
+        assert "invoke_tool" in first_tools
 
-        assert (
-            "add"
-            not in first_tools
-        )
+        assert "add" not in first_tools
 
         # ----------------------------------------------------------
         # Every request sees the same full verb set.
         # ----------------------------------------------------------
 
-        second_request = (
-            llm.requests[1]
-        )
+        second_request = llm.requests[1]
 
-        second_tools = {
-            tool.name
-            for tool in second_request.tools
-        }
+        second_tools = {tool.name for tool in second_request.tools}
 
-        assert (
-            "invoke_tool"
-            in second_tools
-        )
+        assert "invoke_tool" in second_tools
 
-        assert (
-            "add"
-            not in second_tools
-        )
+        assert "add" not in second_tools
 
         # ----------------------------------------------------------
         # Real provider call happened.
         # ----------------------------------------------------------
 
-        assert (
-            providers.calls
-            == [
-                (
-                    "calc",
-                    "add",
-                    {
-                        "x": 20,
-                        "y": 22,
-                    },
-                )
-            ]
-        )
+        assert providers.calls == [
+            (
+                "calc",
+                "add",
+                {
+                    "x": 20,
+                    "y": 22,
+                },
+            )
+        ]
 
         # ----------------------------------------------------------
         # Tool result reached the model.
@@ -650,56 +540,27 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
                 if call_id is None:
                     continue
 
-                tool_messages_by_id[
-                    call_id
-                ] = message
+                tool_messages_by_id[call_id] = message
 
-        tool_messages = list(
-            tool_messages_by_id.values()
-        )
+        tool_messages = list(tool_messages_by_id.values())
 
-        assert (
-            len(tool_messages)
-            == 1
-        )
+        assert len(tool_messages) == 1
 
-        assert any(
-            '"text":"42"'
-            in (
-                message.content
-                or ""
-            )
-            for message in tool_messages
-        )
+        assert any('"text":"42"' in (message.content or "") for message in tool_messages)
 
         # ----------------------------------------------------------
         # Completed turn is delivered to Modules.
         # ----------------------------------------------------------
 
-        assert (
-            len(
-                modules.delivered_turns
-            )
-            == 2
-        )
+        assert len(modules.delivered_turns) == 2
 
         # The second turn delivered the final reply, recorded
         # structurally on the turn's reply field.
-        record = (
-            modules.delivered_turns[
-                -1
-            ]
-        )
+        record = modules.delivered_turns[-1]
 
-        assert (
-            record.reply
-            == "42"
-        )
+        assert record.reply == "42"
 
-        assert (
-            record.error
-            is None
-        )
+        assert record.error is None
 
     finally:
         await cancel_children(agent)
@@ -712,9 +573,7 @@ async def test_agent_runs_real_route_tool_final_chain(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
-    modules = FakeModules(
-        initial_value=1
-    )
+    modules = FakeModules(initial_value=1)
 
     providers = FakeProviderRuntime()
 
@@ -727,12 +586,8 @@ async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
 
     llm = QueueLLM(
         [
-            make_response(
-                content="first"
-            ),
-            make_response(
-                content="second"
-            ),
+            make_response(content="first"),
+            make_response(content="second"),
         ]
     )
 
@@ -764,44 +619,22 @@ async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
         # Exactly one refresh/snapshot per turn.
         # ----------------------------------------------------------
 
-        assert (
-            skills.refresh_calls
-            == 2
-        )
+        assert skills.refresh_calls == 2
 
-        assert (
-            modules.snapshot_calls
-            == 2
-        )
+        assert modules.snapshot_calls == 2
 
         # ----------------------------------------------------------
         # Turn 1 world remains v1.
         # Turn 2 sees v2.
         # ----------------------------------------------------------
 
-        first_context_world = (
-            modules
-            .snapshot_values[0]
-        )
+        first_context_world = modules.snapshot_values[0]
 
-        second_context_world = (
-            modules
-            .snapshot_values[1]
-        )
+        second_context_world = modules.snapshot_values[1]
 
-        assert (
-            first_context_world[
-                "state"
-            ]["value"]
-            == 1
-        )
+        assert first_context_world["state"]["value"] == 1
 
-        assert (
-            second_context_world[
-                "state"
-            ]["value"]
-            == 2
-        )
+        assert second_context_world["state"]["value"] == 2
 
         # ----------------------------------------------------------
         # Persona is injected independently on every turn.
@@ -809,27 +642,13 @@ async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
         # We verify it from the actual system prompt.
         # ----------------------------------------------------------
 
-        first_persona = (
-            llm.requests[0]
-            .messages[0]
-            .content
-        )
+        first_persona = llm.requests[0].messages[0].content
 
-        second_persona = (
-            llm.requests[1]
-            .messages[0]
-            .content
-        )
+        second_persona = llm.requests[1].messages[0].content
 
-        assert (
-            "persona-v1"
-            in first_persona
-        )
+        assert "persona-v1" in first_persona
 
-        assert (
-            "persona-v2"
-            in second_persona
-        )
+        assert "persona-v2" in second_persona
 
         # ----------------------------------------------------------
         # History accumulates across turns: the second request
@@ -859,15 +678,9 @@ async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
             == "user"
         ]
 
-        assert (
-            first_request_users
-            == [""]
-        )
+        assert first_request_users == [""]
 
-        assert (
-            second_request_users
-            == ["", ""]
-        )
+        assert second_request_users == ["", ""]
 
         # ----------------------------------------------------------
         # The first turn's assistant reply is replayed in the
@@ -881,11 +694,8 @@ async def test_agent_refreshes_skill_persona_and_world_each_turn(tmp_path):
                 None,
             )
             == "assistant"
-            and (message.content or "")
-            == "first"
-            for message in llm.requests[
-                1
-            ].messages
+            and (message.content or "") == "first"
+            for message in llm.requests[1].messages
         )
 
     finally:
@@ -918,9 +728,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             (the inbox is never involved)
     """
 
-    modules = FakeModules(
-        initial_value=5
-    )
+    modules = FakeModules(initial_value=5)
 
     providers = FakeProviderRuntime()
 
@@ -948,9 +756,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             self,
             request,
         ):
-            self.requests.append(
-                request
-            )
+            self.requests.append(request)
 
             await asyncio.sleep(0)
 
@@ -996,9 +802,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
                 if self.child_calls == 1:
                     await release_child.wait()
 
-                    return make_response(
-                        content="late child result"
-                    )
+                    return make_response(content="late child result")
 
                 # Second child turn: submit the report via
                 # the finish tool; only this ends the task.
@@ -1019,19 +823,13 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             # ------------------------------------------------------
 
             if not user_inputs:
-                raise AssertionError(
-                    "Parent request has no user messages."
-                )
+                raise AssertionError("Parent request has no user messages.")
 
             # A later root turn carries the harvested child report as
             # a user message; the report is recognized by the
             # <subagent_report> frame.
             has_report = any(
-                "<subagent_report>"
-                in (
-                    message.content
-                    or ""
-                )
+                "<subagent_report>" in (message.content or "")
                 for message in request.messages
                 if getattr(
                     message,
@@ -1056,11 +854,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             # Child is intentionally still blocked.
             # ------------------------------------------------------
 
-            if (
-                not has_report
-                and self.parent_steps
-                == 0
-            ):
+            if not has_report and self.parent_steps == 0:
                 self.parent_steps += 1
 
                 return make_response(
@@ -1075,16 +869,10 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
                     ]
                 )
 
-            if (
-                not has_report
-                and self.parent_steps
-                == 1
-            ):
+            if not has_report and self.parent_steps == 1:
                 self.parent_steps += 1
 
-                return make_response(
-                    content="parent finished early"
-                )
+                return make_response(content="parent finished early")
 
             # ------------------------------------------------------
             # Next parent turn.
@@ -1114,24 +902,13 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
                     )
                 )
 
-                assert (
-                    "<subagent_report>"
-                    in report_text
-                )
+                assert "<subagent_report>" in report_text
 
-                assert (
-                    "late child"
-                    in report_text
-                )
+                assert "late child" in report_text
 
-                assert (
-                    "late child result"
-                    in report_text
-                )
+                assert "late child result" in report_text
 
-                return make_response(
-                    content="report received"
-                )
+                return make_response(content="report received")
 
             raise AssertionError(
                 f"Unexpected parent state: "
@@ -1169,10 +946,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         assert first_rendered[-1].role == "tool"
 
-        assert (
-            "Subagent spawned"
-            in first_rendered[-1].content
-        )
+        assert "Subagent spawned" in first_rendered[-1].content
 
         await asyncio.wait_for(
             child_started.wait(),
@@ -1191,10 +965,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         second = await agent.run()
 
-        assert (
-            reply_text(second)
-            == "parent finished early"
-        )
+        assert reply_text(second) == "parent finished early"
 
         # ----------------------------------------------------------
         # Now let the child complete.
@@ -1209,9 +980,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             if child.done and child.report is not None:
                 break
 
-            await asyncio.sleep(
-                0
-            )
+            await asyncio.sleep(0)
 
         assert child.report is not None
 
@@ -1227,10 +996,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         third = await agent.run()
 
-        assert (
-            reply_text(third)
-            == "report received"
-        )
+        assert reply_text(third) == "report received"
 
         # The harvested child left the tree.
         assert agent.children == []
@@ -1243,11 +1009,7 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
 
         for request in llm.requests:
             has_report = any(
-                "<subagent_report>"
-                in (
-                    message.content
-                    or ""
-                )
+                "<subagent_report>" in (message.content or "")
                 for message in request.messages
                 if getattr(
                     message,
@@ -1266,19 +1028,13 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             )
 
             if has_report:
-                report_requests.append(
-                    request
-                )
+                report_requests.append(request)
 
-        assert (
-            report_requests
-        )
+        assert report_requests
 
         report_text = "\n".join(
             message.content
-            for message in (
-                report_requests[-1].messages
-            )
+            for message in (report_requests[-1].messages)
             if getattr(
                 message,
                 "role",
@@ -1295,20 +1051,11 @@ async def test_late_subagent_report_is_harvested_into_the_next_turn(tmp_path):
             )
         )
 
-        assert (
-            "task: late child"
-            in report_text
-        )
+        assert "task: late child" in report_text
 
-        assert (
-            "status: completed"
-            in report_text
-        )
+        assert "status: completed" in report_text
 
-        assert (
-            "late child result"
-            in report_text
-        )
+        assert "late child result" in report_text
 
     finally:
         release_child.set()
@@ -1339,13 +1086,7 @@ async def test_run_returns_the_turn_whose_reply_is_the_model_text(tmp_path):
         "persona",
     )
 
-    llm = QueueLLM(
-        [
-            make_response(
-                content="the answer"
-            )
-        ]
-    )
+    llm = QueueLLM([make_response(content="the answer")])
 
     agent = make_agent(
         llm=llm,
@@ -1365,16 +1106,10 @@ async def test_run_returns_the_turn_whose_reply_is_the_model_text(tmp_path):
 
         assert rendered[-1].role == "assistant"
 
-        assert (
-            rendered[-1].content
-            == "the answer"
-        )
+        assert rendered[-1].content == "the answer"
 
         # The same Turn was delivered to the Modules.
-        assert (
-            modules.delivered_turns[-1]
-            is turn
-        )
+        assert modules.delivered_turns[-1] is turn
 
     finally:
         await cancel_children(agent)
@@ -1436,22 +1171,13 @@ async def test_tool_results_are_written_back_to_the_same_turn(tmp_path):
 
         assert rendered[1].role == "assistant"
 
-        assert [
-            call.name
-            for call in rendered[1].tool_calls
-        ] == ["invoke_tool"]
+        assert [call.name for call in rendered[1].tool_calls] == ["invoke_tool"]
 
         assert rendered[2].role == "tool"
 
-        assert (
-            rendered[2].tool_call_id
-            == "add-1"
-        )
+        assert rendered[2].tool_call_id == "add-1"
 
-        assert (
-            '"text":"5"'
-            in rendered[2].content
-        )
+        assert '"text":"5"' in rendered[2].content
 
         # The provider tool really ran.
         assert providers.calls == [
@@ -1466,12 +1192,7 @@ async def test_tool_results_are_written_back_to_the_same_turn(tmp_path):
         ]
 
         # The delivered Turn carries the results too.
-        assert (
-            tool_messages(
-                modules.delivered_turns[-1]
-            )
-            == [rendered[2]]
-        )
+        assert tool_messages(modules.delivered_turns[-1]) == [rendered[2]]
 
     finally:
         await cancel_children(agent)
@@ -1534,10 +1255,7 @@ async def test_step_failure_is_visible_on_the_delivered_turn(
 
         record = modules.delivered_turns[-1]
 
-        assert (
-            record.error
-            == "RuntimeError: boom"
-        )
+        assert record.error == "RuntimeError: boom"
 
         assert record.ended_at is not None
 

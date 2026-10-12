@@ -27,7 +27,6 @@ BASES = {"Module"}
 
 
 class Report:
-
     def __init__(self, path: Path) -> None:
         self.path = path
         self.errors: list[str] = []
@@ -61,9 +60,7 @@ def check(path: Path) -> Report:
     head = "\n".join(text.splitlines()[:SCAN_LINES])
 
     if HEADER not in head:
-        report.error(
-            f"missing '{HEADER}' header within the first {SCAN_LINES} lines"
-        )
+        report.error(f"missing '{HEADER}' header within the first {SCAN_LINES} lines")
 
     try:
         tree = ast.parse(text)
@@ -71,31 +68,20 @@ def check(path: Path) -> Report:
         report.error(f"syntax error: {exc}")
         return report
 
-    classes = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef)
-    ]
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
 
     subclasses = [
         node
         for node in classes
         if any(
-            (
-                isinstance(base, ast.Name) and base.id in BASES
-            )
-            or (
-                isinstance(base, ast.Attribute)
-                and base.attr in BASES
-            )
+            (isinstance(base, ast.Name) and base.id in BASES)
+            or (isinstance(base, ast.Attribute) and base.attr in BASES)
             for base in node.bases
         )
     ]
 
     if len(subclasses) != 1:
-        report.error(
-            f"expected exactly one Module subclass, found {len(subclasses)}"
-        )
+        report.error(f"expected exactly one Module subclass, found {len(subclasses)}")
 
         return report
 
@@ -146,21 +132,15 @@ def check(path: Path) -> Report:
             names = []
 
             for element in requires.elts:
-                if isinstance(element, ast.Constant) and isinstance(
-                    element.value, str
-                ):
+                if isinstance(element, ast.Constant) and isinstance(element.value, str):
                     names.append(element.value)
                 else:
                     report.error("`requires` entries must be string literals")
 
-            duplicates = {
-                name for name in names if names.count(name) > 1
-            }
+            duplicates = {name for name in names if names.count(name) > 1}
 
             if duplicates:
-                report.error(
-                    f"duplicate requires entries: {sorted(duplicates)}"
-                )
+                report.error(f"duplicate requires entries: {sorted(duplicates)}")
 
     methods = {
         node.name: node
@@ -178,9 +158,7 @@ def check(path: Path) -> Report:
 
     tell = methods.get("tell")
 
-    if tell is not None and not isinstance(
-        tell, ast.AsyncFunctionDef
-    ):
+    if tell is not None and not isinstance(tell, ast.AsyncFunctionDef):
         report.error("`tell()` must be async")
 
     ask = methods.get("ask")

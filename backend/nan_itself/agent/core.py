@@ -51,6 +51,10 @@ from typing import Any
 
 from loguru import logger
 
+from ..events import sink
+from ..modules.model import Turn
+from ..utils import paths
+from ..utils.backoff import next_backoff
 from .model import (
     Report,
     SubagentLimitError,
@@ -70,11 +74,6 @@ from .verbs import (
     SPAWN_TOOL_NAME,
     VERBS,
 )
-from ..events import sink
-from ..modules.model import Turn
-from ..utils import paths
-from ..utils.backoff import next_backoff
-
 
 DEFAULT_BACKOFF = (
     1.0,
@@ -141,17 +140,9 @@ class Agent:
         # (the root no longer rotates per turn).
         self.agent_hash = uuid.uuid4().hex
 
-        self.parent_hash = (
-            parent.agent_hash
-            if parent is not None
-            else None
-        )
+        self.parent_hash = parent.agent_hash if parent is not None else None
 
-        self.depth = (
-            0
-            if parent is None
-            else parent.depth + 1
-        )
+        self.depth = 0 if parent is None else parent.depth + 1
 
         # Children still owing a report; harvested at the next
         # turn boundary.
@@ -234,20 +225,11 @@ class Agent:
         prior: tuple = ()
 
         if self.last_turn is not None:
-            prior = (
-                self.last_turn.history
-                + self.engine.render_turn(
-                    self.last_turn
-                )
-            )
+            prior = self.last_turn.history + self.engine.render_turn(self.last_turn)
 
-            if (
-                self._history_chars(prior)
-                > self.history_char_limit
-            ):
+            if self._history_chars(prior) > self.history_char_limit:
                 logger.info(
-                    "History exceeded {} characters; "
-                    "clearing conversation history",
+                    "History exceeded {} characters; clearing conversation history",
                     self.history_char_limit,
                 )
 
@@ -266,11 +248,7 @@ class Agent:
             agent_hash=self.agent_hash,
             parent_hash=self.parent_hash,
             depth=self.depth,
-            task=(
-                self.task
-                if self.depth > 0
-                else None
-            ),
+            task=(self.task if self.depth > 0 else None),
             world=world,
             persona=persona,
             history=prior,
@@ -289,13 +267,9 @@ class Agent:
         completed = turn
 
         try:
-            completed = await self.engine.step(
-                turn
-            )
+            completed = await self.engine.step(turn)
 
-            completed = await self._run_calls(
-                completed
-            )
+            completed = await self._run_calls(completed)
 
             self.last_turn = completed
 
@@ -312,17 +286,13 @@ class Agent:
         except Exception as exc:
             completed = replace(
                 completed,
-                error=(
-                    f"{type(exc).__name__}: {exc}"
-                ),
+                error=(f"{type(exc).__name__}: {exc}"),
                 ended_at=time.time(),
             )
             raise
 
         finally:
-            self.modules.deliver_turn(
-                completed
-            )
+            self.modules.deliver_turn(completed)
 
     async def _observe(
         self,
@@ -343,17 +313,15 @@ class Agent:
         def on_module_start(
             module_id: str,
         ) -> None:
-            pending_query_records[module_id] = (
-                sink.emit(
-                    "record_started",
-                    content={
-                        "category": "module_query",
-                        "payload": {},
-                        "agent_hash": self.agent_hash,
-                        "parent_hash": self.parent_hash,
-                        "depth": self.depth,
-                    },
-                )
+            pending_query_records[module_id] = sink.emit(
+                "record_started",
+                content={
+                    "category": "module_query",
+                    "payload": {},
+                    "agent_hash": self.agent_hash,
+                    "parent_hash": self.parent_hash,
+                    "depth": self.depth,
+                },
             )
 
         def on_module_result(
@@ -362,11 +330,9 @@ class Agent:
             duration: float,
             failed: bool,
         ) -> None:
-            record_id = (
-                pending_query_records.pop(
-                    module_id,
-                    None,
-                )
+            record_id = pending_query_records.pop(
+                module_id,
+                None,
             )
 
             if not record_id:
@@ -425,12 +391,10 @@ class Agent:
                 },
             )
 
-        ambient_context = (
-            await self.modules.query_snapshot(
-                turn,
-                on_start=on_module_start,
-                on_result=on_module_result,
-            )
+        ambient_context = await self.modules.query_snapshot(
+            turn,
+            on_start=on_module_start,
+            on_result=on_module_result,
         )
 
         return replace(
@@ -469,22 +433,20 @@ class Agent:
 
             report = child.report
 
-            record_id = (
-                sink.emit(
-                    "record_started",
-                    content={
-                        "category": "subagent_report",
-                        "payload": {
-                            "agent_id": report.agent_id,
-                            "task": report.task or "",
-                            "status": report.status,
-                            "body": report.body,
-                        },
-                        "agent_hash": self.agent_hash,
-                        "parent_hash": self.parent_hash,
-                        "depth": self.depth,
+            record_id = sink.emit(
+                "record_started",
+                content={
+                    "category": "subagent_report",
+                    "payload": {
+                        "agent_id": report.agent_id,
+                        "task": report.task or "",
+                        "status": report.status,
+                        "body": report.body,
                     },
-                )
+                    "agent_hash": self.agent_hash,
+                    "parent_hash": self.parent_hash,
+                    "depth": self.depth,
+                },
             )
 
             if record_id:
@@ -511,9 +473,7 @@ class Agent:
                         "kind": "text",
                         "text": line,
                     }
-                    for line in (
-                        report.body or ""
-                    ).splitlines()
+                    for line in (report.body or "").splitlines()
                 )
 
                 sink.emit(
@@ -565,14 +525,10 @@ class Agent:
                 "[turn:{}] tool {} {}",
                 turn.agent_hash[:8],
                 call.name,
-                json.dumps(
-                    call.arguments
-                ),
+                json.dumps(call.arguments),
             )
 
-            results.append(
-                await self._run_call(call)
-            )
+            results.append(await self._run_call(call))
 
         return replace(
             turn,
@@ -606,23 +562,17 @@ class Agent:
         started = time.time()
 
         try:
-            verb = VERBS.get(
-                call.name
-            )
+            verb = VERBS.get(call.name)
 
             if verb is None:
                 result_text = (
-                    f"Unknown action '{call.name}'. "
-                    f"Available actions: "
-                    f"{', '.join(VERBS)}."
+                    f"Unknown action '{call.name}'. Available actions: {', '.join(VERBS)}."
                 )
 
             else:
-                result_text = (
-                    await verb.execute(
-                        call=call,
-                        agent=self,
-                    )
+                result_text = await verb.execute(
+                    call=call,
+                    agent=self,
                 )
 
         except Exception as exc:
@@ -644,9 +594,7 @@ class Agent:
             raise
 
         if record_id:
-            entries = _result_entries(
-                result_text
-            )
+            entries = _result_entries(result_text)
 
             if entries:
                 sink.emit(
@@ -664,9 +612,7 @@ class Agent:
                 "record_done",
                 id=record_id,
                 content={
-                    "duration_s": (
-                        time.time() - started
-                    ),
+                    "duration_s": (time.time() - started),
                     "agent_hash": self.agent_hash,
                     "parent_hash": self.parent_hash,
                     "depth": self.depth,
@@ -682,7 +628,7 @@ class Agent:
     def spawn(
         self,
         task: str,
-    ) -> "Agent":
+    ) -> Agent:
         """
         Spawn a child Agent running the same homogeneous loop.
 
@@ -693,14 +639,9 @@ class Agent:
         """
         child_depth = self.depth + 1
 
-        if (
-            child_depth
-            > self.max_subagent_depth
-        ):
+        if child_depth > self.max_subagent_depth:
             raise SubagentLimitError(
-                "Maximum Subagent depth exceeded: "
-                f"{child_depth} > "
-                f"{self.max_subagent_depth}"
+                f"Maximum Subagent depth exceeded: {child_depth} > {self.max_subagent_depth}"
             )
 
         child = Agent(
@@ -710,16 +651,10 @@ class Agent:
             skills=self.skills,
             task=task,
             parent=self,
-            max_subagent_depth=(
-                self.max_subagent_depth
-            ),
-            history_char_limit=(
-                self.history_char_limit
-            ),
+            max_subagent_depth=(self.max_subagent_depth),
+            history_char_limit=(self.history_char_limit),
             backoff=self.backoff,
-            autonomous_interval=(
-                self.autonomous_interval
-            ),
+            autonomous_interval=(self.autonomous_interval),
         )
 
         self.children.append(
@@ -728,10 +663,7 @@ class Agent:
 
         child._task = asyncio.create_task(
             child.loop(),
-            name=(
-                f"subagent:"
-                f"{child.agent_hash}"
-            ),
+            name=(f"subagent:{child.agent_hash}"),
         )
 
         return child
@@ -819,7 +751,7 @@ class Agent:
                 timeout=delay,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return self._stopping
 
         return True
@@ -838,16 +770,11 @@ class Agent:
         both cases the report precedes `done`, so a parent that
         harvests on `child.done` always finds the report ready.
         """
-        lost = [
-            child
-            for child in self.children
-            if child.done
-        ]
+        lost = [child for child in self.children if child.done]
 
         if lost:
             logger.warning(
-                "Agent {} exiting with {} "
-                "unharvested child report(s); dropped",
+                "Agent {} exiting with {} unharvested child report(s); dropped",
                 self.agent_hash[:8],
                 len(lost),
             )
@@ -907,9 +834,7 @@ class Agent:
                     child._task,
                 )
 
-            tasks.extend(
-                child._descendant_tasks()
-            )
+            tasks.extend(child._descendant_tasks())
 
         return tasks
 
@@ -936,10 +861,7 @@ class Agent:
         cancelled = False
 
         try:
-            while (
-                not self.done
-                and not self._stopping
-            ):
+            while not self.done and not self._stopping:
                 # Cooperative pause: checked before every turn,
                 # never mid-turn.
                 if self._paused:
@@ -962,11 +884,9 @@ class Agent:
                     raise
 
                 except Exception:
-                    delay, backoff_index = (
-                        next_backoff(
-                            self.backoff,
-                            backoff_index,
-                        )
+                    delay, backoff_index = next_backoff(
+                        self.backoff,
+                        backoff_index,
                     )
 
                     logger.exception(
@@ -995,11 +915,10 @@ class Agent:
                 if self.done or self._stopping:
                     break
 
-                if self.autonomous_interval > 0:
-                    if await self._interruptible_wait(
-                        self.autonomous_interval,
-                    ):
-                        break
+                if self.autonomous_interval > 0 and await self._interruptible_wait(
+                    self.autonomous_interval,
+                ):
+                    break
 
             logger.info(
                 "Agent {} stopped after {} cycles",
@@ -1053,18 +972,13 @@ class Agent:
             pass
 
         except Exception:
-            logger.exception(
-                "Task crashed while being reaped"
-            )
+            logger.exception("Task crashed while being reaped")
 
     @staticmethod
     def _history_chars(
         messages,
     ) -> int:
-        return sum(
-            len(message.content or "")
-            for message in messages
-        )
+        return sum(len(message.content or "") for message in messages)
 
     @staticmethod
     def _reply_text(
@@ -1139,37 +1053,25 @@ def _record_spec(
         call.name,
     )
 
-    arguments = (
-        call.arguments
-        if isinstance(call.arguments, dict)
-        else {}
-    )
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
 
     if category == "tool_call":
-        provider, tool = _split_tool_name(
-            arguments.get("name")
-        )
+        provider, tool = _split_tool_name(arguments.get("name"))
 
         inner = arguments.get("arguments")
 
         return category, {
             "provider": provider,
             "tool": tool,
-            "arguments": (
-                inner if isinstance(inner, dict) else {}
-            ),
+            "arguments": (inner if isinstance(inner, dict) else {}),
         }
 
     if category == "skill_invoke":
         payload: dict[str, Any] = {
-            "skill": _as_str(
-                arguments.get("name")
-            ),
+            "skill": _as_str(arguments.get("name")),
         }
 
-        resource = _as_str(
-            arguments.get("path")
-        )
+        resource = _as_str(arguments.get("path"))
 
         if resource:
             payload["resource"] = resource
@@ -1178,18 +1080,12 @@ def _record_spec(
 
     if category == "channel_write":
         channel_payload: dict[str, Any] = {
-            "module": _as_str(
-                arguments.get("module")
-            ),
-            "channel": _as_str(
-                arguments.get("channel")
-            ),
+            "module": _as_str(arguments.get("module")),
+            "channel": _as_str(arguments.get("channel")),
         }
 
         if "payload" in arguments:
-            channel_payload["payload"] = (
-                arguments["payload"]
-            )
+            channel_payload["payload"] = arguments["payload"]
 
         return category, channel_payload
 

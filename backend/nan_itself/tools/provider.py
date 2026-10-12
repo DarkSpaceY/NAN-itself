@@ -78,10 +78,7 @@ class Provider:
         name: str,
         arguments: dict[str, Any] | None,
     ) -> types.CallToolResult:
-        if (
-            self.spec.kind
-            == PROVIDER_KIND_LOCAL
-        ):
+        if self.spec.kind == PROVIDER_KIND_LOCAL:
             return await self._call_local(
                 name,
                 arguments,
@@ -99,29 +96,18 @@ class Provider:
     ) -> types.CallToolResult:
         provider = self.instance
 
-        method = (
-            provider.get_tool_method(name)
-            if provider is not None
-            else None
-        )
+        method = provider.get_tool_method(name) if provider is not None else None
 
         if method is None:
             return error_result(
-                f"Tool '{name}' is not exposed "
-                f"by local provider "
-                f"'{self.spec.name}'."
+                f"Tool '{name}' is not exposed by local provider '{self.spec.name}'."
             )
 
         try:
-            result = await method.invoke(
-                arguments
-            )
+            result = await method.invoke(arguments)
 
         except ValidationError as exc:
-            return error_result(
-                f"Invalid arguments for tool "
-                f"'{name}':\n{exc}"
-            )
+            return error_result(f"Invalid arguments for tool '{name}':\n{exc}")
 
         except Exception as exc:
             logger.exception(
@@ -130,10 +116,6 @@ class Provider:
                 name,
             )
 
-            return error_result(
-                f"{type(exc).__name__}: {exc}"
-            )
+            return error_result(f"{type(exc).__name__}: {exc}")
 
-        return text_result(
-            serialize_value(result)
-        )
+        return text_result(serialize_value(result))

@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
-from nan_itself.modules.runtime import Facade
 from nan_itself.modules.model import ModuleState
+from nan_itself.modules.runtime import Facade
 from nan_itself.skills.model import SkillMetadata
 from nan_itself.skills.runtime import SkillRuntime
-from nan_itself.tools import local as local_backend
 from nan_itself.tools import mcp as mcp_backend
+from nan_itself.tools.provider import Provider
 from nan_itself.tools.runtime import ProviderRuntime
 from nan_itself.tools.spec import (
-    PROVIDER_KIND_MCP,
     ProviderSpec,
 )
-from nan_itself.tools.provider import Provider
 from nan_itself.utils import paths as _paths
 
 
@@ -55,18 +54,14 @@ class FakeSession:
                             "type": "string",
                         }
                     },
-                    "required": [
-                        "text"
-                    ],
+                    "required": ["text"],
                     "additionalProperties": False,
                 },
             )
         ]
 
     async def list_tools(self):
-        return SimpleNamespace(
-            tools=self.tools
-        )
+        return SimpleNamespace(tools=self.tools)
 
     async def call_tool(
         self,
@@ -77,10 +72,7 @@ class FakeSession:
             content=[
                 SimpleNamespace(
                     type="text",
-                    text=(
-                        f"{self.generation}:"
-                        f"{arguments['text']}"
-                    ),
+                    text=(f"{self.generation}:{arguments['text']}"),
                 )
             ]
         )
@@ -90,9 +82,7 @@ def make_mcp_provider(
     spec: ProviderSpec,
     generation: str,
 ) -> Provider:
-    session = FakeSession(
-        generation
-    )
+    session = FakeSession(generation)
 
     stack = FakeStack()
 
@@ -100,10 +90,7 @@ def make_mcp_provider(
         spec=spec,
         stack=stack,
         session=session,
-        tools={
-            tool.name: tool
-            for tool in session.tools
-        },
+        tools={tool.name: tool for tool in session.tools},
     )
 
 
@@ -149,9 +136,7 @@ def test_workspace_mcp_rejects_multi_provider_mapping():
         assert "exactly one provider" in message
         assert "mcp_servers" in message
     else:
-        raise AssertionError(
-            "MCP accepted a multi-provider file"
-        )
+        raise AssertionError("MCP accepted a multi-provider file")
 
 
 # ============================================================================
@@ -183,9 +168,7 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
         mcp_dir = tmp_path / "workspace" / "tools" / "mcps"
         mcp_dir.mkdir(parents=True, exist_ok=True)
 
-        source = (
-            mcp_dir / "example.yaml"
-        )
+        source = mcp_dir / "example.yaml"
 
         source.write_text(
             "\n".join(
@@ -224,17 +207,10 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
 
             await runtime._scan_mcps()
 
-            old_provider = (
-                runtime.get_provider(
-                    "example"
-                )
-            )
+            old_provider = runtime.get_provider("example")
 
             assert old_provider is not None
-            assert (
-                old_provider.spec.args
-                == ("v1",)
-            )
+            assert old_provider.spec.args == ("v1",)
 
             # ------------------------------------------------------
             # Broken intermediate file.
@@ -248,16 +224,9 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
             await runtime._scan_mcps()
 
             # v1 must survive.
-            current = (
-                runtime.get_provider(
-                    "example"
-                )
-            )
+            current = runtime.get_provider("example")
 
-            assert (
-                current
-                is old_provider
-            )
+            assert current is old_provider
 
             # ------------------------------------------------------
             # Valid v2.
@@ -277,30 +246,18 @@ def test_mcp_invalid_intermediate_file_keeps_old_provider(
 
             await runtime._scan_mcps()
 
-            new_provider = (
-                runtime.get_provider(
-                    "example"
-                )
-            )
+            new_provider = runtime.get_provider("example")
 
             assert new_provider is not None
 
-            assert (
-                new_provider
-                is not old_provider
-            )
+            assert new_provider is not old_provider
 
-            assert (
-                new_provider.spec.args
-                == ("v2",)
-            )
+            assert new_provider.spec.args == ("v2",)
 
         finally:
             await runtime.stop()
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -324,9 +281,7 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
         local_dir = tmp_path / "workspace" / "tools" / "local"
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        source = (
-            local_dir / "example.py"
-        )
+        source = local_dir / "example.py"
 
         source.write_text(
             """# @tool
@@ -346,11 +301,7 @@ class Provider(ToolSet):
         try:
             await runtime._scan_locals()
 
-            old_provider = (
-                runtime.get_provider(
-                    "example"
-                )
-            )
+            old_provider = runtime.get_provider("example")
 
             assert old_provider is not None
 
@@ -368,12 +319,7 @@ class Provider(ToolSet):
 
             await runtime._scan_locals()
 
-            assert (
-                runtime.get_provider(
-                    "example"
-                )
-                is old_provider
-            )
+            assert runtime.get_provider("example") is old_provider
 
             source.write_text(
                 """# @tool
@@ -390,25 +336,16 @@ class Provider(ToolSet):
 
             await runtime._scan_locals()
 
-            new_provider = (
-                runtime.get_provider(
-                    "example"
-                )
-            )
+            new_provider = runtime.get_provider("example")
 
             assert new_provider is not None
 
-            assert (
-                new_provider
-                is not old_provider
-            )
+            assert new_provider is not old_provider
 
         finally:
             await runtime.stop()
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 # ============================================================================
@@ -428,21 +365,13 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
-    skill_dir = (
-        root / "example"
-    )
+    skill_dir = root / "example"
 
-    skill_dir.mkdir(
-        parents=True
-    )
+    skill_dir.mkdir(parents=True)
 
-    source = (
-        skill_dir / "SKILL.md"
-    )
+    source = skill_dir / "SKILL.md"
 
     source.write_text(
         "v1",
@@ -452,23 +381,15 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
     def fake_read_metadata(
         skill_root,
     ):
-        value = (
-            skill_root / "SKILL.md"
-        ).read_text(
-            encoding="utf-8"
-        )
+        value = (skill_root / "SKILL.md").read_text(encoding="utf-8")
 
         if value == "INVALID":
-            raise ValueError(
-                "temporary invalid SKILL.md"
-            )
+            raise ValueError("temporary invalid SKILL.md")
 
         return SkillMetadata(
             name="example",
             description=value,
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -482,11 +403,7 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     runtime.refresh()
 
-    old_record = (
-        runtime._registry.get_record(
-            "example"
-        )
-    )
+    old_record = runtime._registry.get_record("example")
 
     assert old_record is not None
 
@@ -497,12 +414,7 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     runtime.refresh()
 
-    assert (
-        runtime._registry.get_record(
-            "example"
-        )
-        is old_record
-    )
+    assert runtime._registry.get_record("example") is old_record
 
     source.write_text(
         "v2",
@@ -511,20 +423,13 @@ def test_skill_invalid_intermediate_file_keeps_old_record(
 
     runtime.refresh()
 
-    new_record = (
-        runtime._registry.get_record(
-            "example"
-        )
-    )
+    new_record = runtime._registry.get_record("example")
 
     assert new_record is not None
 
     assert new_record is not old_record
 
-    assert (
-        new_record.generation
-        == old_record.generation + 1
-    )
+    assert new_record.generation == old_record.generation + 1
 
 
 # ============================================================================
@@ -545,17 +450,11 @@ def test_module_invalid_intermediate_file_keeps_old_generation(
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     async def scenario():
-        workspace = (
-            tmp_path / "workspace" / "modules"
-        )
+        workspace = tmp_path / "workspace" / "modules"
 
-        workspace.mkdir(
-            parents=True
-        )
+        workspace.mkdir(parents=True)
 
-        source = (
-            workspace / "example.py"
-        )
+        source = workspace / "example.py"
 
         valid_v1 = """# @module
 import asyncio
@@ -588,15 +487,9 @@ class Example(Module):
         facade = Facade()
 
         # Initial scan/register.
-        await facade._scan_module_root(
-            facade.workspace_modules_dir
-        )
+        await facade._scan_module_root(facade.workspace_modules_dir)
 
-        old = (
-            facade._find_record_by_source(
-                source
-            )
-        )
+        old = facade._find_record_by_source(source)
 
         assert old is not None
         assert old.generation == 0
@@ -613,26 +506,14 @@ class Example(Module):
             encoding="utf-8",
         )
 
-        await facade._scan_module_root(
-            facade.workspace_modules_dir
-        )
+        await facade._scan_module_root(facade.workspace_modules_dir)
 
-        current = (
-            facade._find_record_by_source(
-                source
-            )
-        )
+        current = facade._find_record_by_source(source)
 
         # Broken candidate must not replace v1.
-        assert (
-            current
-            is old
-        )
+        assert current is old
 
-        assert (
-            current.generation
-            == 0
-        )
+        assert current.generation == 0
 
         # Restore valid source.
         source.write_text(
@@ -644,55 +525,35 @@ class Example(Module):
             record,
             started=None,
         ):
-            record.state = (
-                ModuleState.RUNNING
-            )
+            record.state = ModuleState.RUNNING
 
             if started is not None:
                 started.set()
 
             await asyncio.Event().wait()
 
-        facade._run_module = (
-            fake_run_module
-        )
+        facade._run_module = fake_run_module
 
-        await facade._scan_module_root(
-            facade.workspace_modules_dir
-        )
+        await facade._scan_module_root(facade.workspace_modules_dir)
 
-        new = (
-            facade._find_record_by_source(
-                source
-            )
-        )
+        new = facade._find_record_by_source(source)
 
         assert new is not None
 
         assert new is not old
 
-        assert (
-            new.generation
-            == 1
-        )
+        assert new.generation == 1
 
         # Cleanup candidate task.
         task = new.task
 
-        if (
-            task is not None
-            and not task.done()
-        ):
+        if task is not None and not task.done():
             task.cancel()
 
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
-    run(
-        scenario()
-    )
+    run(scenario())
 
 
 def test_module_losing_header_is_unregistered(
@@ -709,13 +570,9 @@ def test_module_losing_header_is_unregistered(
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
     async def scenario():
-        workspace = (
-            tmp_path / "workspace" / "modules"
-        )
+        workspace = tmp_path / "workspace" / "modules"
 
-        workspace.mkdir(
-            parents=True
-        )
+        workspace.mkdir(parents=True)
 
         source = workspace / "example.py"
 
@@ -734,16 +591,9 @@ class Example(Module):
 
         facade = Facade()
 
-        await facade._scan_module_root(
-            facade.workspace_modules_dir
-        )
+        await facade._scan_module_root(facade.workspace_modules_dir)
 
-        assert (
-            facade._find_record_by_source(
-                source
-            )
-            is not None
-        )
+        assert facade._find_record_by_source(source) is not None
 
         # Same file, header removed.
         source.write_text(
@@ -758,17 +608,8 @@ class Example(Module):
             encoding="utf-8",
         )
 
-        await facade._scan_module_root(
-            facade.workspace_modules_dir
-        )
+        await facade._scan_module_root(facade.workspace_modules_dir)
 
-        assert (
-            facade._find_record_by_source(
-                source
-            )
-            is None
-        )
+        assert facade._find_record_by_source(source) is None
 
-    run(
-        scenario()
-    )
+    run(scenario())

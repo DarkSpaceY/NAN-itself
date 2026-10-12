@@ -30,6 +30,8 @@ it reopens every retry_interval seconds.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import queue
@@ -37,7 +39,6 @@ import shutil
 import sys
 import threading
 import time
-import asyncio
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -53,17 +54,14 @@ import onnxruntime as ort
 import torch
 import yaml
 from loguru import logger
+from nan_itself.modules.model import Module, Turn
+from nan_itself.utils import paths as _paths
 from PIL import Image
 from pydantic import BaseModel
 from transformers import (
     AutoModelForImageTextToText,
     AutoProcessor,
 )
-
-from nan_itself.modules.model import Module, Turn
-
-from nan_itself.utils import paths as _paths
-
 
 # ============================================================================
 # VISION TOOLKIT (inlined from backend/nan_itself/utils/vision.py)
@@ -139,13 +137,9 @@ def frame_stats(frame: Any) -> dict[str, float]:
 
     f = gray.astype(np.float32)
 
-    clipped_over = float(
-        (gray >= 250).mean()
-    )
+    clipped_over = float((gray >= 250).mean())
 
-    clipped_under = float(
-        (gray <= 5).mean()
-    )
+    clipped_under = float((gray <= 5).mean())
 
     b = frame[:, :, 0].astype(np.float32)
     g = frame[:, :, 1].astype(np.float32)
@@ -154,13 +148,9 @@ def frame_stats(frame: Any) -> dict[str, float]:
     rg = r - g
     yb = 0.5 * (r + g) - b
 
-    root_mean_sq = (
-        (rg.std() ** 2 + yb.std() ** 2) ** 0.5
-    )
+    root_mean_sq = (rg.std() ** 2 + yb.std() ** 2) ** 0.5
 
-    root_mean = (
-        (rg.mean() ** 2 + yb.mean() ** 2) ** 0.5
-    )
+    root_mean = (rg.mean() ** 2 + yb.mean() ** 2) ** 0.5
 
     colorfulness = root_mean_sq + 0.3 * root_mean
 
@@ -172,9 +162,7 @@ def frame_stats(frame: Any) -> dict[str, float]:
 
     sharpness = float(lap.var())
 
-    mad = float(
-        np.median(np.abs(lap - np.median(lap)))
-    )
+    mad = float(np.median(np.abs(lap - np.median(lap))))
 
     noise = 1.4826 * mad
 
@@ -249,9 +237,12 @@ def spectral_saliency(
 
     residual = log_amp - avg
 
-    sal = np.abs(
-        np.fft.ifft2(np.exp(residual + 1j * phase)),
-    ) ** 2
+    sal = (
+        np.abs(
+            np.fft.ifft2(np.exp(residual + 1j * phase)),
+        )
+        ** 2
+    )
 
     sal = cv2.GaussianBlur(sal, (9, 9), 2.5)
 
@@ -383,10 +374,7 @@ class MotionTracker:
             4,
         )
 
-        active = (
-            ratio >= self.motion_ratio_min
-            and energy >= self.motion_energy_min
-        )
+        active = ratio >= self.motion_ratio_min and energy >= self.motion_energy_min
 
         # Light change: the WHOLE frame shifted brightness nearly
         # uniformly -- a lamp switch, not content movement. The
@@ -400,8 +388,7 @@ class MotionTracker:
             abs(mean_now - mean_prev) >= self.light_jump
             and ratio > 0.5
             and float(diff.std()) < self.light_diff_std_max
-            and now - self._last_light_at
-            >= self.light_cooldown_s
+            and now - self._last_light_at >= self.light_cooldown_s
         )
 
         if light_change:
@@ -413,11 +400,7 @@ class MotionTracker:
 
             self._light_times.append(now)
 
-            while (
-                self._light_times
-                and self._light_times[0]
-                < now - self.flicker_window_s
-            ):
+            while self._light_times and self._light_times[0] < now - self.flicker_window_s:
                 self._light_times.popleft()
 
         # Scene cut: the frame's STRUCTURE was replaced. Pearson
@@ -469,9 +452,7 @@ class MotionTracker:
             "motion_start": rising,
             "scene_cut": scene_cut,
             "light_change": light_change,
-            "flicker": (
-                len(self._light_times) >= self.flicker_count
-            ),
+            "flicker": (len(self._light_times) >= self.flicker_count),
         }
 
 
@@ -523,10 +504,7 @@ def optical_flow_summary(
         "flow_dy": round(float(vy.mean()), 3),
         "flow_mag": round(mean_mag, 3),
         "flow_uniformity": round(float(uniformity), 3),
-        "camera_motion": bool(
-            mean_mag >= camera_mag_min
-            and uniformity >= camera_uni_min
-        ),
+        "camera_motion": bool(mean_mag >= camera_mag_min and uniformity >= camera_uni_min),
     }
 
 
@@ -540,9 +518,7 @@ def motion_blob(
     if mask is None or not mask.any():
         return None
 
-    count, _, stats, _ = (
-        cv2.connectedComponentsWithStats(mask, 8)
-    )
+    count, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
 
     if count <= 1:
         return None
@@ -568,8 +544,7 @@ def motion_blob(
         "blob_w": round(w / width, 3),
         "blob_h": round(h / height, 3),
         "blob_area": round(
-            float(stats[best, cv2.CC_STAT_AREA])
-            / float(width * height),
+            float(stats[best, cv2.CC_STAT_AREA]) / float(width * height),
             4,
         ),
     }
@@ -686,9 +661,7 @@ class GlanceSegmenter:
 
         self._frames += 1
 
-        self._quiet_run = (
-            0 if active else self._quiet_run + 1
-        )
+        self._quiet_run = 0 if active else self._quiet_run + 1
 
         if active or trigger:
             self._active_count += 1
@@ -703,10 +676,7 @@ class GlanceSegmenter:
 
         closed = False
 
-        if self._quiet_run >= self.trailing_limit:
-            closed = True
-
-        elif self._frames >= self.max_total:
+        if self._quiet_run >= self.trailing_limit or self._frames >= self.max_total:
             closed = True
 
         if closed:
@@ -838,28 +808,20 @@ class CameraSource:
     def start(self) -> None:
         device = self.device
 
-        if (
-            device is not None
-            and isinstance(device, str)
-            and device.isdigit()
-        ):
+        if device is not None and isinstance(device, str) and device.isdigit():
             device = int(device)
 
         if device is None:
             device = 0
 
-        backend = cv2.CAP_AVFOUNDATION if (
-            sys_darwin()
-        ) else cv2.CAP_ANY
+        backend = cv2.CAP_AVFOUNDATION if (sys_darwin()) else cv2.CAP_ANY
 
         cap = cv2.VideoCapture(device, backend)
 
         if not cap.isOpened():
             cap.release()
 
-            raise RuntimeError(
-                f"camera {device!r} could not be opened"
-            )
+            raise RuntimeError(f"camera {device!r} could not be opened")
 
         cap.set(
             cv2.CAP_PROP_FRAME_WIDTH,
@@ -936,12 +898,8 @@ class CameraSource:
         self._cap = None
 
         if cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 cap.release()
-
-            except Exception:
-
-                pass
 
 
 def sys_darwin() -> bool:
@@ -1024,6 +982,7 @@ class FaceAnalyzer:
         for location, encoding in zip(
             locations,
             encodings,
+            strict=False,
         ):
             top, right, bottom, left = location
 
@@ -1108,9 +1067,7 @@ class FaceMatcher:
 
         for label, person in self.persons.items():
             for stored in person["encodings"]:
-                dist = float(
-                    np.linalg.norm(stored - vec)
-                )
+                dist = float(np.linalg.norm(stored - vec))
 
                 if dist < best_dist:
                     best_label = label
@@ -1119,10 +1076,7 @@ class FaceMatcher:
 
         promoted_now = False
 
-        if (
-            best_label is not None
-            and best_dist <= self.threshold
-        ):
+        if best_label is not None and best_dist <= self.threshold:
             person = self.persons[best_label]
 
             person["count"] += 1
@@ -1135,10 +1089,7 @@ class FaceMatcher:
             # already stored (pose/lighting variation), capped.
             if len(person["encodings"]) < self.MAX_ENCODINGS:
                 min_dist = min(
-                    float(
-                        np.linalg.norm(stored - vec)
-                    )
-                    for stored in person["encodings"]
+                    float(np.linalg.norm(stored - vec)) for stored in person["encodings"]
                 )
 
                 if min_dist > self.threshold * 0.7:
@@ -1166,8 +1117,7 @@ class FaceMatcher:
         if (
             best_label not in self.persisted
             and person["count"] >= self.promote_min_sightings
-            and person["seen_ms"]
-            >= self.promote_min_seen_ms
+            and person["seen_ms"] >= self.promote_min_seen_ms
         ):
             self.persisted.add(best_label)
 
@@ -1185,10 +1135,7 @@ class FaceMatcher:
                 continue
 
             persons[label] = {
-                "encodings": [
-                    [round(float(x), 5) for x in enc]
-                    for enc in person["encodings"]
-                ],
+                "encodings": [[round(float(x), 5) for x in enc] for enc in person["encodings"]],
                 "count": person["count"],
                 "seen_ms": round(person["seen_ms"], 1),
                 "created_at": person["created_at"],
@@ -1258,8 +1205,7 @@ class FaceMatcher:
         used = [
             int(label.split("-")[1])
             for label in self.persons
-            if label.startswith("person-")
-            and label.split("-")[1].isdigit()
+            if label.startswith("person-") and label.split("-")[1].isdigit()
         ]
 
         if used:
@@ -1288,7 +1234,6 @@ class QrScanner:
             text, _, _ = self._get().detectAndDecode(frame)
 
         except Exception:
-
             return None
 
         return text or None
@@ -1334,11 +1279,7 @@ class OcrReader:
 
         results = self._reader.readtext(frame)
 
-        entries = [
-            (str(text), float(conf))
-            for _, text, conf in results
-            if str(text).strip()
-        ]
+        entries = [(str(text), float(conf)) for _, text, conf in results if str(text).strip()]
 
         entries.sort(key=lambda item: -item[1])
 
@@ -1399,9 +1340,7 @@ class YoloOnnxDetector:
             providers=["CPUExecutionProvider"],
         )
 
-        self._input_name = (
-            self._session.get_inputs()[0].name
-        )
+        self._input_name = self._session.get_inputs()[0].name
 
     @staticmethod
     def nms(
@@ -1420,11 +1359,7 @@ class YoloOnnxDetector:
         keep: list[int] = []
 
         for i in order:
-            if any(
-                YoloOnnxDetector._iou(boxes[i], boxes[j])
-                > iou_threshold
-                for j in keep
-            ):
+            if any(YoloOnnxDetector._iou(boxes[i], boxes[j]) > iou_threshold for j in keep):
                 continue
 
             keep.append(i)
@@ -1481,8 +1416,7 @@ class YoloOnnxDetector:
         candidates = [
             i
             for i, conf in enumerate(confidences)
-            if conf >= self.conf_threshold
-            and class_ids[i] < len(self._labels)
+            if conf >= self.conf_threshold and class_ids[i] < len(self._labels)
         ]
 
         if not candidates:
@@ -1566,11 +1500,7 @@ class YoloOnnxDetector:
             value=(114, 114, 114),
         )
 
-        blob = (
-            canvas[:, :, ::-1]
-            .astype(np.float32)
-            .transpose(2, 0, 1)[None] / 255.0
-        )
+        blob = canvas[:, :, ::-1].astype(np.float32).transpose(2, 0, 1)[None] / 255.0
 
         output = self._session.run(
             None,
@@ -1599,14 +1529,9 @@ class VlmCaptioner:
     specialized additions, not hidden features here.
     """
 
-    DEFAULT_PROMPT = (
-        "Briefly describe what is happening in this image "
-        "in one sentence."
-    )
+    DEFAULT_PROMPT = "Briefly describe what is happening in this image in one sentence."
 
-    DEFAULT_REPO_ID = (
-        "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-    )
+    DEFAULT_REPO_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 
     def __init__(
         self,
@@ -1625,14 +1550,11 @@ class VlmCaptioner:
         self._model: Any = None
 
     def _weights_present(self) -> bool:
-        return self.model_path.is_dir() and any(
-            self.model_path.iterdir()
-        )
+        return self.model_path.is_dir() and any(self.model_path.iterdir())
 
     def _download(self) -> None:
         logger.info(
-            "vlm weights missing at {}; downloading {} "
-            "(~1 GB, honors HF_ENDPOINT and proxy envs)",
+            "vlm weights missing at {}; downloading {} (~1 GB, honors HF_ENDPOINT and proxy envs)",
             self.model_path,
             self.repo_id,
         )
@@ -1876,9 +1798,7 @@ class VisionPipeline:
 
         was_occluded = self.occluded
 
-        self.occluded = (
-            self._occlusion_run >= self.occlusion_frames
-        )
+        self.occluded = self._occlusion_run >= self.occlusion_frames
 
         if self.occluded and not was_occluded:
             events.append({"type": "occlusion"})
@@ -1902,10 +1822,7 @@ class VisionPipeline:
         # ----------------------------------------------------------
         # Flow + motion blob: only while motion is present.
         # ----------------------------------------------------------
-        if (
-            self._prev_small is not None
-            and motion["motion_energy"] > 0
-        ):
+        if self._prev_small is not None and motion["motion_energy"] > 0:
             flow = optical_flow_summary(
                 self._prev_small,
                 small,
@@ -1923,9 +1840,7 @@ class VisionPipeline:
         self._prev_small = small
 
         # Saliency is slow relative to the rest: gate it.
-        if now - self._last_saliency_at >= (
-            self.saliency_interval_s
-        ):
+        if now - self._last_saliency_at >= (self.saliency_interval_s):
             self._last_saliency_at = now
 
             stats.update(spectral_saliency(small))
@@ -1934,13 +1849,7 @@ class VisionPipeline:
 
         self.latest_stats = stats
 
-        trigger = (
-            "light"
-            if motion["light_change"]
-            else "cut"
-            if motion["scene_cut"]
-            else None
-        )
+        trigger = "light" if motion["light_change"] else "cut" if motion["scene_cut"] else None
 
         if self.occluded:
             trigger = None
@@ -1955,9 +1864,7 @@ class VisionPipeline:
             trigger,
             now,
         ):
-            glance.duration_ms = int(
-                (now - glance.started_at) * 1000
-            )
+            glance.duration_ms = int((now - glance.started_at) * 1000)
 
             events.append(
                 {"type": "glance", "glance": glance},
@@ -2001,9 +1908,7 @@ class VisionConfig(BaseModel):
 
     ocr_models_dir: str = "models/easyocr"
 
-    vlm_dir: str = (
-        "models/vision/vlm/SmolVLM2-500M-Video-Instruct"
-    )
+    vlm_dir: str = "models/vision/vlm/SmolVLM2-500M-Video-Instruct"
 
 
 def _resolve_path(value: str) -> Path:
@@ -2013,11 +1918,7 @@ def _resolve_path(value: str) -> Path:
     """
     resolved = Path(value).expanduser()
 
-    return (
-        resolved
-        if resolved.is_absolute()
-        else _paths.repo_root() / resolved
-    )
+    return resolved if resolved.is_absolute() else _paths.repo_root() / resolved
 
 
 def _load_config() -> VisionConfig:
@@ -2027,27 +1928,18 @@ def _load_config() -> VisionConfig:
     defaults; anything unparsable is a loud construction
     failure.
     """
-    path = (
-        _paths.repo_root()
-        / "config"
-        / "modules"
-        / "vision.yaml"
-    )
+    path = _paths.repo_root() / "config" / "modules" / "vision.yaml"
 
     if not path.is_file():
         return VisionConfig()
 
-    data = yaml.safe_load(
-        path.read_text(encoding="utf-8")
-    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     if data is None:
         return VisionConfig()
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"Invalid module config YAML: {path}"
-        )
+        raise ValueError(f"Invalid module config YAML: {path}")
 
     return VisionConfig(**data)
 
@@ -2056,21 +1948,86 @@ def _load_config() -> VisionConfig:
 # weights (order matches the model's class indices; background
 # not listed, per labels.txt convention).
 COCO80_LABELS: tuple[str, ...] = (
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus",
-    "train", "truck", "boat", "traffic light", "fire hydrant",
-    "stop sign", "parking meter", "bench", "bird", "cat", "dog",
-    "horse", "sheep", "cow", "elephant", "bear", "zebra",
-    "giraffe", "backpack", "umbrella", "handbag", "tie",
-    "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-    "kite", "baseball bat", "baseball glove", "skateboard",
-    "surfboard", "tennis racket", "bottle", "wine glass", "cup",
-    "fork", "knife", "spoon", "bowl", "banana", "apple",
-    "sandwich", "orange", "broccoli", "carrot", "hot dog",
-    "pizza", "donut", "cake", "chair", "couch", "potted plant",
-    "bed", "dining table", "toilet", "tv", "laptop", "mouse",
-    "remote", "keyboard", "cell phone", "microwave", "oven",
-    "toaster", "sink", "refrigerator", "book", "clock", "vase",
-    "scissors", "teddy bear", "hair drier", "toothbrush",
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "traffic light",
+    "fire hydrant",
+    "stop sign",
+    "parking meter",
+    "bench",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "frisbee",
+    "skis",
+    "snowboard",
+    "sports ball",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "chair",
+    "couch",
+    "potted plant",
+    "bed",
+    "dining table",
+    "toilet",
+    "tv",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "microwave",
+    "oven",
+    "toaster",
+    "sink",
+    "refrigerator",
+    "book",
+    "clock",
+    "vase",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",
 )
 
 
@@ -2167,9 +2124,7 @@ class VisionModule(Module):
 
         self.matcher = FaceMatcher(
             threshold=self.face_distance_threshold,
-            promote_min_sightings=(
-                self.promote_min_sightings
-            ),
+            promote_min_sightings=(self.promote_min_sightings),
             promote_min_seen_ms=self.promote_min_seen_ms,
         )
 
@@ -2185,9 +2140,7 @@ class VisionModule(Module):
             motion_energy_min=self.motion_energy_min,
             burst_ratio=self.burst_ratio,
             preroll_frames=self.preroll_frames,
-            trailing_quiet_frames=(
-                self.trailing_quiet_frames
-            ),
+            trailing_quiet_frames=(self.trailing_quiet_frames),
             min_glance_frames=self.min_glance_frames,
             max_glance_frames=self.max_glance_frames,
         )
@@ -2221,17 +2174,9 @@ class VisionModule(Module):
 
         self._ocr_failed = self.ocr_enabled is False
 
-        self.objects_model_path = (
-            _paths.repo_root()
-            / "models"
-            / "vision"
-            / "object"
-            / "model.onnx"
-        )
+        self.objects_model_path = _paths.repo_root() / "models" / "vision" / "object" / "model.onnx"
 
-        self.objects_labels_path = (
-            self.objects_model_path.parent / "labels.txt"
-        )
+        self.objects_labels_path = self.objects_model_path.parent / "labels.txt"
 
         self.objects_factory = lambda: YoloOnnxDetector(
             self.objects_model_path,
@@ -2313,32 +2258,20 @@ class VisionModule(Module):
             "leaves_total": 0,
             "last_enter_ts": None,
             "last_leave_ts": None,
-            "faces_backend": (
-                "disabled" if not self.faces_enabled
-                else "not loaded"
-            ),
+            "faces_backend": ("disabled" if not self.faces_enabled else "not loaded"),
             "faces_total": 0,
             "persons_known": 0,
             "persons_session": 0,
             "qr_total": 0,
             "last_qr": None,
-            "ocr_backend": (
-                "disabled" if not self.ocr_enabled
-                else "not loaded"
-            ),
+            "ocr_backend": ("disabled" if not self.ocr_enabled else "not loaded"),
             "ocr_total": 0,
             "last_ocr": None,
-            "objects_backend": (
-                "disabled"
-                if self._objects_failed
-                else "not loaded"
-            ),
+            "objects_backend": ("disabled" if self._objects_failed else "not loaded"),
             "objects_total": 0,
             "last_objects": [],
             "vlm_backend": (
-                "disabled"
-                if self._vlm_failed
-                else "not loaded (auto-download on first use)"
+                "disabled" if self._vlm_failed else "not loaded (auto-download on first use)"
             ),
             "vlm_total": 0,
             "last_caption": None,
@@ -2527,9 +2460,7 @@ class VisionModule(Module):
             setattr(self, attr, backend)
 
             with self._state_lock:
-                self._stats[stats_key] = type(
-                    backend
-                ).__name__
+                self._stats[stats_key] = type(backend).__name__
 
             logger.info("{} backend ready: {}", label, type(backend).__name__)
 
@@ -2550,9 +2481,7 @@ class VisionModule(Module):
 
                     self._stats["reason"] = str(exc)
 
-                logger.warning(
-                    "vision capture session failed: {}", exc
-                )
+                logger.warning("vision capture session failed: {}", exc)
 
             self._close_camera()
 
@@ -2590,36 +2519,24 @@ class VisionModule(Module):
 
                 quiet = self.pipeline.quiet_seconds(now)
 
-                self._stats["quiet_s"] = (
-                    round(quiet, 1)
-                    if quiet is not None
-                    else None
-                )
+                self._stats["quiet_s"] = round(quiet, 1) if quiet is not None else None
 
-                self._stats["dropped_frames_total"] += (
-                    camera.dropped - dropped_before
-                )
+                self._stats["dropped_frames_total"] += camera.dropped - dropped_before
 
             for event in events:
                 kind = event["type"]
 
                 if kind == "motion_start":
                     with self._state_lock:
-                        self._stats["last_motion_ts"] = (
-                            time.time()
-                        )
+                        self._stats["last_motion_ts"] = time.time()
 
                 elif kind == "light_change":
                     with self._state_lock:
-                        self._stats["last_light_ts"] = (
-                            time.time()
-                        )
+                        self._stats["last_light_ts"] = time.time()
 
                 elif kind == "scene_cut":
                     with self._state_lock:
-                        self._stats["last_cut_ts"] = (
-                            time.time()
-                        )
+                        self._stats["last_cut_ts"] = time.time()
 
                 elif kind == "glance":
                     self._enqueue_glance(event["glance"])
@@ -2645,12 +2562,8 @@ class VisionModule(Module):
 
     def _close_camera(self) -> None:
         if self._camera is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._camera.close()
-
-            except Exception:
-
-                pass
 
             self._camera = None
 
@@ -2664,7 +2577,6 @@ class VisionModule(Module):
                 self._stats["last_glance_ts"] = time.time()
 
         except queue.Full:
-
             with self._state_lock:
                 self._stats["dropped_glances_total"] += 1
 
@@ -2680,16 +2592,13 @@ class VisionModule(Module):
                 )
 
             except queue.Empty:
-
                 continue
 
             try:
                 self._analyze_glance(glance)
 
             except Exception as exc:
-                logger.exception(
-                    "vision analysis failed: {}", exc
-                )
+                logger.exception("vision analysis failed: {}", exc)
 
                 with self._state_lock:
                     self._stats["load_error"] = str(exc)
@@ -2762,18 +2671,13 @@ class VisionModule(Module):
 
                 self._stats["last_person"] = label
 
-                self._stats["last_person_dist"] = (
-                    round(dist, 3)
-                    if dist is not None
-                    else None
-                )
+                self._stats["last_person_dist"] = round(dist, 3) if dist is not None else None
 
                 self._sync_person_stats()
 
             if promoted:
                 logger.info(
-                    "person promoted to persistent "
-                    "registry: {}",
+                    "person promoted to persistent registry: {}",
                     label,
                 )
 
@@ -2846,28 +2750,19 @@ class VisionModule(Module):
                 f"{path.name}.corrupt-{stamp}",
             )
 
-            try:
+            with contextlib.suppress(OSError):
                 path.rename(corrupt)
 
-            except OSError:
-
-                pass
-
             logger.error(
-                "person registry corrupt ({}); quarantined "
-                "as {}; starting empty",
+                "person registry corrupt ({}); quarantined as {}; starting empty",
                 exc,
                 corrupt.name,
             )
 
             self.matcher = FaceMatcher(
                 threshold=self.face_distance_threshold,
-                promote_min_sightings=(
-                    self.promote_min_sightings
-                ),
-                promote_min_seen_ms=(
-                    self.promote_min_seen_ms
-                ),
+                promote_min_sightings=(self.promote_min_sightings),
+                promote_min_seen_ms=(self.promote_min_seen_ms),
             )
 
         with self._state_lock:
@@ -2907,20 +2802,13 @@ class VisionModule(Module):
         if not self._registry_dirty:
             return
 
-        if (
-            time.time() - self._registry_last_save
-            >= self.registry_save_throttle_s
-        ):
+        if time.time() - self._registry_last_save >= self.registry_save_throttle_s:
             self._save_registry()
 
     def _sync_person_stats(self) -> None:
-        self._stats["persons_known"] = (
-            self.matcher.known_count()
-        )
+        self._stats["persons_known"] = self.matcher.known_count()
 
-        self._stats["persons_session"] = len(
-            self.matcher.labels()
-        )
+        self._stats["persons_session"] = len(self.matcher.labels())
 
     # ------------------------------------------------------------------
     # QR / OCR / objects (L6)
@@ -2942,11 +2830,7 @@ class VisionModule(Module):
         now = time.time()
 
         with self._state_lock:
-            if (
-                text == self._last_qr_text
-                and now - self._last_qr_at
-                <= self.ocr_dedup_window_s
-            ):
+            if text == self._last_qr_text and now - self._last_qr_at <= self.ocr_dedup_window_s:
                 return
 
             self._last_qr_text = text
@@ -2988,9 +2872,7 @@ class VisionModule(Module):
 
             return
 
-        text = " | ".join(
-            line for line, _ in lines[:4]
-        ).strip()
+        text = " | ".join(line for line, _ in lines[:4]).strip()
 
         if not text:
             return
@@ -3017,9 +2899,7 @@ class VisionModule(Module):
 
         now = time.monotonic()
 
-        if now - self._last_objects_at < (
-            self.objects_interval_s
-        ):
+        if now - self._last_objects_at < (self.objects_interval_s):
             return
 
         if self._objects is None:
@@ -3038,10 +2918,7 @@ class VisionModule(Module):
         if not objects:
             return
 
-        summary = [
-            f"{item['name']} {item['conf']:.2f}"
-            for item in objects[:4]
-        ]
+        summary = [f"{item['name']} {item['conf']:.2f}" for item in objects[:4]]
 
         with self._state_lock:
             self._stats["objects_total"] += len(objects)
@@ -3105,10 +2982,7 @@ class VisionModule(Module):
             await asyncio.sleep(self.publish_interval)
 
             with self._state_lock:
-                payload = {
-                    key: value
-                    for key, value in self._stats.items()
-                }
+                payload = {key: value for key, value in self._stats.items()}
 
             self.data.publish(payload)
 
@@ -3149,13 +3023,8 @@ class VisionModule(Module):
 
         quiet = stats.get("quiet_s")
 
-        if (
-            not stats.get("motion_active")
-            and quiet is not None
-        ):
-            lines.append(
-                f"- seeing: still {self._fmt_span(quiet)}"
-            )
+        if not stats.get("motion_active") and quiet is not None:
+            lines.append(f"- seeing: still {self._fmt_span(quiet)}")
 
         # The scene, in one line.
         lines.append(
@@ -3173,17 +3042,13 @@ class VisionModule(Module):
         cut_ts = stats.get("last_cut_ts")
 
         if cut_ts and time.time() - cut_ts < 60.0:
-            lines.append(
-                "- scene changed at "
-                f"{datetime.fromtimestamp(cut_ts).strftime('%H:%M')}"
-            )
+            lines.append(f"- scene changed at {datetime.fromtimestamp(cut_ts).strftime('%H:%M')}")
 
         light_ts = stats.get("last_light_ts")
 
         if light_ts and time.time() - light_ts < 60.0:
             lines.append(
-                "- lighting changed at "
-                f"{datetime.fromtimestamp(light_ts).strftime('%H:%M')}"
+                f"- lighting changed at {datetime.fromtimestamp(light_ts).strftime('%H:%M')}"
             )
 
         seen_lines = self._render_seen(seen)
@@ -3236,9 +3101,7 @@ class VisionModule(Module):
                 tags += f" [obj: {', '.join(objects)}]"
 
             if item.get("caption"):
-                preview = item["caption"][
-                    : self.see_preview_cap
-                ]
+                preview = item["caption"][: self.see_preview_cap]
 
                 tags += f' [caption: "{preview}"]'
 
@@ -3250,9 +3113,7 @@ class VisionModule(Module):
                 max(0.0, item["duration_ms"] / 1000.0),
             )
 
-            out.append(
-                f"- saw {clock} ({item['reason']}, {span}){tags}"
-            )
+            out.append(f"- saw {clock} ({item['reason']}, {span}){tags}")
 
             if len(out) >= self.see_render_limit:
                 break
@@ -3285,26 +3146,16 @@ class VisionModule(Module):
     def serialize_state(self) -> dict[str, Any]:
         with self._state_lock:
             return {
-                "glances_total": self._stats[
-                    "glances_total"
-                ],
-                "faces_total": self._stats[
-                    "faces_total"
-                ],
+                "glances_total": self._stats["glances_total"],
+                "faces_total": self._stats["faces_total"],
                 "qr_total": self._stats["qr_total"],
                 "ocr_total": self._stats["ocr_total"],
-                "objects_total": self._stats[
-                    "objects_total"
-                ],
+                "objects_total": self._stats["objects_total"],
                 "vlm_total": self._stats["vlm_total"],
                 "cuts_total": self._stats["cuts_total"],
                 "light_total": self._stats["light_total"],
-                "enters_total": self._stats[
-                    "enters_total"
-                ],
-                "leaves_total": self._stats[
-                    "leaves_total"
-                ],
+                "enters_total": self._stats["enters_total"],
+                "leaves_total": self._stats["leaves_total"],
             }
 
     def restore_state(self, state: Any) -> None:

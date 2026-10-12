@@ -21,8 +21,9 @@ import re
 import subprocess
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 import mss
 from loguru import logger
@@ -33,7 +34,6 @@ try:
     HAS_PSUTIL = True
 
 except Exception:
-
     psutil = None
 
     HAS_PSUTIL = False
@@ -75,7 +75,6 @@ def _run(cmd: list[str] | str, timeout: float = 4.0) -> str:
         return result.stdout or ""
 
     except Exception:
-
         return ""
 
 
@@ -90,15 +89,13 @@ def idle_seconds() -> float | None:
 
     if system == "Darwin":
         out = _run(
-            "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ "
-            "{print $NF/1000000000; exit}'",
+            "ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF/1000000000; exit}'",
         )
 
         try:
             return float(out.strip())
 
         except ValueError:
-
             return None
 
     if system == "Linux":
@@ -108,10 +105,10 @@ def idle_seconds() -> float | None:
             return float(out.strip()) / 1000.0
 
         except ValueError:
-
             return None
 
     if system == "Windows":
+
         class LASTINPUTINFO(ctypes.Structure):
             _fields_ = [
                 ("cbSize", ctypes.c_uint),
@@ -122,9 +119,7 @@ def idle_seconds() -> float | None:
 
         info.cbSize = ctypes.sizeof(LASTINPUTINFO)
 
-        if ctypes.windll.user32.GetLastInputInfo(
-            ctypes.byref(info)
-        ):
+        if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
             tick = ctypes.windll.kernel32.GetTickCount()
 
             return max(0.0, (tick - info.dwTime) / 1000.0)
@@ -162,9 +157,7 @@ def foreground_app() -> tuple[str, str] | None:
         return (quoted.group(1), "") if quoted else None
 
     if system == "Linux":
-        out = _run(
-            "xdotool getactivewindow getwindowname"
-        ).strip()
+        out = _run("xdotool getactivewindow getwindowname").strip()
 
         if out:
             return "unknown", out
@@ -195,7 +188,6 @@ def display_count() -> int | None:
         return max(0, len(monitors) - 1)  # [0] is the union
 
     except Exception:
-
         return None
 
 
@@ -246,9 +238,7 @@ def _psutil_metrics() -> dict[str, Any]:
 
     out["self_cpu"] = me.cpu_percent(interval=None)
 
-    out["self_mem_mb"] = round(
-        me.memory_info().rss / (1024 * 1024)
-    )
+    out["self_mem_mb"] = round(me.memory_info().rss / (1024 * 1024))
 
     return out
 
@@ -268,12 +258,9 @@ def _top_processes(
 
                 cache[proc.pid] = entry
 
-            out.append(
-                (proc.pid, entry[1], entry[0].cpu_percent(None))
-            )
+            out.append((proc.pid, entry[1], entry[0].cpu_percent(None)))
 
         except Exception:
-
             continue
 
     # Prune dead entries occasionally enough.
@@ -300,16 +287,10 @@ class SystemProbe:
         now: Callable[[], float] = time.time,
         mono: Callable[[], float] = time.monotonic,
         idle_fn: Callable[[], float | None] = idle_seconds,
-        focus_fn: Callable[
-            [], tuple[str, str] | None
-        ] = foreground_app,
+        focus_fn: Callable[[], tuple[str, str] | None] = foreground_app,
         displays_fn: Callable[[], int | None] = display_count,
-        metrics_fn: Callable[
-            [], dict[str, Any]
-        ] = _psutil_metrics,
-        procs_fn: Callable[
-            [dict], list
-        ] = _top_processes,
+        metrics_fn: Callable[[], dict[str, Any]] = _psutil_metrics,
+        procs_fn: Callable[[dict], list] = _top_processes,
         disk_threshold: float = 90.0,
         runaway_cpu: float = 90.0,
         runaway_samples: int = 3,
@@ -382,11 +363,7 @@ class SystemProbe:
                 self.work_seconds += min(dt, 30.0)
 
     def _check_focus(self, focus) -> None:
-        if (
-            focus
-            and self._focus
-            and focus[0] != self._focus[0]
-        ):
+        if focus and self._focus and focus[0] != self._focus[0]:
             self._emit(f"focus -> {focus[0]}")
 
         if focus:
@@ -395,11 +372,7 @@ class SystemProbe:
     def _check_displays(self) -> None:
         count = self.displays_fn()
 
-        if (
-            count is not None
-            and self._displays is not None
-            and count != self._displays
-        ):
+        if count is not None and self._displays is not None and count != self._displays:
             sign = "+" if count > self._displays else "-"
 
             self._emit(f"display {sign}{abs(count - self._displays)}")
@@ -429,9 +402,7 @@ class SystemProbe:
                 self._runaway[pid] = count
 
                 if count == self.runaway_samples:
-                    self._emit(
-                        f"runaway: {name} {cpu:.0f}%"
-                    )
+                    self._emit(f"runaway: {name} {cpu:.0f}%")
 
             else:
                 self._runaway.pop(pid, None)
@@ -443,11 +414,7 @@ class SystemProbe:
 
         mono = self.mono()
 
-        dt = (
-            mono - self._last_sample_mono
-            if self._last_sample_mono is not None
-            else 0.0
-        )
+        dt = mono - self._last_sample_mono if self._last_sample_mono is not None else 0.0
 
         self._last_sample_mono = mono
 
@@ -542,11 +509,7 @@ class SystemModule(Module):
                 self._latest = facts
 
                 self.data.publish(
-                    {
-                        key: value
-                        for key, value in facts.items()
-                        if key != "events"
-                    }
+                    {key: value for key, value in facts.items() if key != "events"}
                     | {"events": facts.get("events", [])[-3:]}
                 )
 
@@ -576,9 +539,7 @@ class SystemModule(Module):
         offset = local.strftime("%z")
 
         lines.append(
-            f"- now: {local.strftime('%H:%M')} "
-            f"{WEEKDAY_ZH[local.weekday()]} "
-            f"(UTC{offset[:3]})"
+            f"- now: {local.strftime('%H:%M')} {WEEKDAY_ZH[local.weekday()]} (UTC{offset[:3]})"
         )
 
         focus = facts.get("focus")
@@ -586,11 +547,7 @@ class SystemModule(Module):
         if focus:
             app, title = focus
 
-            title_part = (
-                f" — {title[: self.render_preview_cap]}"
-                if title
-                else ""
-            )
+            title_part = f" — {title[: self.render_preview_cap]}" if title else ""
 
             lines.append(f"- focus: {app}{title_part}")
 
@@ -601,9 +558,7 @@ class SystemModule(Module):
         awake = _fmt_span(facts.get("uptime"))
 
         lines.append(
-            f"- idle: {idle or 'unknown'}"
-            f" | work: {work or '0s'}"
-            f" | awake: {awake or 'unknown'}"
+            f"- idle: {idle or 'unknown'} | work: {work or '0s'} | awake: {awake or 'unknown'}"
         )
 
         lines.append(f"- {self._resource_line(facts)}")
@@ -611,12 +566,9 @@ class SystemModule(Module):
         events = facts.get("events") or []
 
         if events:
-            recent = events[-self.events_render_limit:]
+            recent = events[-self.events_render_limit :]
 
-            rendered = " | ".join(
-                f"{text}"
-                for _, text in recent
-            )
+            rendered = " | ".join(f"{text}" for _, text in recent)
 
             lines.append(f"- events: {rendered}")
 
@@ -625,10 +577,7 @@ class SystemModule(Module):
         self_mem = facts.get("self_mem_mb")
 
         if self_cpu is not None and self_mem is not None:
-            lines.append(
-                f"- self: nan cpu {self_cpu:.1f}%"
-                f" mem {self_mem}MB"
-            )
+            lines.append(f"- self: nan cpu {self_cpu:.1f}% mem {self_mem}MB")
 
         return "\n".join(lines)
 
@@ -650,11 +599,7 @@ class SystemModule(Module):
         battery = facts.get("battery")
 
         if battery is not None:
-            state = (
-                "charging"
-                if facts.get("charging")
-                else "on battery"
-            )
+            state = "charging" if facts.get("charging") else "on battery"
 
             line += f" | battery {battery}% {state}"
 

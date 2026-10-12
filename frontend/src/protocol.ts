@@ -50,7 +50,7 @@ export interface UserInputContent {
 }
 
 /** turn_started.content：空。轮锚点事件，用户气泡来自 user_input 回执。 */
-export interface TurnStartedContent {}
+export type TurnStartedContent = Record<string, never>;
 
 /** status.content */
 export interface StatusContent {
@@ -67,7 +67,7 @@ interface AgentIdentity {
   depth?: number;
 }
 
-export interface OutputStartedContent extends AgentIdentity {}
+export type OutputStartedContent = AgentIdentity;
 
 export interface OutputDeltaContent extends AgentIdentity {
   text: string;
@@ -77,7 +77,7 @@ export interface OutputDoneContent extends AgentIdentity {
   duration_s: number;
 }
 
-export interface OutputCancelledContent extends AgentIdentity {}
+export type OutputCancelledContent = AgentIdentity;
 
 /** record_started.content 的 category（core._RECORD_CATEGORY + verbs）。 */
 export type RecordCategory =
@@ -120,7 +120,7 @@ export interface RecordFailedContent extends AgentIdentity {
   error: { type: string; message: string };
 }
 
-export interface RecordVoidContent extends AgentIdentity {}
+export type RecordVoidContent = AgentIdentity;
 
 // ------------------------------------------------------------------
 // hello（连接握手，非 bus 事件，无 ts/信封约束）

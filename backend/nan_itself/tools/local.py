@@ -19,24 +19,23 @@ import asyncio
 import hashlib
 import inspect
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import (
     Any,
-    Callable,
     ClassVar,
     get_type_hints,
 )
 
+import mcp.types as types
 from loguru import logger
 from pydantic import (
     BaseModel,
     ConfigDict,
     create_model,
 )
-
-import mcp.types as types
 
 from .provider import (
     Provider,
@@ -51,7 +50,6 @@ from .spec import (
     PROVIDER_KIND_LOCAL,
     ProviderSpec,
 )
-
 
 _LOCAL_TOOL_MARKER = "_nan_local_tool"
 
@@ -88,20 +86,12 @@ class LocalToolMethod:
         self,
         arguments: dict[str, Any] | None,
     ) -> Any:
-        validated = self.input_model.model_validate(
-            arguments or {}
-        )
+        validated = self.input_model.model_validate(arguments or {})
 
         kwargs = validated.model_dump()
 
-        if (
-            inspect.iscoroutinefunction(
-                self.handler
-            )
-        ):
-            return await self.handler(
-                **kwargs
-            )
+        if inspect.iscoroutinefunction(self.handler):
+            return await self.handler(**kwargs)
 
         # A synchronous handler must never run on the event
         # loop: one blocking call (time.sleep, requests, ...)
@@ -144,10 +134,7 @@ def tool(
         target: Callable[..., Any],
     ) -> Callable[..., Any]:
         if not inspect.isfunction(target):
-            raise TypeError(
-                "@tool can only decorate "
-                "functions or methods"
-            )
+            raise TypeError("@tool can only decorate functions or methods")
 
         setattr(
             target,
@@ -198,15 +185,9 @@ class ToolSet:
         # override replaces the base version. Two @tool
         # methods with the same name in ONE class remain an
         # error.
-        for klass in reversed(
-            type(self).__mro__
-        ):
-            for attr_name, attr_value in vars(
-                klass
-            ).items():
-                if not inspect.isfunction(
-                    attr_value
-                ):
+        for klass in reversed(type(self).__mro__):
+            for _attr_name, attr_value in vars(klass).items():
+                if not inspect.isfunction(attr_value):
                     continue
 
                 marker = getattr(
@@ -223,10 +204,7 @@ class ToolSet:
                     marker,
                 )
 
-                if (
-                    owners.get(method.name)
-                    is klass
-                ):
+                if owners.get(method.name) is klass:
                     raise ValueError(
                         f"Local tool provider "
                         f"{type(self).__name__} "
@@ -234,9 +212,7 @@ class ToolSet:
                         f"'{method.name}'"
                     )
 
-                collected[method.name] = (
-                    method
-                )
+                collected[method.name] = method
 
                 owners[method.name] = klass
 
@@ -249,23 +225,15 @@ class ToolSet:
     ) -> LocalToolMethod:
         tool_name = marker["name"]
 
-        if (
-            not isinstance(tool_name, str)
-            or not tool_name
-        ):
+        if not isinstance(tool_name, str) or not tool_name:
             raise TypeError(
-                f"@tool name on "
-                f"{type(self).__name__}."
-                f"{func.__name__} must be a "
-                "non-empty string"
+                f"@tool name on {type(self).__name__}.{func.__name__} must be a non-empty string"
             )
 
         description = marker.get("description")
 
         if description is None:
-            description = (
-                inspect.getdoc(func) or ""
-            ).strip()
+            description = (inspect.getdoc(func) or "").strip()
 
         input_model = self._build_input_model(
             func,
@@ -284,23 +252,16 @@ class ToolSet:
     ) -> type[BaseModel]:
         signature = inspect.signature(func)
 
-        parameters = list(
-            signature.parameters.values()
-        )
+        parameters = list(signature.parameters.values())
 
-        if (
-            parameters
-            and parameters[0].name == "self"
-        ):
+        if parameters and parameters[0].name == "self":
             parameters = parameters[1:]
 
         try:
             hints = get_type_hints(func)
         except Exception as exc:
             raise ValueError(
-                f"Cannot resolve type hints for "
-                f"{type(self).__name__}."
-                f"{func.__name__}: {exc}"
+                f"Cannot resolve type hints for {type(self).__name__}.{func.__name__}: {exc}"
             ) from exc
 
         fields: dict[str, Any] = {}
@@ -311,10 +272,7 @@ class ToolSet:
                 inspect.Parameter.VAR_KEYWORD,
             ):
                 raise ValueError(
-                    f"Tool method "
-                    f"{type(self).__name__}."
-                    f"{func.__name__} does not "
-                    "support var args"
+                    f"Tool method {type(self).__name__}.{func.__name__} does not support var args"
                 )
 
             annotation = hints.get(
@@ -331,10 +289,7 @@ class ToolSet:
                     "type-annotated"
                 )
 
-            if (
-                parameter.default
-                is inspect.Parameter.empty
-            ):
+            if parameter.default is inspect.Parameter.empty:
                 fields[parameter.name] = (
                     annotation,
                     ...,
@@ -346,20 +301,14 @@ class ToolSet:
                     parameter.default,
                 )
 
-        model_name = "".join(
-            part.title()
-            for part in func.__name__.split("_")
-        )
+        model_name = "".join(part.title() for part in func.__name__.split("_"))
 
         return create_model(
-            f"{type(self).__name__}{model_name}"
-            "Input",
+            f"{type(self).__name__}{model_name}Input",
             # Unknown argument names are a model mistake and
             # must surface as a validation error, not be
             # silently ignored while defaults apply.
-            __config__=ConfigDict(
-                extra="forbid"
-            ),
+            __config__=ConfigDict(extra="forbid"),
             **fields,
         )
 
@@ -373,9 +322,7 @@ class ToolSet:
     def tool_methods(
         self,
     ) -> tuple[LocalToolMethod, ...]:
-        return tuple(
-            self._tool_methods.values()
-        )
+        return tuple(self._tool_methods.values())
 
     def get_tool_method(
         self,
@@ -390,9 +337,7 @@ class ToolSet:
             method.name: types.Tool(
                 name=method.name,
                 description=method.description,
-                inputSchema=(
-                    method.input_schema()
-                ),
+                inputSchema=(method.input_schema()),
             )
             for method in self._tool_methods.values()
         }
@@ -415,10 +360,7 @@ def validate_class(
         and cls is not ToolSet
         and not inspect.isabstract(cls)
     ):
-        raise TypeError(
-            "Local tool provider must be a "
-            "concrete ToolSet subclass"
-        )
+        raise TypeError("Local tool provider must be a concrete ToolSet subclass")
 
     provider_id = getattr(
         cls,
@@ -426,14 +368,9 @@ def validate_class(
         None,
     )
 
-    if (
-        not isinstance(provider_id, str)
-        or not provider_id
-    ):
+    if not isinstance(provider_id, str) or not provider_id:
         raise ValueError(
-            f"Local tool provider "
-            f"{getattr(cls, '__name__', cls)} must "
-            "define a non-empty string id"
+            f"Local tool provider {getattr(cls, '__name__', cls)} must define a non-empty string id"
         )
 
 
@@ -441,17 +378,11 @@ def has_tool_header(
     path: Path,
 ) -> bool:
     try:
-        text = path.read_text(
-            encoding="utf-8"
-        )
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return False
 
-    head = "\n".join(
-        text.splitlines()[
-            :LOCAL_TOOL_HEADER_SCAN_LINES
-        ]
-    )
+    head = "\n".join(text.splitlines()[:LOCAL_TOOL_HEADER_SCAN_LINES])
 
     return LOCAL_TOOL_HEADER in head
 
@@ -476,11 +407,7 @@ def load_class_from_file(
         usedforsecurity=False,
     ).hexdigest()[:12]
 
-    module_name = (
-        f"_dynamic_tool_"
-        f"{path.stem}_"
-        f"{digest}"
-    )
+    module_name = f"_dynamic_tool_{path.stem}_{digest}"
 
     sys.modules.pop(
         module_name,
@@ -493,9 +420,7 @@ def load_class_from_file(
     # character change within the same timestamp tick) would
     # silently execute STALE code. Hot reload must never do that.
     try:
-        source = path.read_text(
-            encoding="utf-8"
-        )
+        source = path.read_text(encoding="utf-8")
 
         code = compile(
             source,
@@ -510,9 +435,7 @@ def load_class_from_file(
         )
         raise
 
-    module: ModuleType = ModuleType(
-        module_name
-    )
+    module: ModuleType = ModuleType(module_name)
 
     module.__file__ = str(path)
 
@@ -527,9 +450,7 @@ def load_class_from_file(
 
     module.__dict__["error_result"] = error_result
 
-    sys.modules[
-        module_name
-    ] = module
+    sys.modules[module_name] = module
 
     try:
         exec(
@@ -551,8 +472,7 @@ def load_class_from_file(
             inspect.isclass,
         )
         if (
-            cls.__module__
-            == module.__name__
+            cls.__module__ == module.__name__
             and issubclass(
                 cls,
                 ToolSet,
@@ -569,9 +489,7 @@ def load_class_from_file(
         )
 
         raise RuntimeError(
-            f"{path} must contain exactly "
-            f"one concrete ToolSet; "
-            f"found {len(candidates)}"
+            f"{path} must contain exactly one concrete ToolSet; found {len(candidates)}"
         )
 
     return (
@@ -589,11 +507,7 @@ def build_provider(
     tools = instance.build_tools()
 
     if not tools:
-        raise ValueError(
-            f"Local tool provider "
-            f"'{spec.name}' exposes no "
-            "@tool methods"
-        )
+        raise ValueError(f"Local tool provider '{spec.name}' exposes no @tool methods")
 
     logger.info(
         "Local tool provider '{}' ready, {} tools",

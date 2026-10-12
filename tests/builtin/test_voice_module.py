@@ -29,9 +29,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from nan_itself.modules.model import DataSpace
-
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -257,9 +255,7 @@ def test_say_channel_schema():
 
     assert spec.model is voice.TaskPayload
 
-    payload, error = spec.validate(
-        {"intent": "greet", "key_points": "hi"}
-    )
+    payload, error = spec.validate({"intent": "greet", "key_points": "hi"})
 
     assert error is None
 
@@ -303,9 +299,7 @@ def test_fast_path_answers_trivial_turn():
 
     spoken: list[dict[str, Any]] = []
 
-    instance._speak_text = lambda text, **kw: spoken.append(
-        {"text": text, **kw}
-    )
+    instance._speak_text = lambda text, **kw: spoken.append({"text": text, **kw})
 
     instance._handle_utterance(_utterance())
 
@@ -413,9 +407,7 @@ def test_speak_once_composes_and_plays():
 
     assert instance.slm.compose_calls == [_say_task()]
 
-    assert instance.tts.calls == [
-        ("哈喽，很高兴见到你", "用开心的语气说")
-    ]
+    assert instance.tts.calls == [("哈喽，很高兴见到你", "用开心的语气说")]
 
     assert stream.writes == 3
 
@@ -451,10 +443,7 @@ def test_illegal_instruct_is_loud_and_neutral():
     # Neutral speech, never the hallucinated directive.
     assert instance.tts.calls == [("哈喽", "")]
 
-    assert any(
-        "not on the TTS whitelist" in event
-        for event in instance._events
-    )
+    assert any("not on the TTS whitelist" in event for event in instance._events)
 
 
 def test_compose_failure_is_feedback_not_crash():
@@ -472,10 +461,7 @@ def test_compose_failure_is_feedback_not_crash():
 
     assert "user interrupted" not in list(instance._events)
 
-    assert any(
-        "failed to compose" in event
-        for event in instance._events
-    )
+    assert any("failed to compose" in event for event in instance._events)
 
 
 # ============================================================================
@@ -488,9 +474,7 @@ def test_barge_in_stops_playback_and_drains_fifo():
 
     instance.feed("say", _say_task())
 
-    instance.slm = _FakeSLM(
-        composed={"instruct": "用开心的语气说", "text": "哈喽"}
-    )
+    instance.slm = _FakeSLM(composed={"instruct": "用开心的语气说", "text": "哈喽"})
 
     # During the first write the "listen thread" hears 0.5 s of
     # continuous speech and a second task lands on the FIFO.
@@ -522,16 +506,12 @@ def test_non_interruptible_task_plays_through():
 
     instance.feed("say", _say_task(interruptible=False))
 
-    instance.slm = _FakeSLM(
-        composed={"instruct": "用认真的语气说", "text": "听我说"}
-    )
+    instance.slm = _FakeSLM(composed={"instruct": "用认真的语气说", "text": "听我说"})
 
     gate_during_write: list[Any] = []
 
     def on_write(writes: int) -> None:
-        gate_during_write.append(
-            instance._speaking_interruptible
-        )
+        gate_during_write.append(instance._speaking_interruptible)
 
     instance.tts = _FakeTTS(chunks=3)
 
@@ -600,11 +580,7 @@ def test_provision_requires_published_ring():
 def test_provision_rejects_incompatible_rate():
     instance = _fresh_instance()
 
-    instance.dependencies = {
-        "audio": _FakeReader(
-            {"pcm_ring": {"seq": 1, "sample_rate": 44100}}
-        )
-    }
+    instance.dependencies = {"audio": _FakeReader({"pcm_ring": {"seq": 1, "sample_rate": 44100}})}
 
     with pytest.raises(RuntimeError, match="webrtcvad"):
         instance._provision()
@@ -618,13 +594,9 @@ def test_provision_rejects_incompatible_rate():
 def test_ask_projects_state_and_events():
     instance = _fresh_instance()
 
-    instance._transcripts.append(
-        {"ts": 1758400000.0, "text": "你好"}
-    )
+    instance._transcripts.append({"ts": 1758400000.0, "text": "你好"})
 
-    instance._answered.append(
-        {"ts": 1758400000.0, "text": "你好呀"}
-    )
+    instance._answered.append({"ts": 1758400000.0, "text": "你好呀"})
 
     rendered = asyncio.run(instance.ask(None))
 
@@ -632,11 +604,11 @@ def test_ask_projects_state_and_events():
 
     assert "[Voice] state:" in rendered
 
-    assert '- user said' in rendered
+    assert "- user said" in rendered
 
     assert '"你好"' in rendered
 
-    assert '- answered myself' in rendered
+    assert "- answered myself" in rendered
 
     assert '"你好呀"' in rendered
 
@@ -691,9 +663,7 @@ def test_restore_state_validates_shape():
         instance.restore_state({"transcripts_total": "1"})
 
     with pytest.raises(TypeError, match="must be objects"):
-        instance.restore_state(
-            {"last_transcripts": ["nope"]}
-        )
+        instance.restore_state({"last_transcripts": ["nope"]})
 
 
 # ============================================================================

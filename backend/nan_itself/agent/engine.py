@@ -38,8 +38,18 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
-from loguru import logger
-
+from ..events import (
+    sink,
+)
+from ..modules.model import (
+    Turn,
+)
+from ..utils.llm import (
+    LLMRequest,
+    LLMResponse,
+    ToolDefinition,
+    Usage,
+)
 from .prompts import (
     build_messages,
     render_turn,
@@ -47,18 +57,6 @@ from .prompts import (
 from .verbs import (
     FINISH_TOOL_NAME,
     VERBS,
-)
-from ..modules.model import (
-    Turn,
-)
-from ..events import (
-    sink,
-)
-from ..utils.llm import (
-    LLMRequest,
-    LLMResponse,
-    ToolDefinition,
-    Usage,
 )
 
 
@@ -95,12 +93,8 @@ class StepEngine:
         """
         response = await self._generate(
             LLMRequest(
-                messages=build_messages(
-                    turn
-                ),
-                tools=self._tool_definitions(
-                    depth=turn.depth
-                ),
+                messages=build_messages(turn),
+                tools=self._tool_definitions(depth=turn.depth),
             ),
             turn,
         )
@@ -143,9 +137,7 @@ class StepEngine:
         materialize.
         """
         if not sink.attached:
-            return await self.llm.generate_complete(
-                request
-            )
+            return await self.llm.generate_complete(request)
 
         text_parts: list[str] = []
         tool_calls: list = []
@@ -163,9 +155,7 @@ class StepEngine:
             },
         )
 
-        async for event in self.llm.generate(
-            request
-        ):
+        async for event in self.llm.generate(request):
             if event.kind == "text":
                 if event.text:
                     if first_text is None:
@@ -182,27 +172,18 @@ class StepEngine:
                         },
                     )
 
-                    text_parts.append(
-                        event.text
-                    )
+                    text_parts.append(event.text)
 
             elif event.kind == "tool_call":
                 if event.tool_call is not None:
-                    tool_calls.append(
-                        event.tool_call
-                    )
+                    tool_calls.append(event.tool_call)
 
             elif event.kind == "done":
                 if event.usage is not None:
                     usage = event.usage
 
-                if (
-                    event.finish_reason
-                    is not None
-                ):
-                    finish_reason = (
-                        event.finish_reason
-                    )
+                if event.finish_reason is not None:
+                    finish_reason = event.finish_reason
 
         if stream_id is not None:
             if tool_calls:
@@ -221,10 +202,7 @@ class StepEngine:
                     "output_done",
                     id=stream_id,
                     content={
-                        "duration_s": (
-                            time.time()
-                            - (first_text or time.time())
-                        ),
+                        "duration_s": (time.time() - (first_text or time.time())),
                         "agent_hash": turn.agent_hash,
                         "parent_hash": turn.parent_hash,
                         "depth": turn.depth,
@@ -232,10 +210,7 @@ class StepEngine:
                 )
 
         return LLMResponse(
-            content=(
-                "".join(text_parts)
-                or None
-            ),
+            content=("".join(text_parts) or None),
             tool_calls=tool_calls,
             model=self.llm.model,
             usage=usage,
@@ -252,13 +227,6 @@ class StepEngine:
         # finish ends a subagent's loop; the root agent has no
         # such notion and must not see it.
         if depth == 0:
-            verbs = [
-                verb
-                for verb in verbs
-                if verb.name != FINISH_TOOL_NAME
-            ]
+            verbs = [verb for verb in verbs if verb.name != FINISH_TOOL_NAME]
 
-        return [
-            verb.definition()
-            for verb in verbs
-        ]
+        return [verb.definition() for verb in verbs]

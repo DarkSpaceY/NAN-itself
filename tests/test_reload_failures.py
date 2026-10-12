@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
-from nan_itself.modules.runtime import Facade
 from nan_itself.modules.model import (
     Module,
     ModuleState,
 )
 from nan_itself.modules.reload import hot_reload
+from nan_itself.modules.runtime import Facade
 from nan_itself.skills.model import SkillMetadata
 from nan_itself.skills.runtime import SkillRuntime
 from nan_itself.tools.runtime import ProviderRuntime
@@ -162,6 +161,8 @@ def test_module_long_running_candidate_can_commit_without_returning(
         assert old.instance.stop_calls == 1
 
     run(scenario())
+
+
 def test_module_candidate_immediate_start_failure_keeps_old_generation(
     tmp_path,
     monkeypatch,
@@ -192,9 +193,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
         id = "example"
 
         async def start(self):
-            raise RuntimeError(
-                "candidate failed during startup"
-            )
+            raise RuntimeError("candidate failed during startup")
 
     old = facade._register_module_class(
         OldModule,
@@ -217,18 +216,12 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
 
     assert facade.modules["example"] is old
 
-    assert old.state is (
-        ModuleState.RUNNING
-    )
+    assert old.state is (ModuleState.RUNNING)
 
     assert old.instance.stop_calls == 0
 
-    assert (
-        facade._source_load_errors.get(
-            source.resolve()
-        )
-        is not None
-    )
+    assert facade._source_load_errors.get(source.resolve()) is not None
+
 
 def test_module_candidate_start_failure_keeps_old_generation(
     tmp_path,
@@ -268,9 +261,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
             # Force one scheduler switch so the candidate first appears
             # to have entered start() and then fails.
             await asyncio.sleep(0)
-            raise RuntimeError(
-                "candidate failed during startup"
-            )
+            raise RuntimeError("candidate failed during startup")
 
     old = facade._register_module_class(
         OldModule,
@@ -296,18 +287,11 @@ def test_module_candidate_start_failure_keeps_old_generation(
 
         assert facade.modules["example"] is old
 
-        assert old.state is (
-            ModuleState.RUNNING
-        )
+        assert old.state is (ModuleState.RUNNING)
 
         assert old.instance.stop_calls == 0
 
-        assert (
-            facade._source_load_errors.get(
-                source.resolve()
-            )
-            is not None
-        )
+        assert facade._source_load_errors.get(source.resolve()) is not None
 
     run(scenario())
 
@@ -352,9 +336,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
         id = "example"
 
         def restore_state(self, state):
-            raise RuntimeError(
-                "restore failed"
-            )
+            raise RuntimeError("restore failed")
 
     old = facade._register_module_class(
         OldModule,
@@ -377,18 +359,11 @@ def test_module_reload_restore_failure_keeps_old_generation(
 
     assert facade.modules["example"] is old
 
-    assert old.state is (
-        ModuleState.RUNNING
-    )
+    assert old.state is (ModuleState.RUNNING)
 
     assert old.instance.stop_calls == 0
 
-    assert (
-        facade._source_load_errors.get(
-            source.resolve()
-        )
-        is not None
-    )
+    assert facade._source_load_errors.get(source.resolve()) is not None
 
 
 def test_module_reload_dependency_cycle_keeps_old_generation(
@@ -491,21 +466,13 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
 
     assert facade.modules["a"] is old_a
 
-    assert facade.modules["b"] is (
-        b_record
-    )
+    assert facade.modules["b"] is (b_record)
 
-    assert b_record.instance is (
-        b_instance
-    )
+    assert b_record.instance is (b_instance)
 
-    assert b_instance.dependencies is (
-        b_dependencies
-    )
+    assert b_instance.dependencies is (b_dependencies)
 
-    assert b_record.state is (
-        ModuleState.RUNNING
-    )
+    assert b_record.state is (ModuleState.RUNNING)
 
 
 # ============================================================================
@@ -523,17 +490,11 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    source = (
-        tool_dir / "example.py"
-    )
+    source = tool_dir / "example.py"
 
     _write_tool(
         source,
@@ -547,13 +508,9 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    old_provider = runtime.get_provider(
-        "example"
-    )
+    old_provider = runtime.get_provider("example")
 
     assert old_provider is not None
 
@@ -568,17 +525,11 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 """,
     )
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    new_provider = runtime.get_provider(
-        "example"
-    )
+    new_provider = runtime.get_provider("example")
 
-    assert new_provider is (
-        old_provider
-    )
+    assert new_provider is (old_provider)
 
 
 def test_local_tool_id_collision_keeps_old_provider(
@@ -594,21 +545,13 @@ def test_local_tool_id_collision_keeps_old_provider(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    alpha = (
-        tool_dir / "alpha.py"
-    )
+    alpha = tool_dir / "alpha.py"
 
-    beta = (
-        tool_dir / "beta.py"
-    )
+    beta = tool_dir / "beta.py"
 
     _write_tool(
         alpha,
@@ -632,21 +575,11 @@ def test_local_tool_id_collision_keeps_old_provider(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    alpha_before = (
-        runtime.get_provider(
-            "alpha"
-        )
-    )
+    alpha_before = runtime.get_provider("alpha")
 
-    beta_before = (
-        runtime.get_provider(
-            "beta"
-        )
-    )
+    beta_before = runtime.get_provider("beta")
 
     assert alpha_before is not None
     assert beta_before is not None
@@ -662,20 +595,12 @@ def test_local_tool_id_collision_keeps_old_provider(
 """,
     )
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
     # Failed reload must preserve both existing providers.
-    assert (
-        runtime.get_provider("alpha")
-        is alpha_before
-    )
+    assert runtime.get_provider("alpha") is alpha_before
 
-    assert (
-        runtime.get_provider("beta")
-        is beta_before
-    )
+    assert runtime.get_provider("beta") is beta_before
 
 
 def test_removed_local_tool_does_not_remove_unrelated_provider(
@@ -688,21 +613,13 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    tool_dir = (
-        tmp_path / "workspace" / "tools" / "local"
-    )
+    tool_dir = tmp_path / "workspace" / "tools" / "local"
 
-    tool_dir.mkdir(
-        parents=True
-    )
+    tool_dir.mkdir(parents=True)
 
-    alpha = (
-        tool_dir / "alpha.py"
-    )
+    alpha = tool_dir / "alpha.py"
 
-    beta = (
-        tool_dir / "beta.py"
-    )
+    beta = tool_dir / "beta.py"
 
     _write_tool(
         alpha,
@@ -726,33 +643,19 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 
     runtime = ProviderRuntime()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    beta_before = (
-        runtime.get_provider(
-            "beta"
-        )
-    )
+    beta_before = runtime.get_provider("beta")
 
     assert beta_before is not None
 
     alpha.unlink()
 
-    run(
-        runtime._scan_locals()
-    )
+    run(runtime._scan_locals())
 
-    assert (
-        runtime.get_provider("alpha")
-        is None
-    )
+    assert runtime.get_provider("alpha") is None
 
-    assert (
-        runtime.get_provider("beta")
-        is beta_before
-    )
+    assert runtime.get_provider("beta") is beta_before
 
 
 # ============================================================================
@@ -770,19 +673,13 @@ def test_skill_invalid_candidate_keeps_old_record(
 
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
     _write_valid_skill(
         alpha / "SKILL.md",
@@ -792,23 +689,15 @@ def test_skill_invalid_candidate_keeps_old_record(
     def fake_read_metadata(
         skill_root,
     ):
-        value = (
-            skill_root / "SKILL.md"
-        ).read_text(
-            encoding="utf-8"
-        ).strip()
+        value = (skill_root / "SKILL.md").read_text(encoding="utf-8").strip()
 
         if value == "INVALID":
-            raise ValueError(
-                "invalid skill"
-            )
+            raise ValueError("invalid skill")
 
         return SkillMetadata(
             name=value,
             description=value,
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -822,11 +711,7 @@ def test_skill_invalid_candidate_keeps_old_record(
 
     runtime.refresh()
 
-    old_record = (
-        runtime._registry.get_record(
-            "alpha"
-        )
-    )
+    old_record = runtime._registry.get_record("alpha")
 
     assert old_record is not None
 
@@ -837,17 +722,9 @@ def test_skill_invalid_candidate_keeps_old_record(
 
     runtime.refresh()
 
-    assert (
-        runtime._registry.get_record(
-            "alpha"
-        )
-        is old_record
-    )
+    assert runtime._registry.get_record("alpha") is old_record
 
-    assert (
-        runtime.get_metadata("alpha")
-        is old_record.metadata
-    )
+    assert runtime.get_metadata("alpha") is old_record.metadata
 
 
 def test_skill_name_collision_keeps_old_record(
@@ -867,27 +744,17 @@ def test_skill_name_collision_keeps_old_record(
 
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    beta = (
-        root / "beta"
-    )
+    beta = root / "beta"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
-    beta.mkdir(
-        parents=True
-    )
+    beta.mkdir(parents=True)
 
     _write_valid_skill(
         alpha / "SKILL.md",
@@ -902,18 +769,12 @@ def test_skill_name_collision_keeps_old_record(
     def fake_read_metadata(
         skill_root,
     ):
-        value = (
-            skill_root / "SKILL.md"
-        ).read_text(
-            encoding="utf-8"
-        ).strip()
+        value = (skill_root / "SKILL.md").read_text(encoding="utf-8").strip()
 
         return SkillMetadata(
             name=value,
             description=value,
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -927,17 +788,9 @@ def test_skill_name_collision_keeps_old_record(
 
     runtime.refresh()
 
-    alpha_before = (
-        runtime._registry.get_record(
-            "alpha"
-        )
-    )
+    alpha_before = runtime._registry.get_record("alpha")
 
-    beta_before = (
-        runtime._registry.get_record(
-            "beta"
-        )
-    )
+    beta_before = runtime._registry.get_record("beta")
 
     assert alpha_before is not None
     assert beta_before is not None
@@ -951,19 +804,9 @@ def test_skill_name_collision_keeps_old_record(
     runtime.refresh()
 
     # Transaction must reject the change and preserve both old records.
-    assert (
-        runtime._registry.get_record(
-            "alpha"
-        )
-        is alpha_before
-    )
+    assert runtime._registry.get_record("alpha") is alpha_before
 
-    assert (
-        runtime._registry.get_record(
-            "beta"
-        )
-        is beta_before
-    )
+    assert runtime._registry.get_record("beta") is beta_before
 
     assert runtime.names() == (
         "alpha",
@@ -981,27 +824,17 @@ def test_skill_removed_file_does_not_touch_other_skill(
 
     import nan_itself.skills.registry as registry_module
 
-    root = (
-        tmp_path / "workspace" / "skills"
-    )
+    root = tmp_path / "workspace" / "skills"
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
 
-    alpha = (
-        root / "alpha"
-    )
+    alpha = root / "alpha"
 
-    beta = (
-        root / "beta"
-    )
+    beta = root / "beta"
 
-    alpha.mkdir(
-        parents=True
-    )
+    alpha.mkdir(parents=True)
 
-    beta.mkdir(
-        parents=True
-    )
+    beta.mkdir(parents=True)
 
     _write_valid_skill(
         alpha / "SKILL.md",
@@ -1016,18 +849,12 @@ def test_skill_removed_file_does_not_touch_other_skill(
     def fake_read_metadata(
         skill_root,
     ):
-        value = (
-            skill_root / "SKILL.md"
-        ).read_text(
-            encoding="utf-8"
-        ).strip()
+        value = (skill_root / "SKILL.md").read_text(encoding="utf-8").strip()
 
         return SkillMetadata(
             name=value,
             description=value,
-            source=(
-                skill_root / "SKILL.md"
-            ),
+            source=(skill_root / "SKILL.md"),
             frontmatter={},
         )
 
@@ -1041,11 +868,7 @@ def test_skill_removed_file_does_not_touch_other_skill(
 
     runtime.refresh()
 
-    beta_before = (
-        runtime._registry.get_record(
-            "beta"
-        )
-    )
+    beta_before = runtime._registry.get_record("beta")
 
     assert beta_before is not None
 
@@ -1055,14 +878,6 @@ def test_skill_removed_file_does_not_touch_other_skill(
 
     runtime.refresh()
 
-    assert (
-        runtime.get_metadata("alpha")
-        is None
-    )
+    assert runtime.get_metadata("alpha") is None
 
-    assert (
-        runtime._registry.get_record(
-            "beta"
-        )
-        is beta_before
-    )
+    assert runtime._registry.get_record("beta") is beta_before

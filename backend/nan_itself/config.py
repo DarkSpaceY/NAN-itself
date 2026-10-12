@@ -16,6 +16,7 @@ class LLMConfig(BaseModel):
     timeout: int = 600
     max_retries: int = 2
 
+
 class GatewayConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
@@ -79,9 +80,7 @@ def load_settings(
 ) -> Settings:
     """加载配置（默认锚定仓库根目录，与 cwd 无关）"""
     path = (
-        Path(config_file)
-        if config_file is not None
-        else repo_root() / "config" / "settings.yaml"
+        Path(config_file) if config_file is not None else repo_root() / "config" / "settings.yaml"
     )
 
     if not path.exists():
@@ -94,9 +93,7 @@ def load_settings(
         data = yaml.safe_load(file) or {}
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"Invalid settings YAML: {path}"
-        )
+        raise ValueError(f"Invalid settings YAML: {path}")
 
     return Settings(**data)
 

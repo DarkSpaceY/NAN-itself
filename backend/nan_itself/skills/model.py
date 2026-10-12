@@ -10,14 +10,12 @@ every other skills module speaks; it imports nothing from them.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-
-NAME_RE = re.compile(
-    r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-)
+NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 MAX_NAME_LENGTH = 64
 

@@ -16,12 +16,12 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from typing import Any, ClassVar, Mapping
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 from loguru import logger
-from pydantic import BaseModel, Field
-
 from nan_itself.modules import ChannelSpec
+from pydantic import BaseModel, Field
 
 
 class SendPayload(BaseModel):
@@ -32,7 +32,6 @@ class SendPayload(BaseModel):
 
 
 class NotifierModule(Module):
-
     id = "notifier"
 
     # Downlink: the model feeds via invoke_channels; the runtime
@@ -49,7 +48,7 @@ class NotifierModule(Module):
     def __init__(self) -> None:
         self._queue: deque[dict] = deque()  # fed payloads, FIFO
         self._events: deque[str] = deque(maxlen=64)
-        self._sent: list[dict] = []      # delivered facts (uplink state)
+        self._sent: list[dict] = []  # delivered facts (uplink state)
         self._last_error: str | None = None
 
     def feed(self, channel: str, payload: Any) -> str:

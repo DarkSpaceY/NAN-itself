@@ -43,6 +43,7 @@ retrying failure.
 from __future__ import annotations
 
 import array
+import asyncio
 import base64
 import json
 import math
@@ -51,13 +52,12 @@ import subprocess
 import sys
 import threading
 import time
-import asyncio
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 import numpy as np
 import sounddevice as sd
@@ -66,14 +66,12 @@ import webrtcvad
 import yaml
 from faster_whisper import WhisperModel
 from loguru import logger
-from pydantic import BaseModel
-
 from nan_itself.modules import (
     ChannelSpec,
     Module,
 )
 from nan_itself.utils import paths as _paths
-
+from pydantic import BaseModel
 
 # ======================================================================
 # Inlined audio DSP toolkit (formerly nan_itself.utils.audio).
@@ -146,10 +144,13 @@ def zero_crossing_rate(pcm: bytes | memoryview) -> float:
 
 
 def _spectrum(pcm: bytes | memoryview):
-    samples = np.frombuffer(
-        bytes(pcm),
-        dtype=np.int16,
-    ).astype(np.float32) / 32768.0
+    samples = (
+        np.frombuffer(
+            bytes(pcm),
+            dtype=np.int16,
+        ).astype(np.float32)
+        / 32768.0
+    )
 
     magnitude = np.abs(np.fft.rfft(samples))
 
@@ -210,11 +211,7 @@ def spectral_bandwidth(pcm: bytes | memoryview) -> float:
 
     centroid = float((freqs * magnitude).sum() / total)
 
-    return float(
-        np.sqrt(
-            (magnitude * (freqs - centroid) ** 2).sum() / total
-        )
-    )
+    return float(np.sqrt((magnitude * (freqs - centroid) ** 2).sum() / total))
 
 
 def spectral_rolloff(
@@ -256,9 +253,7 @@ def peak_stats(pcm: bytes | memoryview) -> tuple[float, bool]:
 
     peak = max(abs(s) for s in samples)
 
-    dbfs = (
-        20.0 * math.log10(peak / 32768.0) if peak else -120.0
-    )
+    dbfs = 20.0 * math.log10(peak / 32768.0) if peak else -120.0
 
     return max(-120.0, min(0.0, dbfs)), peak >= 32767 * 0.99
 
@@ -298,10 +293,13 @@ class PitchTracker:
         self.strength = 0.0
 
     def feed(self, pcm: bytes) -> dict[str, float]:
-        x = np.frombuffer(
-            bytes(pcm),
-            dtype=np.int16,
-        ).astype(np.float32) / 32768.0
+        x = (
+            np.frombuffer(
+                bytes(pcm),
+                dtype=np.int16,
+            ).astype(np.float32)
+            / 32768.0
+        )
 
         x = x - x.mean()
 
@@ -332,9 +330,7 @@ class PitchTracker:
 
         lag = self.min_lag + offset
 
-        strength = (
-            float(segment[offset] / ac[0]) if ac[0] > 0 else 0.0
-        )
+        strength = float(segment[offset] / ac[0]) if ac[0] > 0 else 0.0
 
         if strength >= self.strength_min:
             self.f0 = SAMPLE_RATE / lag
@@ -425,10 +421,7 @@ class AmbientClassifier:
         if flatness >= self.noisy_flatness_min:
             return "noisy"
 
-        if (
-            zcr <= self.tonal_zcr_max
-            and flatness <= self.tonal_flatness_max
-        ):
+        if zcr <= self.tonal_zcr_max and flatness <= self.tonal_flatness_max:
             return "tonal"
 
         return "noisy" if zcr > 0.25 else "tonal"
@@ -475,27 +468,19 @@ class FeatureTracker:
                 pass
 
             else:
-                blended = (
-                    self.noise_floor * (1.0 - self.floor_alpha / 4)
-                    + dbfs * (self.floor_alpha / 4)
+                blended = self.noise_floor * (1.0 - self.floor_alpha / 4) + dbfs * (
+                    self.floor_alpha / 4
                 )
 
-                self.noise_floor = min(
-                    max(blended, -95.0), 0.0
-                )
+                self.noise_floor = min(max(blended, -95.0), 0.0)
 
         else:
             self.quiet_frames += 1
 
             if self.quiet_frames >= self.settle_frames:
-                blended = (
-                    self.noise_floor * (1.0 - self.floor_alpha)
-                    + dbfs * self.floor_alpha
-                )
+                blended = self.noise_floor * (1.0 - self.floor_alpha) + dbfs * self.floor_alpha
 
-                self.noise_floor = min(
-                    max(blended, -95.0), 0.0
-                )
+                self.noise_floor = min(max(blended, -95.0), 0.0)
 
         self.speech_recent = is_speech
 
@@ -656,9 +641,7 @@ class UtteranceSegmenter:
 
         self.preroll.clear()
 
-        self.voiced_count = sum(
-            1 for _, speech in self.buffer if speech
-        )
+        self.voiced_count = sum(1 for _, speech in self.buffer if speech)
 
         self.silence_run = 0
 
@@ -689,10 +672,7 @@ class UtteranceSegmenter:
         # does not. Ratio excludes the closing run.
         speech_frames = len(buffered) - trailing
 
-        if (
-            speech_frames > 0
-            and voiced / speech_frames < self.min_voiced_ratio
-        ):
+        if speech_frames > 0 and voiced / speech_frames < self.min_voiced_ratio:
             return []
 
         pcm = b"".join(chunk for chunk, _ in buffered)
@@ -745,8 +725,8 @@ class AudioPipeline:
         )
 
         # ~1s of 30ms frames: stable enough for classification.
-        self.feature_window: deque[tuple[float, float, float]] = (
-            deque(maxlen=max(1, ambient_window_frames))
+        self.feature_window: deque[tuple[float, float, float]] = deque(
+            maxlen=max(1, ambient_window_frames)
         )
 
         self.ambient_kind = "quiet"
@@ -835,9 +815,7 @@ class AudioPipeline:
 
         levels = sorted(f[5] for f in window)
 
-        dynamic_range = levels[int(0.95 * (n - 1))] - levels[
-            int(0.05 * (n - 1))
-        ]
+        dynamic_range = levels[int(0.95 * (n - 1))] - levels[int(0.05 * (n - 1))]
 
         self.ambient_kind = self.classifier.classify(
             is_speech=is_speech,
@@ -860,23 +838,18 @@ class AudioPipeline:
         if (
             not is_speech
             and dbfs >= self.tracker.noise_floor + self.transient_rise_db
-            and now - self._last_transient_at
-            >= self.transient_cooldown_s
+            and now - self._last_transient_at >= self.transient_cooldown_s
         ):
             self._last_transient_at = now
 
-            events.append(
-                {"type": "transient", "dbfs": round(dbfs, 1)}
-            )
+            events.append({"type": "transient", "dbfs": round(dbfs, 1)})
 
         for utt in self.segmenter.feed(pcm, is_speech):
             utt.f0s = self._current_f0s
 
             self._current_f0s = []
 
-            events.append(
-                {"type": "utterance", "utterance": utt}
-            )
+            events.append({"type": "utterance", "utterance": utt})
 
         stats["mode"] = self.vad.mode
 
@@ -898,11 +871,7 @@ class AudioPipeline:
 
         stats["dynamic_range_db"] = round(dynamic_range, 1)
 
-        stats["snr_db"] = (
-            round(dbfs - self.tracker.noise_floor, 1)
-            if is_speech
-            else None
-        )
+        stats["snr_db"] = round(dbfs - self.tracker.noise_floor, 1) if is_speech else None
 
         stats["ambient_kind"] = self.ambient_kind
 
@@ -971,13 +940,7 @@ class WhisperTranscriber:
         Pure gate so the hallucination filter is unit-testable
         without loading the model.
         """
-        if (
-            no_speech_prob > self.no_speech_max
-            and confidence < self.halluc_conf_max
-        ):
-            return False
-
-        return True
+        return not (no_speech_prob > self.no_speech_max and confidence < self.halluc_conf_max)
 
     def load(self) -> None:
         if self._model is not None:
@@ -1000,10 +963,13 @@ class WhisperTranscriber:
     def transcribe(self, utt: Utterance) -> dict:
         self.load()
 
-        audio = np.frombuffer(
-            utt.pcm,
-            dtype=np.int16,
-        ).astype(np.float32) / 32768.0
+        audio = (
+            np.frombuffer(
+                utt.pcm,
+                dtype=np.int16,
+            ).astype(np.float32)
+            / 32768.0
+        )
 
         segments, info = self._model.transcribe(
             audio,
@@ -1020,17 +986,11 @@ class WhisperTranscriber:
         words: list[dict] = []
 
         for seg in segments:
-            no_speech = float(
-                getattr(seg, "no_speech_prob", 0.0) or 0.0
-            )
+            no_speech = float(getattr(seg, "no_speech_prob", 0.0) or 0.0)
 
             avg_logprob = seg.avg_logprob
 
-            confidence = (
-                math.exp(avg_logprob)
-                if avg_logprob is not None
-                else 0.5
-            )
+            confidence = math.exp(avg_logprob) if avg_logprob is not None else 0.5
 
             if not self.segment_passes(no_speech, confidence):
                 logger.info(
@@ -1053,9 +1013,7 @@ class WhisperTranscriber:
                         "start": float(word.start or 0.0),
                         "end": float(word.end or 0.0),
                         "p": round(
-                            math.exp(word.probability)
-                            if word.probability is not None
-                            else 0.5,
+                            math.exp(word.probability) if word.probability is not None else 0.5,
                             3,
                         ),
                     },
@@ -1063,11 +1021,7 @@ class WhisperTranscriber:
 
         text = " ".join(p for p in parts if p).strip()
 
-        confidence = (
-            round(sum(confs) / len(confs), 3)
-            if confs
-            else 0.5
-        )
+        confidence = round(sum(confs) / len(confs), 3) if confs else 0.5
 
         result = {
             "text": text,
@@ -1079,12 +1033,7 @@ class WhisperTranscriber:
 
         language = result.get("language")
 
-        if (
-            self.translate_enabled
-            and text
-            and language
-            and language != "en"
-        ):
+        if self.translate_enabled and text and language and language != "en":
             translated_segments, _ = self._model.transcribe(
                 audio,
                 language=language,
@@ -1093,9 +1042,7 @@ class WhisperTranscriber:
             )
 
             result["translation"] = " ".join(
-                seg.text.strip()
-                for seg in translated_segments
-                if seg.text.strip()
+                seg.text.strip() for seg in translated_segments if seg.text.strip()
             )
 
         return result
@@ -1342,18 +1289,12 @@ class CosyVoiceTTS:
         )
 
         for output in outputs:
-            chunk = (
-                output.get("tts_speech")
-                if isinstance(output, dict)
-                else None
-            )
+            chunk = output.get("tts_speech") if isinstance(output, dict) else None
 
             if chunk is None:
                 continue
 
-            audio = (
-                chunk.detach().cpu().float().numpy().reshape(-1)
-            )
+            audio = chunk.detach().cpu().float().numpy().reshape(-1)
 
             if audio.size:
                 yield audio
@@ -1433,9 +1374,7 @@ _FAST_PATH_USER = """\
 
 
 def _allowlist_block() -> str:
-    return "\n".join(
-        f"   - {instruct}" for instruct in ALLOWED_INSTRUCTS
-    )
+    return "\n".join(f"   - {instruct}" for instruct in ALLOWED_INSTRUCTS)
 
 
 class SmallDialogue:
@@ -1477,9 +1416,7 @@ class SmallDialogue:
     # ------------------------------------------------------------------
 
     def _weights_present(self) -> bool:
-        return self.model_path.is_dir() and any(
-            self.model_path.iterdir()
-        )
+        return self.model_path.is_dir() and any(self.model_path.iterdir())
 
     def _download(self) -> None:
         logger.info(
@@ -1582,7 +1519,7 @@ class SmallDialogue:
             )
 
         text = self._tokenizer.decode(
-            output[0][inputs["input_ids"].shape[1]:],
+            output[0][inputs["input_ids"].shape[1] :],
             skip_special_tokens=True,
         )
 
@@ -1706,9 +1643,7 @@ def cosine_similarity(a, b) -> float:  # noqa: ANN001 - mirrors toolkit
     if denom <= 0.0:
         return 0.0
 
-    return float(
-        np.clip(np.dot(a, b) / denom, -1.0, 1.0)
-    )
+    return float(np.clip(np.dot(a, b) / denom, -1.0, 1.0))
 
 
 class VoiceSpeakerRegistry:
@@ -1741,32 +1676,21 @@ class VoiceSpeakerRegistry:
             return
 
         try:
-            data = json.loads(
-                self.path.read_text(encoding="utf-8")
-            )
+            data = json.loads(self.path.read_text(encoding="utf-8"))
 
         except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"Invalid speaker registry JSON: {self.path}"
-            ) from exc
+            raise ValueError(f"Invalid speaker registry JSON: {self.path}") from exc
 
         if not isinstance(data, dict):
-            raise ValueError(
-                f"Invalid speaker registry JSON: {self.path}"
-            )
+            raise ValueError(f"Invalid speaker registry JSON: {self.path}")
 
         people: dict[str, list[list[float]]] = {}
 
         for name, vectors in data.items():
             if not isinstance(vectors, list):
-                raise ValueError(
-                    f"Registry entry {name!r} must be a list"
-                )
+                raise ValueError(f"Registry entry {name!r} must be a list")
 
-            people[str(name)] = [
-                [float(x) for x in vector]
-                for vector in vectors
-            ]
+            people[str(name)] = [[float(x) for x in vector] for vector in vectors]
 
         self.people = people
 
@@ -1790,10 +1714,7 @@ class VoiceSpeakerRegistry:
 
         for name, vectors in self.people.items():
             score = max(
-                (
-                    cosine_similarity(stored, embedding)
-                    for stored in vectors
-                ),
+                (cosine_similarity(stored, embedding) for stored in vectors),
                 default=0.0,
             )
 
@@ -1802,10 +1723,7 @@ class VoiceSpeakerRegistry:
 
                 best_score = score
 
-        if (
-            best_name is not None
-            and best_score >= self.threshold
-        ):
+        if best_name is not None and best_score >= self.threshold:
             self.matched_total += 1
 
             return best_name
@@ -1814,9 +1732,7 @@ class VoiceSpeakerRegistry:
 
         name = f"person-{index}"
 
-        self.people[name] = [
-            [float(x) for x in np.ravel(embedding)]
-        ]
+        self.people[name] = [[float(x) for x in np.ravel(embedding)]]
 
         self.save()
 
@@ -1953,9 +1869,7 @@ class VoiceConfig(BaseModel):
 
     diarization_models_dir: str = "models/voice/diarization"
 
-    voices_registry: str = (
-        "data/databases/audio/voice_speakers.json"
-    )
+    voices_registry: str = "data/databases/audio/voice_speakers.json"
 
 
 def _resolve_path(value: str) -> Path:
@@ -1965,11 +1879,7 @@ def _resolve_path(value: str) -> Path:
     """
     resolved = Path(value).expanduser()
 
-    return (
-        resolved
-        if resolved.is_absolute()
-        else _paths.repo_root() / resolved
-    )
+    return resolved if resolved.is_absolute() else _paths.repo_root() / resolved
 
 
 def _load_config() -> VoiceConfig:
@@ -1978,27 +1888,18 @@ def _load_config() -> VoiceConfig:
     VoiceConfig defaults. Missing or empty file = pure defaults;
     anything unparsable is a loud construction failure.
     """
-    path = (
-        _paths.repo_root()
-        / "config"
-        / "modules"
-        / "voice.yaml"
-    )
+    path = _paths.repo_root() / "config" / "modules" / "voice.yaml"
 
     if not path.is_file():
         return VoiceConfig()
 
-    data = yaml.safe_load(
-        path.read_text(encoding="utf-8")
-    )
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
 
     if data is None:
         return VoiceConfig()
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"Invalid module config YAML: {path}"
-        )
+        raise ValueError(f"Invalid module config YAML: {path}")
 
     return VoiceConfig(**data)
 
@@ -2087,39 +1988,27 @@ class VoiceModule(Module):
         self.tts_speed = cfg.tts_speed
 
         # Reuse the audio module's whisper weights.
-        self.whisper_models_dir = _resolve_path(
-            cfg.whisper_models_dir
-        )
+        self.whisper_models_dir = _resolve_path(cfg.whisper_models_dir)
 
         self.slm_path = _resolve_path(cfg.slm_path)
 
         self.slm_repo_id = cfg.slm_repo_id
 
-        self.tts_checkout_dir = _resolve_path(
-            cfg.tts_checkout_dir
-        )
+        self.tts_checkout_dir = _resolve_path(cfg.tts_checkout_dir)
 
         self.tts_model_dir = _resolve_path(cfg.tts_model_dir)
 
-        self.tts_reference_wav = _resolve_path(
-            cfg.tts_reference_wav
-        )
+        self.tts_reference_wav = _resolve_path(cfg.tts_reference_wav)
 
         self.diarization_repo = cfg.diarization_repo
 
         self.diarization_token = cfg.diarization_token
 
-        self.diarization_threshold = (
-            cfg.diarization_threshold
-        )
+        self.diarization_threshold = cfg.diarization_threshold
 
-        self.diarization_models_dir = _resolve_path(
-            cfg.diarization_models_dir
-        )
+        self.diarization_models_dir = _resolve_path(cfg.diarization_models_dir)
 
-        self.voices_registry_path = _resolve_path(
-            cfg.voices_registry
-        )
+        self.voices_registry_path = _resolve_path(cfg.voices_registry)
 
         # Backends (provisioned in start(), swappable in tests).
         self.transcriber: Any = None
@@ -2182,9 +2071,7 @@ class VoiceModule(Module):
         # thread) and say tasks (speak thread).
         self._play_lock = threading.Lock()
 
-        self._utterance_queue: queue.Queue[Any] = queue.Queue(
-            maxsize=32
-        )
+        self._utterance_queue: queue.Queue[Any] = queue.Queue(maxsize=32)
 
         self._pipeline: Any = None
 
@@ -2248,25 +2135,20 @@ class VoiceModule(Module):
 
         if reader is None:
             raise RuntimeError(
-                "voice requires the audio module (pcm_ring facts); "
-                "audio is not loaded"
+                "voice requires the audio module (pcm_ring facts); audio is not loaded"
             )
 
         ring = reader.snapshot().get("pcm_ring")
 
         if not isinstance(ring, dict) or "seq" not in ring:
             raise RuntimeError(
-                "audio has not published pcm_ring yet; voice "
-                "retries with backoff until it does"
+                "audio has not published pcm_ring yet; voice retries with backoff until it does"
             )
 
         rate = int(ring.get("sample_rate") or 0)
 
         if rate not in (8000, 16000, 32000, 48000):
-            raise RuntimeError(
-                f"audio ring sample rate {rate} is not a "
-                "webrtcvad-compatible rate"
-            )
+            raise RuntimeError(f"audio ring sample rate {rate} is not a webrtcvad-compatible rate")
 
         self.sample_rate = rate
 
@@ -2312,9 +2194,7 @@ class VoiceModule(Module):
         with self._state_lock:
             self._state = "listening"
 
-        logger.info(
-            "voice backends ready (stt+slm+tts+diarization)"
-        )
+        logger.info("voice backends ready (stt+slm+tts+diarization)")
 
     # ==================================================================
     # Threads
@@ -2334,11 +2214,7 @@ class VoiceModule(Module):
 
         barge_need = max(
             1,
-            int(
-                self.barge_in_min_speech_s
-                * 1000
-                // self.frame_ms
-            ),
+            int(self.barge_in_min_speech_s * 1000 // self.frame_ms),
         )
 
         was_speaking = False
@@ -2466,9 +2342,7 @@ class VoiceModule(Module):
             self._pipeline = AudioPipeline(
                 vad_aggressiveness=self.vad_aggressiveness,
                 preroll_frames=self.preroll_frames,
-                trailing_silence_frames=(
-                    self.trailing_silence_frames
-                ),
+                trailing_silence_frames=(self.trailing_silence_frames),
                 min_utterance_frames=self.min_utterance_frames,
                 max_utterance_frames=self.max_utterance_frames,
             )
@@ -2478,14 +2352,10 @@ class VoiceModule(Module):
                 continue
 
             try:
-                self._utterance_queue.put_nowait(
-                    event["utterance"]
-                )
+                self._utterance_queue.put_nowait(event["utterance"])
 
             except queue.Full:
-                logger.warning(
-                    "voice utterance queue full; dropped one"
-                )
+                logger.warning("voice utterance queue full; dropped one")
 
     def _trigger_barge_in(self) -> None:
         logger.info("barge-in detected")
@@ -2500,16 +2370,13 @@ class VoiceModule(Module):
                 )
 
             except queue.Empty:
-
                 continue
 
             try:
                 self._handle_utterance(utt)
 
             except Exception as exc:
-                logger.exception(
-                    "voice utterance handling failed: {}", exc
-                )
+                logger.exception("voice utterance handling failed: {}", exc)
 
                 with self._state_lock:
                     self._stats["load_error"] = str(exc)
@@ -2542,9 +2409,7 @@ class VoiceModule(Module):
                 speaker = self.registry.match_or_enroll(vector)
 
             except Exception as exc:
-                logger.warning(
-                    "voice diarization failed: {}", exc
-                )
+                logger.warning("voice diarization failed: {}", exc)
 
         with self._state_lock:
             self._transcripts.append(
@@ -2578,9 +2443,7 @@ class VoiceModule(Module):
             return
 
         with self._state_lock:
-            self._answered.append(
-                {"ts": time.time(), "text": reply}
-            )
+            self._answered.append({"ts": time.time(), "text": reply})
 
             self._stats["fast_answers_total"] += 1
 
@@ -2628,9 +2491,7 @@ class VoiceModule(Module):
             composed["text"],
             instruct=composed["instruct"],
             source="task",
-            interruptible=bool(
-                task.get("interruptible", True)
-            ),
+            interruptible=bool(task.get("interruptible", True)),
         )
 
         return True
@@ -2658,8 +2519,7 @@ class VoiceModule(Module):
                 self._state = "listening"
 
             self._emit_event(
-                "voice: SLM failed to compose the say task; "
-                "skipped (rewrite the task and resend)"
+                "voice: SLM failed to compose the say task; skipped (rewrite the task and resend)"
             )
 
             return None
@@ -2712,11 +2572,7 @@ class VoiceModule(Module):
                     if self._barge_event.is_set():
                         break
 
-                    if (
-                        source == "fast"
-                        and self._pending_say()
-                        is not None
-                    ):
+                    if source == "fast" and self._pending_say() is not None:
                         break
 
                     if stream is None:
@@ -2727,9 +2583,7 @@ class VoiceModule(Module):
             except Exception as exc:
                 logger.warning("voice playback failed: {}", exc)
 
-                self._emit_event(
-                    f"voice: playback failed ({exc})"
-                )
+                self._emit_event(f"voice: playback failed ({exc})")
 
             finally:
                 if stream is not None:
@@ -2739,7 +2593,6 @@ class VoiceModule(Module):
                         stream.close()
 
                     except Exception:
-
                         pass
 
             interrupted = self._barge_event.is_set()
@@ -2830,10 +2683,7 @@ class VoiceModule(Module):
             await asyncio.sleep(self.publish_interval)
 
             with self._state_lock:
-                payload = {
-                    key: value
-                    for key, value in self._stats.items()
-                }
+                payload = {key: value for key, value in self._stats.items()}
 
                 payload["state"] = self._state
 
@@ -2867,18 +2717,14 @@ class VoiceModule(Module):
 
             who = f" ({speaker})" if speaker else ""
 
-            lines.append(
-                f'- user said{who} {clock}: "{item["text"]}"'
-            )
+            lines.append(f'- user said{who} {clock}: "{item["text"]}"')
 
         for item in reversed(answered):
             clock = datetime.fromtimestamp(item["ts"]).strftime(
                 "%H:%M",
             )
 
-            lines.append(
-                f'- answered myself {clock}: "{item["text"]}"'
-            )
+            lines.append(f'- answered myself {clock}: "{item["text"]}"')
 
         if stats.get("load_error"):
             lines.append(f"- error: {stats['load_error']}")
@@ -2886,9 +2732,7 @@ class VoiceModule(Module):
         # One-shot feedback, drained: each event is rendered
         # exactly once.
         while self._events:
-            lines.append(
-                f"[event] {self._events.popleft()}"
-            )
+            lines.append(f"[event] {self._events.popleft()}")
 
         if len(lines) == 1 and state == "idle":
             return None
@@ -2903,16 +2747,10 @@ class VoiceModule(Module):
     def serialize_state(self) -> dict[str, Any]:
         with self._state_lock:
             return {
-                "transcripts_total": self._stats[
-                    "transcripts_total"
-                ],
-                "fast_answers_total": self._stats[
-                    "fast_answers_total"
-                ],
+                "transcripts_total": self._stats["transcripts_total"],
+                "fast_answers_total": self._stats["fast_answers_total"],
                 "tasks_total": self._stats["tasks_total"],
-                "compose_failures_total": self._stats[
-                    "compose_failures_total"
-                ],
+                "compose_failures_total": self._stats["compose_failures_total"],
                 "bargeins_total": self._stats["bargeins_total"],
                 "last_transcripts": list(self._transcripts),
             }
@@ -2939,9 +2777,7 @@ class VoiceModule(Module):
 
         for item in state.get("last_transcripts") or []:
             if not isinstance(item, dict):
-                raise TypeError(
-                    "last_transcripts entries must be objects"
-                )
+                raise TypeError("last_transcripts entries must be objects")
 
             self._transcripts.append(
                 {

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
 from nan_itself.agent.model import Report
@@ -16,7 +15,6 @@ from nan_itself.events import EventBus, sink
 from nan_itself.modules.loading import import_module_class
 from nan_itself.modules.model import DataSpace, Turn
 from nan_itself.utils.llm import Message, ToolCall
-
 
 # ============================================================================
 # Async helpers
@@ -176,9 +174,7 @@ class CapturingEngine:
     """
 
     def __init__(self):
-        self.executions: list[
-            CapturedExecution
-        ] = []
+        self.executions: list[CapturedExecution] = []
 
         self.on_execute = None
 
@@ -200,9 +196,7 @@ class CapturingEngine:
                 turn,
             )
 
-            if asyncio.iscoroutine(
-                outcome
-            ):
+            if asyncio.iscoroutine(outcome):
                 await outcome
 
         return replace(
@@ -295,10 +289,7 @@ def test_run_assembles_turn_boundaries(
     # assistant reply.
     assert agent.last_turn is not None
 
-    assert [
-        m.content
-        for m in render_turn(agent.last_turn)
-    ] == ["", "assistant-done"]
+    assert [m.content for m in render_turn(agent.last_turn)] == ["", "assistant-done"]
 
     # Per-turn boundaries: refresh + snapshot exactly once.
     assert agent.skills.refresh_calls == 1
@@ -326,9 +317,7 @@ def test_run_extends_history_across_turns():
     # (observation + assistant reply).
     assert first.history == ()
 
-    assert [
-        m.content for m in second.history
-    ] == ["", "assistant-done"]
+    assert [m.content for m in second.history] == ["", "assistant-done"]
 
 
 def test_agent_retains_history_char_limit_and_clears_over_it():
@@ -351,10 +340,7 @@ def test_agent_retains_history_char_limit_and_clears_over_it():
 
     assert len(engine.executions) == 2
 
-    assert (
-        engine.executions[1].history
-        == ()
-    )
+    assert engine.executions[1].history == ()
 
 
 def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
@@ -362,19 +348,9 @@ def test_finish_tool_hidden_for_main_agent_and_visible_for_subagents():
         llm=FakeLLM(),
     )
 
-    root_names = {
-        tool.name
-        for tool in engine._tool_definitions(
-            depth=0
-        )
-    }
+    root_names = {tool.name for tool in engine._tool_definitions(depth=0)}
 
-    child_names = {
-        tool.name
-        for tool in engine._tool_definitions(
-            depth=2
-        )
-    }
+    child_names = {tool.name for tool in engine._tool_definitions(depth=2)}
 
     assert "finish" not in root_names
 
@@ -406,9 +382,7 @@ def test_step_sees_history_plus_the_turn_messages():
         reports=("observation",),
     )
 
-    result = run(
-        engine.step(turn)
-    )
+    result = run(engine.step(turn))
 
     # The turn's history snapshot became the model-visible
     # prefix: system + history + this turn's rendering.
@@ -416,21 +390,14 @@ def test_step_sees_history_plus_the_turn_messages():
 
     assert len(request.messages) == 4
 
-    assert [
-        m.content
-        for m in request.messages[:3]
-    ] == ["p", "old", "last"]
+    assert [m.content for m in request.messages[:3]] == ["p", "old", "last"]
 
     # The completed Turn carries the same snapshot plus its
     # structured flow (reply) -- the full model input is
     # exactly build_messages(result).
-    assert [
-        m.content for m in result.history
-    ] == ["old", "last"]
+    assert [m.content for m in result.history] == ["old", "last"]
 
-    assert [
-        m.content for m in render_turn(result)
-    ] == ["observation", "reply"]
+    assert [m.content for m in render_turn(result)] == ["observation", "reply"]
 
 
 # ============================================================================
@@ -492,10 +459,7 @@ def test_harvest_children_collects_and_mirrors_finished_reports():
 
     started = events[0]
 
-    assert (
-        started["content"]["category"]
-        == "subagent_report"
-    )
+    assert started["content"]["category"] == "subagent_report"
 
     assert started["content"]["payload"] == {
         "agent_id": "abc12345",
@@ -535,11 +499,7 @@ def test_harvest_children_collects_and_mirrors_finished_reports():
         },
     ]
 
-    done = [
-        event
-        for event in events
-        if event["t"] == "record_done"
-    ][0]
+    done = [event for event in events if event["t"] == "record_done"][0]
 
     # The v1 display strings are gone: the record closes with its
     # identity only, no summary/note.
@@ -645,9 +605,7 @@ class ScriptedLLM:
         # run between this agent's turns.
         await asyncio.sleep(0)
 
-        observation = (
-            request.messages[-1].content or ""
-        )
+        observation = request.messages[-1].content or ""
 
         # The parent's observation always carries its task; check
         # it FIRST, because a delivered child report quotes the
@@ -655,11 +613,7 @@ class ScriptedLLM:
         if "parent task" in observation:
             self.parent_calls += 1
 
-            if (
-                self.finish_on_call is not None
-                and self.parent_calls
-                >= self.finish_on_call
-            ):
+            if self.finish_on_call is not None and self.parent_calls >= self.finish_on_call:
                 # Finish while the grandchild is still running:
                 # unblock it only after the parent called
                 # finish.
@@ -672,9 +626,7 @@ class ScriptedLLM:
                 return self._finish("parent report")
 
             if self.parent_calls > 50:
-                raise AssertionError(
-                    "parent never received the child report"
-                )
+                raise AssertionError("parent never received the child report")
 
             return self._text("still working")
 
@@ -682,15 +634,9 @@ class ScriptedLLM:
             if self.grandchild_gate is not None:
                 await self.grandchild_gate.wait()
 
-            return self._finish(
-                "grandchild report"
-            )
+            return self._finish("grandchild report")
 
-        raise AssertionError(
-            "unrouted observation: {!r:.200}".format(
-                observation
-            )
-        )
+        raise AssertionError(f"unrouted observation: {observation!r:.200}")
 
 
 async def _run_spawn_scenario(
@@ -768,14 +714,10 @@ def test_child_report_reaches_parent_observation():
 
     # Some parent turn's observation carried the <subagent_report>
     # block from the grandchild.
-    observations = [
-        request.messages[-1].content or ""
-        for request in llm.requests
-    ]
+    observations = [request.messages[-1].content or "" for request in llm.requests]
 
     assert any(
-        "<subagent_report>" in observation
-        and "grandchild report" in observation
+        "<subagent_report>" in observation and "grandchild report" in observation
         for observation in observations
     )
 
@@ -800,10 +742,7 @@ def test_early_finish_drops_running_children_reports():
 
     assert "parent report" in parent.report.body
 
-    assert (
-        "grandchild report"
-        not in parent.report.body
-    )
+    assert "grandchild report" not in parent.report.body
 
 
 # ============================================================================
@@ -948,11 +887,7 @@ def test_loop_pause_halts_new_turns_until_resume():
     engine.on_execute = pause_after_second
 
     def statuses() -> list[str]:
-        return [
-            event["content"].get("state")
-            for event in bus.history()
-            if event["t"] == "status"
-        ]
+        return [event["content"].get("state") for event in bus.history() if event["t"] == "status"]
 
     async def scenario():
         task = asyncio.create_task(agent.loop())
@@ -1021,14 +956,7 @@ def _turn(depth=0):
 
 
 def _load_inbox(max_size=256):
-    path = (
-        Path(__file__)
-        .resolve()
-        .parents[1]
-        / "builtin"
-        / "modules"
-        / "inbox.py"
-    )
+    path = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox.py"
 
     cls, _, _ = import_module_class(path)
 

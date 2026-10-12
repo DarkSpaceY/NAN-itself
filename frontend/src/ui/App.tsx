@@ -79,9 +79,13 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
   const isPaused = nanState.status === "paused";
   const [pausePending, setPausePending] = useState(false);
 
+  // 后端把状态置为 paused 即视为确认，撤回 pending 标记：
+  // 属于「订阅外部系统、在回调里更新 state」的模式，而非 effect 体内直接 setState。
   useEffect(() => {
-    if (isPaused) setPausePending(false);
-  }, [isPaused]);
+    return store.subscribe(() => {
+      if (store.getState().status === "paused") setPausePending(false);
+    });
+  }, [store]);
 
   const pauseControl = useMemo<PauseControl>(() => {
     const pending = pausePending && !isPaused;

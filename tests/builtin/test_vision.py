@@ -14,13 +14,12 @@ import importlib.util
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 import pytest
-
 from nan_itself.modules.model import Turn
-
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -404,11 +403,7 @@ def test_glance_segmenter_slices_motion():
     emitted: list[Glance] = []
 
     for i in range(10):
-        frame = (
-            first_moving
-            if i == 0
-            else frame_with_square(x=100 + 40 * i, y=100)
-        )
+        frame = first_moving if i == 0 else frame_with_square(x=100 + 40 * i, y=100)
 
         emitted.extend(
             segmenter.feed(frame, 30.0, True, None, now),
@@ -527,9 +522,13 @@ def test_face_matcher_assign_and_promote():
 
     # 128-dim noise: the perturbation must stay well inside the
     # 0.5 threshold (0.03 * sqrt(128) ~= 0.34).
-    again = base + rng.standard_normal(128).astype(
-        np.float32,
-    ) * 0.03
+    again = (
+        base
+        + rng.standard_normal(128).astype(
+            np.float32,
+        )
+        * 0.03
+    )
 
     stranger = rng.standard_normal(128).astype(np.float32)
 
@@ -591,10 +590,7 @@ def test_face_matcher_serialize_restore_roundtrip():
     assert restored.known_count() == 2
 
     for label, person in matcher.persons.items():
-        assert (
-            len(restored.persons[label]["encodings"])
-            == len(person["encodings"])
-        )
+        assert len(restored.persons[label]["encodings"]) == len(person["encodings"])
 
 
 def test_yolo_nms_suppresses_overlaps():
@@ -646,10 +642,7 @@ def test_vision_pipeline_emits_motion_and_glance():
     kinds: list[str] = []
 
     for frame in frames:
-        kinds.extend(
-            event["type"]
-            for event in pipeline.process(frame, now)
-        )
+        kinds.extend(event["type"] for event in pipeline.process(frame, now))
 
         now += 1 / 15
 
@@ -676,10 +669,7 @@ def test_vision_pipeline_emits_motion_and_glance():
 
         now += 1 / 15
 
-    glances = [
-        event for event in events
-        if event["type"] == "glance"
-    ]
+    glances = [event for event in events if event["type"] == "glance"]
 
     assert len(glances) == 1
 
@@ -710,10 +700,7 @@ def test_vision_pipeline_light_and_cut_events():
 
     kinds: list[str] = []
 
-    kinds.extend(
-        event["type"]
-        for event in pipeline.process(bright, now)
-    )
+    kinds.extend(event["type"] for event in pipeline.process(bright, now))
 
     assert "light_change" in kinds
 
@@ -781,10 +768,7 @@ def test_vision_pipeline_occlusion_events():
 
     bright = np.full((480, 640, 3), 90, dtype=np.uint8)
 
-    kinds.extend(
-        event["type"]
-        for event in pipeline.process(bright, now)
-    )
+    kinds.extend(event["type"] for event in pipeline.process(bright, now))
 
     assert "recovery" in kinds
 
@@ -949,10 +933,7 @@ def test_vlm_captioner_construction_is_lazy():
 
     assert captioner.max_tokens == 48
 
-    assert (
-        captioner.repo_id
-        == VlmCaptioner.DEFAULT_REPO_ID
-    )
+    assert captioner.repo_id == VlmCaptioner.DEFAULT_REPO_ID
 
 
 def test_vlm_missing_weights_do_not_fail_init():
@@ -1033,10 +1014,7 @@ def test_vlm_caption_glance_via_fake_backend():
 
     assert module._stats["vlm_total"] == 1
 
-    assert (
-        module._stats["last_caption"]
-        == "a white square on gray."
-    )
+    assert module._stats["last_caption"] == "a white square on gray."
 
     assert module._stats["vlm_backend"] == "FakeCaptioner"
 

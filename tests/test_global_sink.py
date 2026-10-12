@@ -26,7 +26,6 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
 from nan_itself.agent.core import Agent
 from nan_itself.agent.engine import StepEngine
 from nan_itself.agent.prompts import render_turn
@@ -35,7 +34,6 @@ from nan_itself.events import (
     sink,
 )
 from nan_itself.modules.model import Turn
-
 
 # ============================================================================
 # Hygiene: the singleton must never leak between tests
@@ -88,22 +86,13 @@ def test_caller_supplied_identity_lands_in_content():
     # sink neither adds nor rewrites fields.
     assert event["content"]["agent_hash"] == "hash-a"
 
-    assert (
-        event["content"]["parent_hash"]
-        == "hash-parent"
-    )
+    assert event["content"]["parent_hash"] == "hash-parent"
 
     assert event["content"]["depth"] == 2
 
-    assert (
-        event["content"]["category"]
-        == "subagent_report"
-    )
+    assert event["content"]["category"] == "subagent_report"
 
-    assert (
-        event["content"]["payload"]["agent_id"]
-        == "abc12345"
-    )
+    assert event["content"]["payload"]["agent_id"] == "abc12345"
 
 
 def test_emission_without_identity_omits_the_keys():
@@ -328,10 +317,7 @@ def test_agent_run_stamps_events_with_its_own_identity():
 
         # Let the in-flight turn finish emitting.
         for _ in range(100):
-            if any(
-                event["t"] == "output_done"
-                for event in bus.history()
-            ):
+            if any(event["t"] == "output_done" for event in bus.history()):
                 break
 
             await asyncio.sleep(0)
@@ -354,22 +340,13 @@ def test_agent_run_stamps_events_with_its_own_identity():
         # Every event of the child's turn carries the child's own
         # identity inside content -- never the root's.
         for event in events:
-            assert (
-                event["content"]["agent_hash"]
-                == child.agent_hash
-            )
+            assert event["content"]["agent_hash"] == child.agent_hash
 
-            assert (
-                event["content"]["parent_hash"]
-                == root.agent_hash
-            )
+            assert event["content"]["parent_hash"] == root.agent_hash
 
             assert event["content"]["depth"] == 1
 
-        kinds = [
-            event["t"]
-            for event in events
-        ]
+        kinds = [event["t"] for event in events]
 
         assert "record_started" in kinds
 
@@ -450,10 +427,7 @@ def test_engine_step_without_bus_uses_complete_generation():
         # The step records the assistant's outcome structurally
         # (reply); rendering yields the observation first, then
         # the assistant reply.
-        assert [
-            message.content
-            for message in render_turn(result)
-        ] == ["observation", "hi"]
+        assert [message.content for message in render_turn(result)] == ["observation", "hi"]
 
         assert not llm.streamed
 

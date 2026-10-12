@@ -60,6 +60,7 @@ coexist during the transaction.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,6 @@ from .watcher import (
     SourceTracker,
     file_fingerprint,
 )
-
 
 # Grace period for one MCP worker to exit after being asked
 # to stop. A worker stuck in a hung MCP round trip is
@@ -109,15 +109,11 @@ class _MCPWorker:
     ) -> None:
         self.spec = spec
 
-        self.stop_event = (
-            asyncio.Event()
-        )
+        self.stop_event = asyncio.Event()
 
         loop = asyncio.get_running_loop()
 
-        self.ready: asyncio.Future[Provider] = (
-            loop.create_future()
-        )
+        self.ready: asyncio.Future[Provider] = loop.create_future()
 
         self.task: asyncio.Task[None] | None = None
 
@@ -139,18 +135,12 @@ class _MCPWorker:
         """
         async with self._condition:
             if self.stopping:
-                raise RuntimeError(
-                    f"MCP provider '{self.spec.name}' "
-                    f"is stopping."
-                )
+                raise RuntimeError(f"MCP provider '{self.spec.name}' is stopping.")
 
             provider = self.provider
 
             if provider is None:
-                raise RuntimeError(
-                    f"MCP provider '{self.spec.name}' "
-                    f"is not ready."
-                )
+                raise RuntimeError(f"MCP provider '{self.spec.name}' is not ready.")
 
             self.active_calls += 1
 
@@ -187,9 +177,7 @@ class _MCPWorker:
         Wait until all in-flight tool calls have completed.
         """
         async with self._condition:
-            await self._condition.wait_for(
-                lambda: self.active_calls == 0
-            )
+            await self._condition.wait_for(lambda: self.active_calls == 0)
 
 
 class ProviderRuntime:
@@ -203,44 +191,20 @@ class ProviderRuntime:
         project_root = _paths.repo_root()
 
         self.tool_timeout = tool_timeout
-        self.mcp_start_timeout = (
-            mcp_start_timeout
-        )
+        self.mcp_start_timeout = mcp_start_timeout
 
         # Builtin and workspace sources live in parallel directory
         # layouts and are scanned with exactly the same hot-reload
         # logic. Deleting a source file disables its provider.
-        self.builtin_mcps_dir = (
-            project_root
-            / "builtin"
-            / "tools"
-            / "mcps"
-        ).resolve()
+        self.builtin_mcps_dir = (project_root / "builtin" / "tools" / "mcps").resolve()
 
-        self.builtin_locals_dir = (
-            project_root
-            / "builtin"
-            / "tools"
-            / "local"
-        ).resolve()
+        self.builtin_locals_dir = (project_root / "builtin" / "tools" / "local").resolve()
 
-        self.workspace_mcp_dir = (
-            project_root
-            / "workspace"
-            / "tools"
-            / "mcps"
-        ).resolve()
+        self.workspace_mcp_dir = (project_root / "workspace" / "tools" / "mcps").resolve()
 
-        self.workspace_local_dir = (
-            project_root
-            / "workspace"
-            / "tools"
-            / "local"
-        ).resolve()
+        self.workspace_local_dir = (project_root / "workspace" / "tools" / "local").resolve()
 
-        self.scan_interval = (
-            scan_interval
-        )
+        self.scan_interval = scan_interval
 
         # ----------------------------------------------------------
         # Live providers.
@@ -296,14 +260,10 @@ class ProviderRuntime:
         # Supervisor lifecycle.
         # ----------------------------------------------------------
 
-        self._supervisor_task: (
-            asyncio.Task[None] | None
-        ) = None
+        self._supervisor_task: asyncio.Task[None] | None = None
 
         # start() waits until the supervisor finishes initial loading.
-        self._startup_future: (
-            asyncio.Future[None] | None
-        ) = None
+        self._startup_future: asyncio.Future[None] | None = None
 
         self._wake = asyncio.Event()
 
@@ -330,17 +290,11 @@ class ProviderRuntime:
 
         loop = asyncio.get_running_loop()
 
-        self._startup_future = (
-            loop.create_future()
-        )
+        self._startup_future = loop.create_future()
 
-        self._supervisor_task = (
-            asyncio.create_task(
-                self._supervisor(),
-                name=(
-                    "provider-runtime-supervisor"
-                ),
-            )
+        self._supervisor_task = asyncio.create_task(
+            self._supervisor(),
+            name=("provider-runtime-supervisor"),
         )
 
         try:
@@ -350,15 +304,11 @@ class ProviderRuntime:
             self._stopping = True
             self._wake.set()
 
-            supervisor = (
-                self._supervisor_task
-            )
+            supervisor = self._supervisor_task
 
             if supervisor is not None:
-                try:
+                with contextlib.suppress(BaseException):
                     await supervisor
-                except BaseException:
-                    pass
 
             self._supervisor_task = None
             self._startup_future = None
@@ -379,9 +329,7 @@ class ProviderRuntime:
         signals each worker's stop event and waits for each worker task
         to exit. The worker itself then closes its own MCP context.
         """
-        supervisor = (
-            self._supervisor_task
-        )
+        supervisor = self._supervisor_task
 
         if supervisor is None:
             return
@@ -396,15 +344,10 @@ class ProviderRuntime:
             await supervisor
 
         except asyncio.CancelledError:
-            logger.warning(
-                "Provider runtime supervisor was cancelled "
-                "during shutdown"
-            )
+            logger.warning("Provider runtime supervisor was cancelled during shutdown")
 
         except Exception:
-            logger.exception(
-                "Provider runtime supervisor failed during shutdown"
-            )
+            logger.exception("Provider runtime supervisor failed during shutdown")
 
         finally:
             self._startup_future = None
@@ -412,9 +355,7 @@ class ProviderRuntime:
             # Evict dynamic tool modules before dropping the
             # name mapping: repeated start/stop cycles must
             # not accumulate _dynamic_tool_* entries.
-            for imported_name in (
-                self._local_imported_names.values()
-            ):
+            for imported_name in self._local_imported_names.values():
                 sys.modules.pop(
                     imported_name,
                     None,
@@ -437,19 +378,13 @@ class ProviderRuntime:
     def provider_names(
         self,
     ) -> tuple[str, ...]:
-        return tuple(
-            sorted(
-                self.providers
-            )
-        )
+        return tuple(sorted(self.providers))
 
     def get_provider(
         self,
         name: str,
     ) -> Provider | None:
-        return self.providers.get(
-            name
-        )
+        return self.providers.get(name)
 
     def list_all_tools(
         self,
@@ -470,22 +405,14 @@ class ProviderRuntime:
             ]
         ] = []
 
-        for provider_name in sorted(
-            self.providers
-        ):
-            provider = self.providers[
-                provider_name
-            ]
+        for provider_name in sorted(self.providers):
+            provider = self.providers[provider_name]
 
-            for tool_name in sorted(
-                provider.tools
-            ):
+            for tool_name in sorted(provider.tools):
                 pairs.append(
                     (
                         provider_name,
-                        provider.tools[
-                            tool_name
-                        ],
+                        provider.tools[tool_name],
                     )
                 )
 
@@ -494,43 +421,34 @@ class ProviderRuntime:
     async def resolve_tool(
         self,
         name: str,
-    ) -> tuple[
-        Provider,
-        types.Tool,
-    ] | None:
+    ) -> (
+        tuple[
+            Provider,
+            types.Tool,
+        ]
+        | None
+    ):
         """
         Resolve a 'provider/tool' composite name.
 
         MCP tool tables are refreshed once on a miss, so a tool
         added to a live server becomes visible without restart.
         """
-        provider_name, _, tool_name = (
-            name.partition("/")
-        )
+        provider_name, _, tool_name = name.partition("/")
 
         if not tool_name:
             return None
 
-        provider = self.providers.get(
-            provider_name
-        )
+        provider = self.providers.get(provider_name)
 
         if provider is None:
             return None
 
-        tool = provider.tools.get(
-            tool_name
-        )
+        tool = provider.tools.get(tool_name)
 
-        if (
-            tool is None
-            and provider.spec.kind
-            != PROVIDER_KIND_LOCAL
-        ):
+        if tool is None and provider.spec.kind != PROVIDER_KIND_LOCAL:
             try:
-                await self.refresh_provider_tools(
-                    provider_name
-                )
+                await self.refresh_provider_tools(provider_name)
 
             except Exception as exc:
                 # A failed refresh (hung server, worker
@@ -539,24 +457,19 @@ class ProviderRuntime:
                 # now; report None instead of raising out
                 # of a resolver contract.
                 logger.warning(
-                    "Tool table refresh failed for "
-                    "MCP provider '{}': {}",
+                    "Tool table refresh failed for MCP provider '{}': {}",
                     provider_name,
                     exc,
                 )
 
                 return None
 
-            provider = self.providers.get(
-                provider_name
-            )
+            provider = self.providers.get(provider_name)
 
             if provider is None:
                 return None
 
-            tool = provider.tools.get(
-                tool_name
-            )
+            tool = provider.tools.get(tool_name)
 
         if tool is None:
             return None
@@ -572,32 +485,19 @@ class ProviderRuntime:
     ) -> None:
         provider = self.providers[name]
 
-        if (
-            provider.spec.kind
-            == PROVIDER_KIND_LOCAL
-        ):
+        if provider.spec.kind == PROVIDER_KIND_LOCAL:
             return
 
-        worker = (
-            self._mcp_workers.get(
-                name
-            )
-        )
+        worker = self._mcp_workers.get(name)
 
         if worker is None:
-            raise RuntimeError(
-                f"MCP provider '{name}' "
-                f"is not running."
-            )
+            raise RuntimeError(f"MCP provider '{name}' is not running.")
 
         reserved = await worker.acquire()
 
         try:
             if reserved is not provider:
-                raise RuntimeError(
-                    f"MCP provider '{name}' changed while "
-                    f"refreshing tools."
-                )
+                raise RuntimeError(f"MCP provider '{name}' changed while refreshing tools.")
 
             await mcp_backend.refresh_tools(
                 provider,
@@ -613,23 +513,15 @@ class ProviderRuntime:
         tool_name: str,
         arguments: dict[str, Any] | None = None,
     ) -> types.CallToolResult:
-        provider = self.providers.get(
-            provider_name
-        )
+        provider = self.providers.get(provider_name)
 
         if provider is None:
-            return error_result(
-                f"Unknown tool provider: "
-                f"{provider_name}"
-            )
+            return error_result(f"Unknown tool provider: {provider_name}")
 
         arguments = arguments or {}
 
         try:
-            if (
-                provider.spec.kind
-                == PROVIDER_KIND_LOCAL
-            ):
+            if provider.spec.kind == PROVIDER_KIND_LOCAL:
                 return await asyncio.wait_for(
                     provider.call_tool(
                         tool_name,
@@ -638,25 +530,17 @@ class ProviderRuntime:
                     timeout=self.tool_timeout,
                 )
 
-            worker = (
-                self._mcp_workers.get(
-                    provider_name
-                )
-            )
+            worker = self._mcp_workers.get(provider_name)
 
             if worker is None:
-                return error_result(
-                    f"MCP provider '{provider_name}' "
-                    f"is not running."
-                )
+                return error_result(f"MCP provider '{provider_name}' is not running.")
 
             reserved = await worker.acquire()
 
             try:
                 if reserved is not provider:
                     return error_result(
-                        f"MCP provider '{provider_name}' "
-                        f"was replaced during the tool call."
+                        f"MCP provider '{provider_name}' was replaced during the tool call."
                     )
 
                 return await asyncio.wait_for(
@@ -670,7 +554,7 @@ class ProviderRuntime:
             finally:
                 await worker.release()
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Tool call timed out: %s.%s (%gs)",
                 provider_name,
@@ -679,8 +563,7 @@ class ProviderRuntime:
             )
 
             return error_result(
-                f"Tool '{tool_name}' timed out "
-                f"after {self.tool_timeout:g} seconds."
+                f"Tool '{tool_name}' timed out after {self.tool_timeout:g} seconds."
             )
 
         except Exception as exc:
@@ -690,9 +573,7 @@ class ProviderRuntime:
                 tool_name,
             )
 
-            return error_result(
-                str(exc)
-            )
+            return error_result(str(exc))
 
     # ==================================================================
     # MCP worker lifecycle
@@ -720,41 +601,24 @@ class ProviderRuntime:
         This allows old and new generations with the same provider
         name to coexist safely during replacement.
         """
-        if (
-            register
-            and spec.name in self._mcp_workers
-        ):
-            raise ValueError(
-                f"Duplicate MCP worker: "
-                f"{spec.name}"
-            )
+        if register and spec.name in self._mcp_workers:
+            raise ValueError(f"Duplicate MCP worker: {spec.name}")
 
-        worker = _MCPWorker(
-            spec
-        )
+        worker = _MCPWorker(spec)
 
         worker.task = asyncio.create_task(
-            self._run_mcp_worker(
-                worker
-            ),
-            name=(
-                f"mcp-worker:"
-                f"{spec.name}"
-            ),
+            self._run_mcp_worker(worker),
+            name=(f"mcp-worker:{spec.name}"),
         )
 
         try:
             provider = await asyncio.wait_for(
-                asyncio.shield(
-                    worker.ready
-                ),
+                asyncio.shield(worker.ready),
                 timeout=self.mcp_start_timeout,
             )
 
         except BaseException:
-            await self._stop_mcp_worker(
-                worker
-            )
+            await self._stop_mcp_worker(worker)
             raise
 
         worker.provider = provider
@@ -762,13 +626,9 @@ class ProviderRuntime:
         if register:
             # The worker is fully ready before it becomes visible
             # to the rest of the runtime.
-            self._mcp_workers[
-                spec.name
-            ] = worker
+            self._mcp_workers[spec.name] = worker
 
-            self.providers[
-                spec.name
-            ] = provider
+            self.providers[spec.name] = provider
 
             logger.info(
                 "MCP worker '{}' started",
@@ -810,18 +670,14 @@ class ProviderRuntime:
             worker.provider = provider
 
             if not worker.ready.done():
-                worker.ready.set_result(
-                    provider
-                )
+                worker.ready.set_result(provider)
 
             # Stay alive until this worker is asked to stop.
             await worker.stop_event.wait()
 
         except BaseException as exc:
             if not worker.ready.done():
-                worker.ready.set_exception(
-                    exc
-                )
+                worker.ready.set_exception(exc)
 
             if not isinstance(
                 exc,
@@ -845,8 +701,7 @@ class ProviderRuntime:
 
             except BaseException:
                 logger.exception(
-                    "Failed while draining calls for "
-                    "MCP worker '{}'",
+                    "Failed while draining calls for MCP worker '{}'",
                     spec.name,
                 )
 
@@ -895,11 +750,7 @@ class ProviderRuntime:
             # appear in these mappings, so this is naturally safe.
             # ------------------------------------------------------
 
-            current_worker = (
-                self._mcp_workers.get(
-                    spec.name
-                )
-            )
+            current_worker = self._mcp_workers.get(spec.name)
 
             if current_worker is worker:
                 self._mcp_workers.pop(
@@ -916,19 +767,10 @@ class ProviderRuntime:
                 source_file = spec.file
 
                 if source_file is not None:
-                    expected = (
-                        source_file.resolve()
-                    )
+                    expected = source_file.resolve()
 
-                    for source_path, names in (
-                        list(
-                            self._mcp_sources.items()
-                        )
-                    ):
-                        if (
-                            source_path.resolve()
-                            != expected
-                        ):
+                    for source_path, names in list(self._mcp_sources.items()):
+                        if source_path.resolve() != expected:
                             continue
 
                         if spec.name not in names:
@@ -942,16 +784,9 @@ class ProviderRuntime:
                                 None,
                             )
 
-            current_provider = (
-                self.providers.get(
-                    spec.name
-                )
-            )
+            current_provider = self.providers.get(spec.name)
 
-            if (
-                provider is not None
-                and current_provider is provider
-            ):
+            if provider is not None and current_provider is provider:
                 self.providers.pop(
                     spec.name,
                     None,
@@ -984,13 +819,12 @@ class ProviderRuntime:
                 timeout=_MCP_STOP_TIMEOUT,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # wait_for has cancelled the task; a worker that
             # could not stop on its own (e.g. hung inside an
             # MCP round trip) must not hang the caller too.
             logger.exception(
-                "MCP worker '{}' did not stop within "
-                f"{_MCP_STOP_TIMEOUT:g}s and was cancelled",
+                f"MCP worker '{{}}' did not stop within {_MCP_STOP_TIMEOUT:g}s and was cancelled",
                 worker.spec.name,
             )
 
@@ -1022,12 +856,7 @@ class ProviderRuntime:
             await worker.begin_stop()
 
         await asyncio.gather(
-            *(
-                self._await_mcp_worker(
-                    worker
-                )
-                for worker in workers
-            ),
+            *(self._await_mcp_worker(worker) for worker in workers),
             return_exceptions=True,
         )
 
@@ -1058,9 +887,7 @@ class ProviderRuntime:
     async def _stop_all_mcp_workers(
         self,
     ) -> None:
-        workers = list(
-            self._mcp_workers.values()
-        )
+        workers = list(self._mcp_workers.values())
 
         if not workers:
             return
@@ -1069,12 +896,7 @@ class ProviderRuntime:
             await worker.begin_stop()
 
         await asyncio.gather(
-            *(
-                self._await_mcp_worker(
-                    worker
-                )
-                for worker in workers
-            ),
+            *(self._await_mcp_worker(worker) for worker in workers),
             return_exceptions=True,
         )
 
@@ -1091,13 +913,9 @@ class ProviderRuntime:
         or removes it cleanly when the file is gone. This policy
         is the same for builtin and workspace sources.
         """
-        dead: list[
-            tuple[str, _MCPWorker]
-        ] = []
+        dead: list[tuple[str, _MCPWorker]] = []
 
-        for name, worker in list(
-            self._mcp_workers.items()
-        ):
+        for name, worker in list(self._mcp_workers.items()):
             task = worker.task
 
             if task is None:
@@ -1132,11 +950,7 @@ class ProviderRuntime:
                         name,
                     )
 
-            current_worker = (
-                self._mcp_workers.get(
-                    name
-                )
-            )
+            current_worker = self._mcp_workers.get(name)
 
             if current_worker is not worker:
                 continue
@@ -1146,37 +960,25 @@ class ProviderRuntime:
                 None,
             )
 
-            provider = (
-                self.providers.get(
-                    name
-                )
-            )
+            provider = self.providers.get(name)
 
-            if (
-                provider is not None
-                and provider is worker.provider
-            ):
+            if provider is not None and provider is worker.provider:
                 self.providers.pop(
                     name,
                     None,
                 )
 
-            source = Path(
-                worker.spec.source
-            ).resolve()
+            source = Path(worker.spec.source).resolve()
 
             self._mcp_sources.pop(
                 source,
                 None,
             )
 
-            self._mcp_tracker.forget(
-                source
-            )
+            self._mcp_tracker.forget(source)
 
             logger.warning(
-                "MCP worker '{}' died; source '{}' "
-                "will be reloaded",
+                "MCP worker '{}' died; source '{}' will be reloaded",
                 name,
                 source,
             )
@@ -1194,13 +996,9 @@ class ProviderRuntime:
     async def _scan_mcps(
         self,
     ) -> None:
-        await self._scan_mcp_root(
-            self.builtin_mcps_dir
-        )
+        await self._scan_mcp_root(self.builtin_mcps_dir)
 
-        await self._scan_mcp_root(
-            self.workspace_mcp_dir
-        )
+        await self._scan_mcp_root(self.workspace_mcp_dir)
 
     async def _scan_mcp_root(
         self,
@@ -1213,45 +1011,30 @@ class ProviderRuntime:
 
         # Blocked names never enter the candidate set (which also
         # removes an already-loaded one, as a plain removal).
-        blocked_names = _blocklist.blocked(
-            "tools"
-        )
+        blocked_names = _blocklist.blocked("tools")
 
         current_files = {
             path.resolve()
             for path in root.iterdir()
             if (
                 path.is_file()
-                and path.suffix.lower()
-                in {".yaml", ".yml"}
+                and path.suffix.lower() in {".yaml", ".yml"}
                 and not path.name.startswith("_")
                 and path.stem not in blocked_names
             )
         }
 
         removed = {
-            path
-            for path in self._mcp_tracker.known_files()
-            if path.is_relative_to(
-                root
-            )
+            path for path in self._mcp_tracker.known_files() if path.is_relative_to(root)
         } - current_files
 
         for path in removed:
-            await self._remove_mcp_source(
-                path
-            )
+            await self._remove_mcp_source(path)
 
-        for path in sorted(
-            current_files
-        ):
-            fingerprint = (
-                file_fingerprint(path)
-            )
+        for path in sorted(current_files):
+            fingerprint = file_fingerprint(path)
 
-            loaded = (
-                path in self._mcp_sources
-            )
+            loaded = path in self._mcp_sources
 
             if not self._mcp_tracker.needs_load(
                 path,
@@ -1285,13 +1068,9 @@ class ProviderRuntime:
     async def _scan_locals(
         self,
     ) -> None:
-        await self._scan_local_root(
-            self.builtin_locals_dir
-        )
+        await self._scan_local_root(self.builtin_locals_dir)
 
-        await self._scan_local_root(
-            self.workspace_local_dir
-        )
+        await self._scan_local_root(self.workspace_local_dir)
 
     async def _scan_local_root(
         self,
@@ -1304,48 +1083,30 @@ class ProviderRuntime:
 
         # Blocked names never enter the candidate set (which also
         # removes an already-loaded one, as a plain removal).
-        blocked_names = _blocklist.blocked(
-            "tools"
-        )
+        blocked_names = _blocklist.blocked("tools")
 
         current_files = {
             path.resolve()
-            for path in root.rglob(
-                "*.py"
-            )
+            for path in root.rglob("*.py")
             if (
                 path.is_file()
                 and not path.name.startswith("_")
                 and path.stem not in blocked_names
-                and local_backend.has_tool_header(
-                    path
-                )
+                and local_backend.has_tool_header(path)
             )
         }
 
         removed = {
-            path
-            for path in self._local_tracker.known_files()
-            if path.is_relative_to(
-                root
-            )
+            path for path in self._local_tracker.known_files() if path.is_relative_to(root)
         } - current_files
 
         for path in removed:
-            await self._remove_local_source(
-                path
-            )
+            await self._remove_local_source(path)
 
-        for path in sorted(
-            current_files
-        ):
-            fingerprint = (
-                file_fingerprint(path)
-            )
+        for path in sorted(current_files):
+            fingerprint = file_fingerprint(path)
 
-            loaded = (
-                path in self._local_sources
-            )
+            loaded = path in self._local_sources
 
             if not self._local_tracker.needs_load(
                 path,
@@ -1387,26 +1148,17 @@ class ProviderRuntime:
     ) -> None:
         path = path.resolve()
 
-        config = mcp_backend.load_yaml(
-            path
+        config = mcp_backend.load_yaml(path)
+
+        specs = mcp_backend.parse_config(
+            config,
+            path,
         )
 
-        specs = (
-            mcp_backend.parse_config(
-                config,
-                path,
-            )
-        )
-
-        names = [
-            spec.name
-            for spec in specs
-        ]
+        names = [spec.name for spec in specs]
 
         if len(set(names)) != len(names):
-            raise ValueError(
-                f"Duplicate MCP provider name in {path}"
-            )
+            raise ValueError(f"Duplicate MCP provider name in {path}")
 
         # --------------------------------------------------------------
         # Validate ownership before starting candidates:
@@ -1414,24 +1166,15 @@ class ProviderRuntime:
         # --------------------------------------------------------------
 
         for spec in specs:
-            existing = (
-                self.providers.get(
-                    spec.name
-                )
-            )
+            existing = self.providers.get(spec.name)
 
             if existing is None:
                 continue
 
-            source = Path(
-                existing.spec.source
-            ).resolve()
+            source = Path(existing.spec.source).resolve()
 
             if source != path:
-                raise ValueError(
-                    f"MCP provider '{spec.name}' "
-                    f"is already provided by {source}"
-                )
+                raise ValueError(f"MCP provider '{spec.name}' is already provided by {source}")
 
         # --------------------------------------------------------------
         # Connect candidates.
@@ -1454,25 +1197,17 @@ class ProviderRuntime:
 
         try:
             for spec in specs:
-                worker = (
-                    await self._start_mcp_worker(
-                        spec,
-                        register=False,
-                    )
+                worker = await self._start_mcp_worker(
+                    spec,
+                    register=False,
                 )
 
-                candidates[
-                    spec.name
-                ] = worker
+                candidates[spec.name] = worker
 
         except BaseException:
             # Candidates are independent workers. Stop only those
             # created by this failed transaction.
-            await self._stop_mcp_workers(
-                list(
-                    candidates.values()
-                )
-            )
+            await self._stop_mcp_workers(list(candidates.values()))
 
             raise
 
@@ -1485,58 +1220,32 @@ class ProviderRuntime:
             set(),
         )
 
-        new_names = set(
-            candidates
-        )
+        new_names = set(candidates)
 
-        old_workers_to_stop: list[
-            _MCPWorker
-        ] = []
+        old_workers_to_stop: list[_MCPWorker] = []
 
         # --------------------------------------------------------------
         # Remove stale names from this source.
         # --------------------------------------------------------------
 
-        for name in (
-            old_names - new_names
-        ):
-            old_worker = (
-                self._mcp_workers.get(
-                    name
-                )
-            )
+        for name in old_names - new_names:
+            old_worker = self._mcp_workers.get(name)
 
-            if (
-                old_worker is not None
-                and Path(
-                    old_worker.spec.source
-                ).resolve()
-                == path
-            ):
+            if old_worker is not None and Path(old_worker.spec.source).resolve() == path:
                 self._mcp_workers.pop(
                     name,
                     None,
                 )
 
-                current_provider = (
-                    self.providers.get(
-                        name
-                    )
-                )
+                current_provider = self.providers.get(name)
 
-                if (
-                    current_provider is not None
-                    and current_provider
-                    is old_worker.provider
-                ):
+                if current_provider is not None and current_provider is old_worker.provider:
                     self.providers.pop(
                         name,
                         None,
                     )
 
-                old_workers_to_stop.append(
-                    old_worker
-                )
+                old_workers_to_stop.append(old_worker)
 
         # --------------------------------------------------------------
         # Install candidates FIRST, then stop old workers.
@@ -1551,65 +1260,35 @@ class ProviderRuntime:
         # see the new generation after this point.
         # --------------------------------------------------------------
 
-        for name, candidate in (
-            candidates.items()
-        ):
-            old_worker = (
-                self._mcp_workers.get(
-                    name
-                )
-            )
+        for name, candidate in candidates.items():
+            old_worker = self._mcp_workers.get(name)
 
-            if (
-                old_worker is not None
-                and old_worker is not candidate
-            ):
+            if old_worker is not None and old_worker is not candidate:
                 self._mcp_workers.pop(
                     name,
                     None,
                 )
 
-                old_provider = (
-                    self.providers.get(
-                        name
-                    )
-                )
+                old_provider = self.providers.get(name)
 
-                if (
-                    old_provider is not None
-                    and old_provider
-                    is old_worker.provider
-                ):
+                if old_provider is not None and old_provider is old_worker.provider:
                     self.providers.pop(
                         name,
                         None,
                     )
 
-                old_workers_to_stop.append(
-                    old_worker
-                )
+                old_workers_to_stop.append(old_worker)
 
-            self._mcp_workers[
-                name
-            ] = candidate
+            self._mcp_workers[name] = candidate
 
-            provider = (
-                candidate.provider
-            )
+            provider = candidate.provider
 
             if provider is None:
-                raise RuntimeError(
-                    f"MCP worker '{name}' "
-                    f"became ready without a provider."
-                )
+                raise RuntimeError(f"MCP worker '{name}' became ready without a provider.")
 
-            self.providers[
-                name
-            ] = provider
+            self.providers[name] = provider
 
-        self._mcp_sources[
-            path
-        ] = new_names
+        self._mcp_sources[path] = new_names
 
         # --------------------------------------------------------------
         # Stop replaced/stale workers concurrently.
@@ -1617,9 +1296,7 @@ class ProviderRuntime:
         # Old workers close their own stack in their own tasks.
         # --------------------------------------------------------------
 
-        await self._stop_mcp_workers(
-            old_workers_to_stop
-        )
+        await self._stop_mcp_workers(old_workers_to_stop)
 
         logger.info(
             "Loaded MCP source '{}': {}",
@@ -1638,23 +1315,15 @@ class ProviderRuntime:
             set(),
         )
 
-        workers: list[
-            _MCPWorker
-        ] = []
+        workers: list[_MCPWorker] = []
 
         for name in names:
-            worker = (
-                self._mcp_workers.get(
-                    name
-                )
-            )
+            worker = self._mcp_workers.get(name)
 
             if worker is None:
                 continue
 
-            if Path(
-                worker.spec.source
-            ).resolve() != path:
+            if Path(worker.spec.source).resolve() != path:
                 continue
 
             self._mcp_workers.pop(
@@ -1662,33 +1331,19 @@ class ProviderRuntime:
                 None,
             )
 
-            provider = (
-                self.providers.get(
-                    name
-                )
-            )
+            provider = self.providers.get(name)
 
-            if (
-                provider is not None
-                and provider
-                is worker.provider
-            ):
+            if provider is not None and provider is worker.provider:
                 self.providers.pop(
                     name,
                     None,
                 )
 
-            workers.append(
-                worker
-            )
+            workers.append(worker)
 
-        await self._stop_mcp_workers(
-            workers
-        )
+        await self._stop_mcp_workers(workers)
 
-        self._mcp_tracker.forget(
-            path
-        )
+        self._mcp_tracker.forget(path)
 
         logger.info(
             "Removed MCP source '{}'",
@@ -1706,96 +1361,60 @@ class ProviderRuntime:
     ) -> None:
         path = path.resolve()
 
-        old_names = (
-            self._local_sources.get(
-                path,
-                set(),
-            )
+        old_names = self._local_sources.get(
+            path,
+            set(),
         )
 
         (
             cls,
             imported_name,
-        ) = local_backend.load_class_from_file(
-            path
-        )
+        ) = local_backend.load_class_from_file(path)
 
-        local_backend.validate_class(
-            cls
-        )
+        local_backend.validate_class(cls)
 
         provider_name = cls.id
 
-        existing = (
-            self.providers.get(
-                provider_name
-            )
-        )
+        existing = self.providers.get(provider_name)
 
         if existing is not None:
-            source = Path(
-                existing.spec.source
-            ).resolve()
+            source = Path(existing.spec.source).resolve()
 
             if source != path:
-                raise ValueError(
-                    f"Local tool "
-                    f"'{provider_name}' is already "
-                    f"provided by {source}"
-                )
+                raise ValueError(f"Local tool '{provider_name}' is already provided by {source}")
 
-        candidate_spec = (
-            local_backend.local_provider_spec(
-                name=provider_name,
-                file=path,
-                source=str(path),
-            )
+        candidate_spec = local_backend.local_provider_spec(
+            name=provider_name,
+            file=path,
+            source=str(path),
         )
 
-        candidate = (
-            local_backend.build_provider(
-                candidate_spec,
-                cls,
-            )
+        candidate = local_backend.build_provider(
+            candidate_spec,
+            cls,
         )
 
-        previous_imported = (
-            self._local_imported_names.get(
-                path
-            )
-        )
+        previous_imported = self._local_imported_names.get(path)
 
-        if (
-            previous_imported is not None
-            and previous_imported
-            != imported_name
-        ):
+        if previous_imported is not None and previous_imported != imported_name:
             sys.modules.pop(
                 previous_imported,
                 None,
             )
 
-        for name in (
-            old_names - {provider_name}
-        ):
+        for name in old_names - {provider_name}:
             self.providers.pop(
                 name,
                 None,
             )
 
-        self.providers[
-            provider_name
-        ] = candidate
+        self.providers[provider_name] = candidate
 
-        self._local_sources[
-            path
-        ] = {
+        self._local_sources[path] = {
             provider_name,
         }
 
-        self._local_imported_names[
-            path
-        ] = imported_name
+        self._local_imported_names[path] = imported_name
 
         logger.info(
             "Loaded local tool source '{}': {}",
@@ -1809,26 +1428,18 @@ class ProviderRuntime:
     ) -> None:
         path = path.resolve()
 
-        names = (
-            self._local_sources.pop(
-                path,
-                set(),
-            )
+        names = self._local_sources.pop(
+            path,
+            set(),
         )
 
         for name in names:
-            provider = (
-                self.providers.get(
-                    name
-                )
-            )
+            provider = self.providers.get(name)
 
             if provider is None:
                 continue
 
-            if Path(
-                provider.spec.source
-            ).resolve() != path:
+            if Path(provider.spec.source).resolve() != path:
                 continue
 
             self.providers.pop(
@@ -1836,11 +1447,9 @@ class ProviderRuntime:
                 None,
             )
 
-        imported_name = (
-            self._local_imported_names.pop(
-                path,
-                None,
-            )
+        imported_name = self._local_imported_names.pop(
+            path,
+            None,
         )
 
         if imported_name is not None:
@@ -1849,9 +1458,7 @@ class ProviderRuntime:
                 None,
             )
 
-        self._local_tracker.forget(
-            path
-        )
+        self._local_tracker.forget(path)
 
         logger.info(
             "Removed local tool source '{}'",
@@ -1881,21 +1488,12 @@ class ProviderRuntime:
                 # kill the runtime. The supervisor loop keeps
                 # reconciling and failed sources are retried
                 # with backoff.
-                logger.exception(
-                    "Initial provider source scan failed"
-                )
+                logger.exception("Initial provider source scan failed")
 
-            startup_future = (
-                self._startup_future
-            )
+            startup_future = self._startup_future
 
-            if (
-                startup_future is not None
-                and not startup_future.done()
-            ):
-                startup_future.set_result(
-                    None
-                )
+            if startup_future is not None and not startup_future.done():
+                startup_future.set_result(None)
 
             while not self._stopping:
                 try:
@@ -1904,9 +1502,7 @@ class ProviderRuntime:
                     await self._scan_sources()
 
                 except Exception:
-                    logger.exception(
-                        "Provider source reconciliation failed"
-                    )
+                    logger.exception("Provider source reconciliation failed")
 
                 try:
                     await asyncio.wait_for(
@@ -1914,24 +1510,17 @@ class ProviderRuntime:
                         timeout=self.scan_interval,
                     )
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
                 finally:
                     self._wake.clear()
 
         except BaseException as exc:
-            startup_future = (
-                self._startup_future
-            )
+            startup_future = self._startup_future
 
-            if (
-                startup_future is not None
-                and not startup_future.done()
-            ):
-                startup_future.set_exception(
-                    exc
-                )
+            if startup_future is not None and not startup_future.done():
+                startup_future.set_exception(exc)
 
             raise
 
@@ -1945,9 +1534,7 @@ class ProviderRuntime:
             # Evict dynamic tool modules before dropping the
             # name mapping: repeated start/stop cycles must
             # not accumulate _dynamic_tool_* entries.
-            for imported_name in (
-                self._local_imported_names.values()
-            ):
+            for imported_name in self._local_imported_names.values():
                 sys.modules.pop(
                     imported_name,
                     None,

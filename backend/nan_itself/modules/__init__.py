@@ -15,15 +15,15 @@ for the runtime at import time.
 """
 
 from .model import (
+    MODULE_HEADER,
     ChannelSpec,
     DataSpace,
     DataSpaceReader,
-    MODULE_HEADER,
+    DuplicateModuleError,
     Module,
     ModuleRecord,
     ModuleState,
     Turn,
-    DuplicateModuleError,
 )
 
 __all__ = [
@@ -49,6 +49,4 @@ def __getattr__(name: str):
 
         return Facade
 
-    raise AttributeError(
-        f"module {__name__!r} has no attribute {name!r}"
-    )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

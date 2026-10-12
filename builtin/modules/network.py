@@ -10,24 +10,22 @@ No conclusions ("untrusted network" belongs to the agent).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import platform
 import re
 import subprocess
 import time
 from collections import deque
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 import psutil
 from loguru import logger
 
-try:
+with contextlib.suppress(Exception):
     import mss  # noqa: F401  (display sanity only)
-
-except Exception:
-
-    pass
 
 
 # ============================================================================
@@ -85,7 +83,6 @@ def _run(cmd: str, timeout: float = 4.0) -> str:
         return result.stdout or ""
 
     except Exception:
-
         return ""
 
 
@@ -97,14 +94,9 @@ def is_public_ip(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip.strip())
 
-        return (
-            addr.is_global
-            and not addr.is_multicast
-            and not addr.is_reserved
-        )
+        return addr.is_global and not addr.is_multicast and not addr.is_reserved
 
     except Exception:
-
         return False
 
 
@@ -132,9 +124,7 @@ def default_gateway() -> tuple[str, str] | None:
     if system == "Linux":
         out = _run("ip route show default")
 
-        match = re.search(
-            r"default via (\S+)(?: dev (\S+))?", out
-        )
+        match = re.search(r"default via (\S+)(?: dev (\S+))?", out)
 
         if match:
             return match.group(1), match.group(2) or ""
@@ -144,9 +134,7 @@ def default_gateway() -> tuple[str, str] | None:
     if system == "Windows":
         out = _run("route print 0.0.0.0")
 
-        match = re.search(
-            r"0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)", out
-        )
+        match = re.search(r"0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)", out)
 
         if match:
             return match.group(1), ""
@@ -172,7 +160,6 @@ def probe_online(
             )
 
         except Exception:
-
             continue
 
         return (time.perf_counter() - started) * 1000.0
@@ -189,7 +176,6 @@ def public_ip(
             text = httpx.get(url, timeout=timeout).text.strip()
 
         except Exception:
-
             continue
 
         if is_public_ip(text):
@@ -246,19 +232,14 @@ def _net_connections():
             name = "unknown"
 
             if conn.pid:
-                try:
+                with contextlib.suppress(Exception):
                     name = psutil.Process(conn.pid).name()
-
-                except Exception:
-
-                    pass
 
             out.append((conn, conn.pid, name))
 
         return out
 
     except Exception:
-
         out = []
 
         for proc in psutil.process_iter(["name"]):
@@ -269,7 +250,6 @@ def _net_connections():
                     out.append((conn, proc.pid, name))
 
             except Exception:
-
                 continue
 
         return out
@@ -291,12 +271,8 @@ class NetworkProbe:
         *,
         now: Callable[[], float] = time.time,
         mono: Callable[[], float] = time.monotonic,
-        gw_fn: Callable[
-            [], tuple[str, str] | None
-        ] = default_gateway,
-        probe_fn: Callable[
-            [], float | None
-        ] = probe_online,
+        gw_fn: Callable[[], tuple[str, str] | None] = default_gateway,
+        probe_fn: Callable[[], float | None] = probe_online,
         ip_fn: Callable[[], str | None] = public_ip,
         ssid_fn: Callable[[], str | None] = wifi_ssid,
         io_fn: Callable = _net_io,
@@ -383,7 +359,6 @@ class NetworkProbe:
                 name = psutil.Process(pid).name()
 
             except Exception:
-
                 name = "unknown"
 
         if pid is not None:
@@ -402,10 +377,7 @@ class NetworkProbe:
         if latency is None:
             self._fail_count += 1
 
-            if (
-                self._fail_count >= self.offline_after
-                and self._offline_since is None
-            ):
+            if self._fail_count >= self.offline_after and self._offline_since is None:
                 self._offline_since = self.now()
 
                 self._emit("offline")
@@ -423,9 +395,7 @@ class NetworkProbe:
 
             self._fail_count = 0
 
-            self._emit(
-                f"offline {_fmt_span(span)} -> online"
-            )
+            self._emit(f"offline {_fmt_span(span)} -> online")
 
         elif self._fail_count:
             self._fail_count = 0
@@ -454,7 +424,6 @@ class NetworkProbe:
             counters = self.io_fn()
 
         except Exception:
-
             return
 
         if not counters or dt <= 0:
@@ -479,10 +448,7 @@ class NetworkProbe:
 
             rates[name] = (dr, ds)
 
-        self._prev_io = {
-            name: (io.bytes_recv, io.bytes_sent)
-            for name, io in counters.items()
-        }
+        self._prev_io = {name: (io.bytes_recv, io.bytes_sent) for name, io in counters.items()}
 
         self._rates = rates
 
@@ -498,9 +464,7 @@ class NetworkProbe:
             return
 
         if total_down > self._baseline[0] * self.spike_ratio and total_down > 1e6:
-            self._emit(
-                f"traffic spike ↓{_fmt_bps(total_down)}"
-            )
+            self._emit(f"traffic spike ↓{_fmt_bps(total_down)}")
 
             self._baseline = (total_down, total_up)
 
@@ -517,7 +481,6 @@ class NetworkProbe:
             conns = self.conns_fn()
 
         except Exception:
-
             return
 
         est = 0
@@ -568,15 +531,10 @@ class NetworkProbe:
                     cutoff = now_mono - 3600
 
                     self._seen_outbound = {
-                        k: v
-                        for k, v in self._seen_outbound.items()
-                        if v > cutoff
+                        k: v for k, v in self._seen_outbound.items() if v > cutoff
                     }
 
-                self._emit(
-                    f"new outbound: {key[0]} -> "
-                    f"{key[1]}:{key[2]}"
-                )
+                self._emit(f"new outbound: {key[0]} -> {key[1]}:{key[2]}")
 
         listen_count = len(listen_keys)
 
@@ -584,10 +542,7 @@ class NetworkProbe:
 
         if self._seen_listen and new_listen:
             for lport, pid in sorted(new_listen)[:2]:
-                self._emit(
-                    f"listen added: {lport} "
-                    f"({self._proc_name(pid)})"
-                )
+                self._emit(f"listen added: {lport} ({self._proc_name(pid)})")
 
         self._seen_listen = listen_keys
 
@@ -600,7 +555,7 @@ class NetworkProbe:
     # ------------------------------------------------------------------
 
     def sample(self) -> dict[str, Any]:
-        mono = self.mono()
+        self.mono()
 
         now_wall = self.now()
 
@@ -635,17 +590,11 @@ class NetworkProbe:
                 if name.startswith(("lo", "utun", "tun", "tap")):
                     continue
 
-                if not stats.get(
-                    name
-                ) or not stats[name].isup:
+                if not stats.get(name) or not stats[name].isup:
                     continue
 
                 for addr in addr_list:
-                    if (
-                        addr.family.name
-                        == "AF_INET"
-                        and not addr.address.startswith("169.254")
-                    ):
+                    if addr.family.name == "AF_INET" and not addr.address.startswith("169.254"):
                         candidates.append((name, addr.address))
 
                         break
@@ -661,22 +610,27 @@ class NetworkProbe:
                 primary_if, local_ip = candidates[0]
 
         except Exception:
-
             pass
 
         tunnel = None
 
-        if gw and gw[1] and re.search(
-            r"(tun|tap|ppp|wg|ipsec|tailscale)",
-            gw[1],
-            re.I,
+        if (
+            gw
+            and gw[1]
+            and re.search(
+                r"(tun|tap|ppp|wg|ipsec|tailscale)",
+                gw[1],
+                re.I,
+            )
         ):
             # Default route riding a tunnel interface IS the
             # VPN fact; macOS system utuns never carry it.
             tunnel = gw[1]
 
         est, public, listen = getattr(
-            self, "_conn_stats", (None, None, None),
+            self,
+            "_conn_stats",
+            (None, None, None),
         )
 
         total_down = sum(r for r, _ in self._rates.values())
@@ -753,11 +707,7 @@ class NetworkModule(Module):
                 self._latest = facts
 
                 self.data.publish(
-                    {
-                        key: value
-                        for key, value in facts.items()
-                        if key != "events"
-                    }
+                    {key: value for key, value in facts.items() if key != "events"}
                     | {"events": facts.get("events", [])[-3:]}
                 )
 
@@ -806,9 +756,7 @@ class NetworkModule(Module):
         events = facts.get("events") or []
 
         if events:
-            rendered = " | ".join(
-                text for _, text in events[-self.events_render_limit:]
-            )
+            rendered = " | ".join(text for _, text in events[-self.events_render_limit :])
 
             lines.append(f"- events: {rendered}")
 
@@ -818,10 +766,7 @@ class NetworkModule(Module):
         if not facts.get("online"):
             span = facts.get("offline_since")
 
-            return (
-                f"- link: offline"
-                f"{_since(span)}"
-            )
+            return f"- link: offline{_since(span)}"
 
         parts = []
 
@@ -856,10 +801,7 @@ class NetworkModule(Module):
         if dl is None and ul is None:
             return "- traffic: sampling"
 
-        return (
-            f"- traffic: ↓{_fmt_bps(dl or 0)} "
-            f"↑{_fmt_bps(ul or 0)}"
-        )
+        return f"- traffic: ↓{_fmt_bps(dl or 0)} ↑{_fmt_bps(ul or 0)}"
 
     def _conn_line(self, facts: dict) -> str:
         est = facts.get("est")
@@ -871,10 +813,7 @@ class NetworkModule(Module):
         if est is None:
             return "- conn: sampling"
 
-        return (
-            f"- conn: {est} est ({public or 0} public)"
-            f" | listen {listen or 0}"
-        )
+        return f"- conn: {est} est ({public or 0} public) | listen {listen or 0}"
 
 
 def _since(ts: float | None) -> str:

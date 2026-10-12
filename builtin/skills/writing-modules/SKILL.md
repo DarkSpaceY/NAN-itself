@@ -38,21 +38,20 @@ from loguru import logger
 
 
 class MyModule(Module):
-
     id = "my-module"
 
-    requires: ClassVar[tuple[str, ...]] = ()   # ids of modules this reads
+    requires: ClassVar[tuple[str, ...]] = ()  # ids of modules this reads
 
-    async def start(self) -> None:             # service lifetime
+    async def start(self) -> None:  # service lifetime
         while True:
-            ...                                 # sample / infer
-            self.data.publish({...})            # uplink state
+            ...  # sample / infer
+            self.data.publish({...})  # uplink state
             await asyncio.sleep(self.poll_interval)
 
-    async def tell(self, record: Turn) -> None:      # completed turn hook
+    async def tell(self, record: Turn) -> None:  # completed turn hook
         ...
 
-    async def ask(self, turn: Turn) -> str | None:   # cheap projection
+    async def ask(self, turn: Turn) -> str | None:  # cheap projection
         return "[MyModule] ..." or None
 ```
 
@@ -89,7 +88,6 @@ Declare a ClassVar `channels` mapping on your `Module` subclass:
 
 ```python
 class SetGoal(Module):
-
     id = "goal-setter"
 
     channels: ClassVar[Mapping[str, ChannelSpec]] = {

@@ -13,7 +13,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { type FC, memo, useMemo, useRef } from "react";
+import { type FC, memo, useMemo, useState } from "react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
@@ -25,20 +25,22 @@ type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
 };
 
+// 依据 React 官方推荐的「render 期间根据 props 调整 state」模式实现：
+// 仅当新值与已存值不 shallow-equal 时才 setState（条件式，触发同步重渲染），
+// shallow-equal 时沿用已存值的引用，保证下游 useMemo 的依赖稳定。
 const useShallowStable = <T extends Record<string, unknown> | undefined>(
   value: T,
 ): T => {
-  const ref = useRef(value);
-  if (value !== ref.current) {
-    const prev = ref.current;
-    const stable =
+  const [stable, setStable] = useState(value);
+  if (value !== stable) {
+    const shallowEqual =
       value !== undefined &&
-      prev !== undefined &&
-      Object.keys(prev).length === Object.keys(value).length &&
-      Object.keys(value).every((key) => prev[key] === value[key]);
-    if (!stable) ref.current = value;
+      stable !== undefined &&
+      Object.keys(stable).length === Object.keys(value).length &&
+      Object.keys(value).every((key) => stable[key] === value[key]);
+    if (!shallowEqual) setStable(value);
   }
-  return ref.current;
+  return stable;
 };
 
 const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {

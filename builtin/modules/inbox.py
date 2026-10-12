@@ -73,22 +73,21 @@ class InboxModule(Module):
     ) -> str | None:
         # Subagents receive their task from the engine, never
         # the main inbox.
-        if getattr(
-            turn,
-            "depth",
-            0,
-        ) > 0:
+        if (
+            getattr(
+                turn,
+                "depth",
+                0,
+            )
+            > 0
+        ):
             return None
 
         if not self._items:
             return None
 
-        items = list(
-            self._items
-        )
+        items = list(self._items)
 
         self._items.clear()
 
-        return "[Inbox]\n" + "\n\n".join(
-            items
-        )
+        return "[Inbox]\n" + "\n\n".join(items)

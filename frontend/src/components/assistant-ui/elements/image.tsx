@@ -96,9 +96,13 @@ const defaultFilenameFromImage = (image: string): string => {
     let basename = encodedBasename;
     try {
       basename = decodeURIComponent(encodedBasename);
-    } catch {}
+    } catch {
+      // Malformed %-sequence: intentionally keep the still-encoded basename as fallback.
+    }
     if (/\.(png|jpe?g|webp|gif|svg)$/i.test(basename)) return basename;
-  } catch {}
+  } catch {
+    // Unparsable/relative image URL: intentionally fall through to the generic default name below.
+  }
   return "image.png";
 };
 
@@ -459,6 +463,7 @@ function RegenerateButton({
         try {
           await onRegenerate();
         } catch {
+          // Regeneration failure is surfaced by the runtime itself; the button just resets via finally.
         } finally {
           setIsRegenerating(false);
         }

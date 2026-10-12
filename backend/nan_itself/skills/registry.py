@@ -22,9 +22,9 @@ the parsing module.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from nan_itself.utils import blocklist as _blocklist
 
@@ -33,7 +33,6 @@ from .model import (
     SkillMetadata,
     SkillValidationError,
 )
-
 from .parsing import (
     directory_fingerprint,
     read_metadata,
@@ -109,36 +108,22 @@ class SkillRegistry:
                 path.is_dir()
                 and not path.name.startswith("_")
                 and path.name not in blocked_names
-                and (
-                    path / SKILL_FILENAME
-                ).is_file()
+                and (path / SKILL_FILENAME).is_file()
             )
         }
 
         # A root that is itself a skill directory is also accepted.
-        if (
-            root / SKILL_FILENAME
-        ).is_file() and root.name not in blocked_names:
+        if (root / SKILL_FILENAME).is_file() and root.name not in blocked_names:
             current.add(root)
 
-        known = {
-            path
-            for path in self.fingerprints
-            if path.is_relative_to(root)
-        }
+        known = {path for path in self.fingerprints if path.is_relative_to(root)}
 
         # --------------------------------------------------------------
         # Removed Skills.
         # --------------------------------------------------------------
 
-        for skill_dir in (
-            known - current
-        ):
-            record = (
-                self.record_by_dir(
-                    skill_dir
-                )
-            )
+        for skill_dir in known - current:
+            record = self.record_by_dir(skill_dir)
 
             if record is not None:
                 self.records.pop(
@@ -160,42 +145,22 @@ class SkillRegistry:
         # New / changed Skills.
         # --------------------------------------------------------------
 
-        for skill_dir in sorted(
-            current
-        ):
-            fp = directory_fingerprint(
-                skill_dir
-            )
+        for skill_dir in sorted(current):
+            fp = directory_fingerprint(skill_dir)
 
-            previous = (
-                self.fingerprints.get(
-                    skill_dir
-                )
-            )
+            previous = self.fingerprints.get(skill_dir)
 
-            previous_error = (
-                self.errors.get(
-                    skill_dir
-                )
-            )
+            previous_error = self.errors.get(skill_dir)
 
             # Don't repeatedly retry an unchanged broken Skill.
-            if (
-                previous == fp
-                and previous_error is not None
-            ):
+            if previous == fp and previous_error is not None:
                 continue
 
             # Nothing changed.
-            if (
-                previous == fp
-                and skill_dir in self.fingerprints
-            ):
+            if previous == fp and skill_dir in self.fingerprints:
                 continue
 
-            self.fingerprints[
-                skill_dir
-            ] = fp
+            self.fingerprints[skill_dir] = fp
 
             self.errors.pop(
                 skill_dir,
@@ -203,14 +168,10 @@ class SkillRegistry:
             )
 
             try:
-                self.register(
-                    skill_dir
-                )
+                self.register(skill_dir)
 
             except Exception as exc:
-                self.errors[
-                    skill_dir
-                ] = exc
+                self.errors[skill_dir] = exc
 
     # ==================================================================
     # Registration
@@ -229,23 +190,15 @@ class SkillRegistry:
         # succeeds.
         # --------------------------------------------------------------
 
-        metadata = read_metadata(
-            root
-        )
+        metadata = read_metadata(root)
 
         # --------------------------------------------------------------
         # Find the Skill currently owned by this directory.
         # --------------------------------------------------------------
 
-        previous = (
-            self.record_by_dir(
-                root
-            )
-        )
+        previous = self.record_by_dir(root)
 
-        existing = self.records.get(
-            metadata.name
-        )
+        existing = self.records.get(metadata.name)
 
         # --------------------------------------------------------------
         # Validate the candidate name BEFORE removing the old record.
@@ -264,8 +217,7 @@ class SkillRegistry:
         if (
             existing is not None
             and existing is not previous
-            and existing.metadata.source.resolve()
-            != metadata.source.resolve()
+            and existing.metadata.source.resolve() != metadata.source.resolve()
         ):
             raise SkillValidationError(
                 f"Duplicate Skill name '{metadata.name}': "
@@ -280,11 +232,7 @@ class SkillRegistry:
         # directory if its Skill name changed.
         # --------------------------------------------------------------
 
-        if (
-            previous is not None
-            and previous.metadata.name
-            != metadata.name
-        ):
+        if previous is not None and previous.metadata.name != metadata.name:
             self.records.pop(
                 previous.metadata.name,
                 None,
@@ -305,13 +253,9 @@ class SkillRegistry:
             + 1
         )
 
-        self.generations[
-            metadata.name
-        ] = generation
+        self.generations[metadata.name] = generation
 
-        self.records[
-            metadata.name
-        ] = SkillRecord(
+        self.records[metadata.name] = SkillRecord(
             metadata=metadata,
             root=root,
             generation=generation,
@@ -325,9 +269,7 @@ class SkillRegistry:
         self,
         name: str,
     ) -> SkillRecord | None:
-        return self.records.get(
-            name
-        )
+        return self.records.get(name)
 
     def all_records(
         self,
@@ -335,9 +277,7 @@ class SkillRegistry:
         return tuple(
             sorted(
                 self.records.values(),
-                key=lambda item: (
-                    item.metadata.name
-                ),
+                key=lambda item: item.metadata.name,
             )
         )
 
@@ -345,17 +285,10 @@ class SkillRegistry:
         self,
         directory: Path,
     ) -> SkillRecord | None:
-        directory = (
-            directory.resolve()
-        )
+        directory = directory.resolve()
 
-        for record in (
-            self.records.values()
-        ):
-            if (
-                record.root.resolve()
-                == directory
-            ):
+        for record in self.records.values():
+            if record.root.resolve() == directory:
                 return record
 
         return None

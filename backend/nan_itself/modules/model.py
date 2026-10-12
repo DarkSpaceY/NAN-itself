@@ -9,14 +9,14 @@ from siblings.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from types import MappingProxyType
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
-
 
 MODULE_HEADER = "# @module"
 
@@ -48,9 +48,7 @@ class DataSpace:
         initial: Mapping[str, Any] | None = None,
     ) -> None:
         self.owner = owner
-        self._value: dict[str, Any] = deepcopy(
-            dict(initial or {})
-        )
+        self._value: dict[str, Any] = deepcopy(dict(initial or {}))
         self.revision = 0
 
     def publish(
@@ -64,13 +62,9 @@ class DataSpace:
         references into DataSpace internals.
         """
         if not isinstance(value, Mapping):
-            raise TypeError(
-                "DataSpace value must be a Mapping"
-            )
+            raise TypeError("DataSpace value must be a Mapping")
 
-        value_copy = deepcopy(
-            dict(value)
-        )
+        value_copy = deepcopy(dict(value))
 
         self._value = value_copy
         self.revision += 1
@@ -250,9 +244,7 @@ class ChannelSpec:
             return payload, None
 
         try:
-            validated = self.model.model_validate(
-                payload
-            )
+            validated = self.model.model_validate(payload)
 
         except Exception as exc:
             return None, f"{type(exc).__name__}: {exc}"
@@ -300,16 +292,12 @@ class Module:
 
     llm: Any | None = None
 
-    requires: ClassVar[
-        tuple[str, ...]
-    ] = ()
+    requires: ClassVar[tuple[str, ...]] = ()
 
     # Downlink channels the model may feed through the
     # invoke_channels verb. Declared on the subclass; plain
     # Modules stay channel-free.
-    channels: ClassVar[
-        Mapping[str, ChannelSpec]
-    ] = MappingProxyType({})
+    channels: ClassVar[Mapping[str, ChannelSpec]] = MappingProxyType({})
 
     data: DataSpace
 

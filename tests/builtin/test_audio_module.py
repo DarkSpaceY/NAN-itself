@@ -21,9 +21,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from nan_itself.modules.model import DataSpace
-
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -69,9 +67,7 @@ def _fresh_instance():
 
     instance.pcm_ring_window_s = 0.1  # 3200 bytes ≈ 3.3 frames
 
-    instance._pcm_ring_budget = int(
-        instance.pcm_ring_window_s * instance.sample_rate * 2
-    )
+    instance._pcm_ring_budget = int(instance.pcm_ring_window_s * instance.sample_rate * 2)
 
     instance.data = DataSpace("audio")
 
@@ -168,9 +164,7 @@ def test_pcm_ring_seq_and_window_trim():
 
     frames = [b"\x00" * FRAME_BYTES for _ in range(5)]
 
-    instance.mic_factory = lambda: _FakeMic(
-        frames, instance._stop_event
-    )
+    instance.mic_factory = lambda: _FakeMic(frames, instance._stop_event)
 
     instance.pipeline = _SilentPipeline()
 
@@ -228,9 +222,7 @@ def test_publish_once_carries_json_safe_pcm_ring():
 
     decoded = json.loads(encoded)
 
-    assert base64.b64decode(decoded["pcm_ring"]["chunks"][0]) == (
-        b"\x00" * FRAME_BYTES
-    )
+    assert base64.b64decode(decoded["pcm_ring"]["chunks"][0]) == (b"\x00" * FRAME_BYTES)
 
 
 def test_consumer_resync_arithmetic():
@@ -331,9 +323,7 @@ def test_analyze_utterance_attaches_speaker_tag_emotion():
     assert len(lines) == 1
 
     # Clock prefix + "(speaker) <duration> [tag] [emo]" suffix.
-    assert lines[0].endswith(
-        " (person-1) 900ms [Dog 0.90] [emo:happy]"
-    )
+    assert lines[0].endswith(" (person-1) 900ms [Dog 0.90] [emo:happy]")
 
 
 def test_render_heard_formats_short_voiced_ms():

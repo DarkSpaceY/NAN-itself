@@ -32,11 +32,7 @@ def blocked(
     `kind` is a key under `block:` -- "modules", "tools" or
     "skills". Anything missing or malformed yields an empty set.
     """
-    path = (
-        _paths.repo_root()
-        / "config"
-        / CONFIG_FILENAME
-    )
+    path = _paths.repo_root() / "config" / CONFIG_FILENAME
 
     if not path.exists():
         return set()
@@ -48,23 +44,11 @@ def blocked(
         ) as file:
             data = yaml.safe_load(file) or {}
 
-        block = (
-            data.get("block")
-            if isinstance(data, dict)
-            else None
-        )
+        block = data.get("block") if isinstance(data, dict) else None
 
-        names = (
-            block.get(kind)
-            if isinstance(block, dict)
-            else None
-        )
+        names = block.get(kind) if isinstance(block, dict) else None
 
-        return (
-            set(names)
-            if isinstance(names, list)
-            else set()
-        )
+        return set(names) if isinstance(names, list) else set()
 
     except Exception as exc:
         logger.warning(

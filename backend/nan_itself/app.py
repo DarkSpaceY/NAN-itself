@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import uuid
@@ -115,9 +116,7 @@ async def run_agent_process() -> None:
         inbox = modules.get("inbox")
 
         if inbox is None:
-            logger.warning(
-                "Inbox module not running; input dropped"
-            )
+            logger.warning("Inbox module not running; input dropped")
 
         else:
             inbox.put(text)
@@ -125,10 +124,7 @@ async def run_agent_process() -> None:
         if text.strip():
             sink.emit(
                 "user_input",
-                content=(
-                    {"text": text}
-                    | ({"mid": mid} if mid else {})
-                ),
+                content=({"text": text} | ({"mid": mid} if mid else {})),
             )
 
     def gateway_state() -> dict:
@@ -145,15 +141,9 @@ async def run_agent_process() -> None:
         host=settings.gateway.host,
         port=settings.gateway.port,
         on_input=ingest,
-        on_pause=lambda paused: (
-            agent.pause() if paused else agent.resume()
-        ),
+        on_pause=lambda paused: agent.pause() if paused else agent.resume(),
         state_provider=gateway_state,
-        frontend_dir=(
-            _paths.repo_root()
-            / "frontend"
-            / "dist"
-        ),
+        frontend_dir=(_paths.repo_root() / "frontend" / "dist"),
         dedup_cache_size=settings.events.input_dedup_cache_size,
     )
 
@@ -172,15 +162,11 @@ async def run_agent_process() -> None:
         # Start: capabilities first, then the two long-lived tasks.
         # ----------------------------------------------------------
 
-        logger.info(
-            "Starting tool providers"
-        )
+        logger.info("Starting tool providers")
 
         await providers.start()
 
-        logger.info(
-            "Starting module facade"
-        )
+        logger.info("Starting module facade")
 
         await modules.start()
 
@@ -201,9 +187,7 @@ async def run_agent_process() -> None:
         stop_received = asyncio.Event()
 
         def _request_stop() -> None:
-            logger.info(
-                "Stop signal received; stopping agent"
-            )
+            logger.info("Stop signal received; stopping agent")
 
             agent.request_stop()
             stop_received.set()
@@ -217,9 +201,7 @@ async def run_agent_process() -> None:
                 _request_stop,
             )
 
-        logger.info(
-            "NAN is running. Open the gateway frontend to talk."
-        )
+        logger.info("NAN is running. Open the gateway frontend to talk.")
 
         # ----------------------------------------------------------
         # Run until stopped.
@@ -243,9 +225,7 @@ async def run_agent_process() -> None:
             signal.SIGTERM,
         ):
             try:
-                running_loop.remove_signal_handler(
-                    sig
-                )
+                running_loop.remove_signal_handler(sig)
             except Exception:
                 logger.debug(
                     "Signal handler for {} not removed",
@@ -265,20 +245,13 @@ async def run_agent_process() -> None:
 
             except asyncio.CancelledError:
                 if agent_task.cancelled():
-                    logger.debug(
-                        "Agent loop cancelled during shutdown"
-                    )
+                    logger.debug("Agent loop cancelled during shutdown")
 
                 else:
-                    logger.debug(
-                        "Agent loop wait cancelled during "
-                        "shutdown"
-                    )
+                    logger.debug("Agent loop wait cancelled during shutdown")
 
             except Exception:
-                logger.exception(
-                    "Agent loop shutdown failed"
-                )
+                logger.exception("Agent loop shutdown failed")
 
         # ----------------------------------------------------------
         # Gateway.
@@ -288,9 +261,7 @@ async def run_agent_process() -> None:
             await gateway.close()
 
         except BaseException:
-            logger.exception(
-                "Gateway shutdown failed"
-            )
+            logger.exception("Gateway shutdown failed")
 
         # The serve() task may still be alive after close().
         if gateway_task is not None:
@@ -304,9 +275,7 @@ async def run_agent_process() -> None:
                 pass
 
             except Exception:
-                logger.exception(
-                    "Gateway task shutdown failed"
-                )
+                logger.exception("Gateway task shutdown failed")
 
         # ----------------------------------------------------------
         # Modules first, then providers.
@@ -315,41 +284,28 @@ async def run_agent_process() -> None:
         # their consumers before stopping MCP workers.
         # ----------------------------------------------------------
 
-        logger.info(
-            "Stopping modules and tool providers"
-        )
+        logger.info("Stopping modules and tool providers")
 
         try:
             await modules.stop()
 
         except BaseException:
-            logger.exception(
-                "Module shutdown failed; continuing"
-            )
+            logger.exception("Module shutdown failed; continuing")
 
         try:
             await providers.stop()
 
         except BaseException:
-            logger.exception(
-                "Provider shutdown failed; continuing"
-            )
+            logger.exception("Provider shutdown failed; continuing")
 
-        logger.info(
-            "NAN stopped cleanly"
-        )
+        logger.info("NAN stopped cleanly")
 
 
 def main() -> None:
-    try:
-        asyncio.run(
-            run_agent_process()
-        )
-
-    except KeyboardInterrupt:
-        # Signal handlers normally turn Ctrl+C into graceful shutdown,
-        # but keep this as a final safety net.
-        pass
+    # Signal handlers normally turn Ctrl+C into graceful shutdown,
+    # but keep this as a final safety net.
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(run_agent_process())
 
 
 if __name__ == "__main__":

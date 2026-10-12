@@ -23,7 +23,6 @@ from pathlib import Path
 
 from ..utils.backoff import next_backoff
 
-
 # Escalating retry schedule for repeated failures of one
 # source file: the first retry waits 30s, then doubles, and
 # repeated failures keep waiting 5 minutes.
@@ -115,9 +114,7 @@ class SourceTracker:
             attempts - 1,
         )
 
-        return (
-            time.monotonic() - failed_at
-        ) >= delay
+        return (time.monotonic() - failed_at) >= delay
 
     def mark_seen(
         self,
@@ -127,10 +124,7 @@ class SourceTracker:
         # A fingerprint change resets the retry schedule; the
         # same fingerprint keeps its attempt count so repeated
         # failures keep backing off.
-        if (
-            self.fingerprints.get(path)
-            != fingerprint
-        ):
+        if self.fingerprints.get(path) != fingerprint:
             self.failures.pop(path, None)
 
         self.fingerprints[path] = fingerprint

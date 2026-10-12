@@ -21,16 +21,16 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from nan_itself.utils import paths as _paths
 
 from .model import (
     SKILL_FILENAME,
     SkillMetadata,
-    UnknownSkillError,
     SkillValidationError,
+    UnknownSkillError,
 )
 from .parsing import (
     skill_files,
@@ -39,7 +39,6 @@ from .registry import (
     SkillRecord,
     SkillRegistry,
 )
-
 
 # Scripts run through a fixed interpreter table; anything not
 # listed is executed directly (shebang + executable bit).
@@ -86,25 +85,13 @@ class SkillRuntime:
     ) -> None:
         project_root = _paths.repo_root()
 
-        self.builtin_skills_dir = (
-            project_root
-            / "builtin"
-            / "skills"
-        ).resolve()
+        self.builtin_skills_dir = (project_root / "builtin" / "skills").resolve()
 
-        self.workspace_skills_dir = (
-            project_root
-            / "workspace"
-            / "skills"
-        ).resolve()
+        self.workspace_skills_dir = (project_root / "workspace" / "skills").resolve()
 
-        self.resource_char_limit = (
-            resource_char_limit
-        )
+        self.resource_char_limit = resource_char_limit
 
-        self.script_timeout = (
-            script_timeout
-        )
+        self.script_timeout = script_timeout
 
         self._registry = SkillRegistry()
 
@@ -146,10 +133,7 @@ class SkillRuntime:
 
         Full SKILL.md bodies are not loaded here.
         """
-        return tuple(
-            record.metadata
-            for record in self._registry.all_records()
-        )
+        return tuple(record.metadata for record in self._registry.all_records())
 
     def get_metadata(self, name: str) -> SkillMetadata | None:
         record = self._registry.get_record(name)
@@ -160,10 +144,7 @@ class SkillRuntime:
         return record.metadata
 
     def names(self) -> tuple[str, ...]:
-        return tuple(
-            metadata.name
-            for metadata in self.catalog()
-        )
+        return tuple(metadata.name for metadata in self.catalog())
 
     # ==================================================================
     # Resources
@@ -187,43 +168,29 @@ class SkillRuntime:
 
         groups: dict[str, list[str]] = {}
 
-        for path in skill_files(
-            record.root
-        ):
-            relative = (
-                path.relative_to(
-                    record.root
-                ).as_posix()
-            )
+        for path in skill_files(record.root):
+            relative = path.relative_to(record.root).as_posix()
 
             if relative == SKILL_FILENAME:
                 continue
 
             top = relative.split("/", 1)[0]
 
-            groups.setdefault(
-                top, []
-            ).append(relative)
+            groups.setdefault(top, []).append(relative)
 
         ordered = sorted(
             groups.items(),
             key=lambda item: (
                 (
                     0,
-                    PROTOCOL_GROUPS.index(
-                        item[0]
-                    ),
+                    PROTOCOL_GROUPS.index(item[0]),
                 )
-                if item[0]
-                in PROTOCOL_GROUPS
+                if item[0] in PROTOCOL_GROUPS
                 else (1, item[0])
             ),
         )
 
-        return {
-            group: tuple(paths)
-            for group, paths in ordered
-        }
+        return {group: tuple(paths) for group, paths in ordered}
 
     async def invoke(
         self,
@@ -245,10 +212,7 @@ class SkillRuntime:
             path,
         )
 
-        if (
-            resource.relative_to(record.root).parts[0]
-            == "scripts"
-        ):
+        if resource.relative_to(record.root).parts[0] == "scripts":
             return await self._run_script(
                 record,
                 resource,
@@ -268,9 +232,7 @@ class SkillRuntime:
         record = self._registry.get_record(name)
 
         if record is None:
-            raise UnknownSkillError(
-                f"Unknown Skill: {name}"
-            )
+            raise UnknownSkillError(f"Unknown Skill: {name}")
 
         return record
 
@@ -280,26 +242,15 @@ class SkillRuntime:
         path: str,
     ) -> Path:
         if not path.strip():
-            raise SkillValidationError(
-                "Resource path is empty."
-            )
+            raise SkillValidationError("Resource path is empty.")
 
-        resource = (
-            record.root / path
-        ).resolve()
+        resource = (record.root / path).resolve()
 
-        if not resource.is_relative_to(
-            record.root
-        ):
-            raise SkillValidationError(
-                f"Resource path escapes the "
-                f"Skill root: {path}"
-            )
+        if not resource.is_relative_to(record.root):
+            raise SkillValidationError(f"Resource path escapes the Skill root: {path}")
 
         if not resource.is_file():
-            raise SkillValidationError(
-                f"Resource not found: {path}"
-            )
+            raise SkillValidationError(f"Resource not found: {path}")
 
         return resource
 
@@ -336,9 +287,7 @@ class SkillRuntime:
             )
 
         except OSError as exc:
-            return (
-                f"{type(exc).__name__}: {exc}"
-            )
+            return f"{type(exc).__name__}: {exc}"
 
         try:
             stdout, _ = await asyncio.wait_for(
@@ -346,15 +295,12 @@ class SkillRuntime:
                 timeout=self.script_timeout,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
 
             await process.wait()
 
-            return (
-                f"Script timed out after "
-                f"{self.script_timeout:g} seconds."
-            )
+            return f"Script timed out after {self.script_timeout:g} seconds."
 
         text = stdout.decode(
             "utf-8",
@@ -362,10 +308,6 @@ class SkillRuntime:
         )[: self.resource_char_limit]
 
         if process.returncode != 0:
-            text = (
-                f"{text}\n"
-                f"[script exited with code "
-                f"{process.returncode}]"
-            )
+            text = f"{text}\n[script exited with code {process.returncode}]"
 
         return text

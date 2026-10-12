@@ -20,7 +20,6 @@ import time
 import uuid
 from collections import deque
 from typing import Any
-from loguru import logger
 
 HISTORY_LIMIT = 500
 
@@ -28,7 +27,9 @@ SUB_QUEUE_SIZE = 2000
 
 
 class EventBus:
-    def __init__(self, history_limit: int = HISTORY_LIMIT, subscriber_queue_size: int = SUB_QUEUE_SIZE) -> None:
+    def __init__(
+        self, history_limit: int = HISTORY_LIMIT, subscriber_queue_size: int = SUB_QUEUE_SIZE
+    ) -> None:
         self._subs: set[asyncio.Queue] = set()
         self._history: deque[dict] = deque(maxlen=history_limit)
         self._subscriber_queue_size = subscriber_queue_size
@@ -157,9 +158,7 @@ class Sink:
 
         eid = id or self._id()
 
-        payload: dict[str, Any] = (
-            dict(content) if content else {}
-        )
+        payload: dict[str, Any] = dict(content) if content else {}
 
         event: dict[str, Any] = {
             "t": t,

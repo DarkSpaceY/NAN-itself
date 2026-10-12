@@ -25,15 +25,15 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import mcp.types as mcp_types
 
-from .model import (
-    SubagentLimitError,
-)
 from ..events import sink
 from ..skills import (
     UnknownSkillError,
 )
 from ..utils.llm import (
     ToolDefinition,
+)
+from .model import (
+    SubagentLimitError,
 )
 
 if TYPE_CHECKING:
@@ -71,17 +71,13 @@ class SleepVerb:
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name=self.name,
-            description=(
-                "Wait for a while before your next step."
-            ),
+            description=("Wait for a while before your next step."),
             input_schema={
                 "type": "object",
                 "properties": {
                     "seconds": {
                         "type": "number",
-                        "description": (
-                            "How long to wait."
-                        ),
+                        "description": ("How long to wait."),
                     },
                 },
                 "required": ["seconds"],
@@ -93,14 +89,12 @@ class SleepVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         seconds = call.arguments.get("seconds")
 
         if seconds is None:
-            return (
-                "sleep requires 'seconds'."
-            )
+            return "sleep requires 'seconds'."
 
         if not isinstance(
             seconds,
@@ -113,13 +107,9 @@ class SleepVerb:
 
         waited = float(seconds)
 
-        await asyncio.sleep(
-            waited
-        )
+        await asyncio.sleep(waited)
 
-        return (
-            f"Waited {waited:g} seconds."
-        )
+        return f"Waited {waited:g} seconds."
 
 
 class SpawnVerb:
@@ -142,9 +132,7 @@ class SpawnVerb:
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": (
-                            "The task to delegate."
-                        ),
+                        "description": ("The task to delegate."),
                     },
                 },
                 "required": ["task"],
@@ -156,15 +144,12 @@ class SpawnVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         task = call.arguments.get("task")
 
         if not isinstance(task, str) or not task.strip():
-            return (
-                "spawn requires "
-                "a non-empty 'task'."
-            )
+            return "spawn requires a non-empty 'task'."
 
         try:
             child = agent.spawn(
@@ -232,7 +217,7 @@ class ListToolsVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         try:
             pairs = agent.tools.list_all_tools()
@@ -243,10 +228,7 @@ class ListToolsVerb:
         if not pairs:
             return "No tools are available."
 
-        return "\n".join(
-            f"{provider_name}/{tool.name}"
-            for provider_name, tool in pairs
-        )
+        return "\n".join(f"{provider_name}/{tool.name}" for provider_name, tool in pairs)
 
 
 class ShowToolVerb:
@@ -265,9 +247,7 @@ class ShowToolVerb:
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": (
-                            "Tool name as 'provider/tool'."
-                        ),
+                        "description": ("Tool name as 'provider/tool'."),
                     },
                 },
                 "required": ["name"],
@@ -279,41 +259,27 @@ class ShowToolVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         name = call.arguments.get("name")
 
         if not isinstance(name, str) or not name.strip():
-            return (
-                "show_tool requires 'name' "
-                "(format 'provider/tool')."
-            )
+            return "show_tool requires 'name' (format 'provider/tool')."
 
         try:
-            resolved = (
-                await agent.tools.resolve_tool(
-                    name
-                )
-            )
+            resolved = await agent.tools.resolve_tool(name)
 
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
 
         if resolved is None:
-            return (
-                f"Unknown tool '{name}'. "
-                "Use list_tools to see available tools."
-            )
+            return f"Unknown tool '{name}'. Use list_tools to see available tools."
 
         provider, tool = resolved
 
         definition = {
-            "name": (
-                f"{provider.spec.name}/{tool.name}"
-            ),
-            "description": (
-                tool.description or ""
-            ),
+            "name": (f"{provider.spec.name}/{tool.name}"),
+            "description": (tool.description or ""),
             "inputSchema": tool.inputSchema,
         }
 
@@ -341,15 +307,11 @@ class InvokeToolVerb:
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": (
-                            "Tool name as 'provider/tool'."
-                        ),
+                        "description": ("Tool name as 'provider/tool'."),
                     },
                     "arguments": {
                         "type": "object",
-                        "description": (
-                            "Arguments for the tool."
-                        ),
+                        "description": ("Arguments for the tool."),
                     },
                 },
                 "required": ["name"],
@@ -361,20 +323,14 @@ class InvokeToolVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         name = call.arguments.get("name")
 
         if not isinstance(name, str) or not name.strip():
-            return (
-                "invoke_tool requires 'name' "
-                "(format 'provider/tool')."
-            )
+            return "invoke_tool requires 'name' (format 'provider/tool')."
 
-        arguments = (
-            call.arguments.get("arguments")
-            or {}
-        )
+        arguments = call.arguments.get("arguments") or {}
 
         if not isinstance(
             arguments,
@@ -383,26 +339,17 @@ class InvokeToolVerb:
             return "'arguments' must be an object."
 
         try:
-            resolved = (
-                await agent.tools.resolve_tool(
-                    name
-                )
-            )
+            resolved = await agent.tools.resolve_tool(name)
 
             if resolved is None:
-                return (
-                    f"Unknown tool '{name}'. "
-                    "Use list_tools to see available tools."
-                )
+                return f"Unknown tool '{name}'. Use list_tools to see available tools."
 
             provider, tool = resolved
 
-            result = (
-                await agent.tools.call_tool(
-                    provider.spec.name,
-                    tool.name,
-                    arguments,
-                )
+            result = await agent.tools.call_tool(
+                provider.spec.name,
+                tool.name,
+                arguments,
             )
 
         except Exception as exc:
@@ -443,17 +390,14 @@ class ListSkillsVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         catalog = agent.skills.catalog()
 
         if not catalog:
             return "No skills are available."
 
-        return "\n".join(
-            f"{metadata.name}: {metadata.description}"
-            for metadata in catalog
-        )
+        return "\n".join(f"{metadata.name}: {metadata.description}" for metadata in catalog)
 
 
 class ShowSkillVerb:
@@ -472,9 +416,7 @@ class ShowSkillVerb:
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": (
-                            "The Skill name."
-                        ),
+                        "description": ("The Skill name."),
                     },
                 },
                 "required": ["name"],
@@ -486,22 +428,17 @@ class ShowSkillVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         name = call.arguments.get("name")
 
         if not isinstance(name, str) or not name.strip():
             return "show_skill requires 'name'."
 
-        metadata = agent.skills.get_metadata(
-            name
-        )
+        metadata = agent.skills.get_metadata(name)
 
         if metadata is None:
-            return (
-                f"Unknown Skill '{name}'. "
-                "Use list_skills to see available skills."
-            )
+            return f"Unknown Skill '{name}'. Use list_skills to see available skills."
 
         lines = [
             f"name: {metadata.name}",
@@ -510,11 +447,7 @@ class ShowSkillVerb:
         ]
 
         try:
-            resources = (
-                agent.skills.resource_paths(
-                    name
-                )
-            )
+            resources = agent.skills.resource_paths(name)
 
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
@@ -530,18 +463,11 @@ class ShowSkillVerb:
             )
 
             if paths:
-                lines.append(
-                    f"{group}:"
-                )
+                lines.append(f"{group}:")
 
-                lines.extend(
-                    f"  - {path}"
-                    for path in paths
-                )
+                lines.extend(f"  - {path}" for path in paths)
 
-        return "\n".join(
-            lines
-        )
+        return "\n".join(lines)
 
 
 class InvokeSkillVerb:
@@ -561,9 +487,7 @@ class InvokeSkillVerb:
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": (
-                            "The Skill name."
-                        ),
+                        "description": ("The Skill name."),
                     },
                     "path": {
                         "type": "string",
@@ -576,12 +500,8 @@ class InvokeSkillVerb:
                     },
                     "args": {
                         "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": (
-                            "Arguments for a script."
-                        ),
+                        "items": {"type": "string"},
+                        "description": ("Arguments for a script."),
                     },
                 },
                 "required": ["name", "path"],
@@ -593,16 +513,13 @@ class InvokeSkillVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         name = call.arguments.get("name")
 
         path = call.arguments.get("path")
 
-        args = (
-            call.arguments.get("args")
-            or []
-        )
+        args = call.arguments.get("args") or []
 
         if not isinstance(name, str) or not name.strip():
             return "invoke_skill requires 'name'."
@@ -623,19 +540,14 @@ class InvokeSkillVerb:
             return "'args' must be a list of strings."
 
         try:
-            result = (
-                await agent.skills.invoke(
-                    name,
-                    path,
-                    args,
-                )
+            result = await agent.skills.invoke(
+                name,
+                path,
+                args,
             )
 
         except UnknownSkillError:
-            return (
-                f"Unknown Skill '{name}'. "
-                "Use list_skills to see available skills."
-            )
+            return f"Unknown Skill '{name}'. Use list_skills to see available skills."
 
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
@@ -667,12 +579,10 @@ class ListChannelsVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         try:
-            return (
-                agent.modules.list_module_channels()
-            )
+            return agent.modules.list_module_channels()
 
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
@@ -684,25 +594,17 @@ class ShowChannelsVerb:
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name=self.name,
-            description=(
-                "Show channel details: description and "
-                "JSON schema."
-            ),
+            description=("Show channel details: description and JSON schema."),
             input_schema={
                 "type": "object",
                 "properties": {
                     "module": {
                         "type": "string",
-                        "description": (
-                            "Module id, e.g. 'desktop'."
-                        ),
+                        "description": ("Module id, e.g. 'desktop'."),
                     },
                     "channel": {
                         "type": "string",
-                        "description": (
-                            "Channel name; omit to show "
-                            "every channel of the module."
-                        ),
+                        "description": ("Channel name; omit to show every channel of the module."),
                     },
                 },
                 "required": ["module"],
@@ -714,24 +616,17 @@ class ShowChannelsVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         module_id = call.arguments.get("module")
 
-        if not isinstance(module_id, str) or (
-            not module_id.strip()
-        ):
+        if not isinstance(module_id, str) or (not module_id.strip()):
             return "show_channels requires 'module'."
 
         channel = call.arguments.get("channel")
 
-        if channel is not None and (
-            not isinstance(channel, str)
-            or not channel.strip()
-        ):
-            return (
-                "'channel' must be a string."
-            )
+        if channel is not None and (not isinstance(channel, str) or not channel.strip()):
+            return "'channel' must be a string."
 
         try:
             return agent.modules.show_module_channel(
@@ -762,22 +657,16 @@ class InvokeChannelsVerb:
                 "properties": {
                     "module": {
                         "type": "string",
-                        "description": (
-                            "Module id, e.g. 'desktop'."
-                        ),
+                        "description": ("Module id, e.g. 'desktop'."),
                     },
                     "channel": {
                         "type": "string",
-                        "description": (
-                            "Channel name, e.g. 'goal'."
-                        ),
+                        "description": ("Channel name, e.g. 'goal'."),
                     },
                     "payload": {
                         "type": "object",
                         "description": (
-                            "Payload, shaped by the "
-                            "channel schema (see "
-                            "show_channels)."
+                            "Payload, shaped by the channel schema (see show_channels)."
                         ),
                     },
                 },
@@ -790,20 +679,16 @@ class InvokeChannelsVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         module_id = call.arguments.get("module")
 
-        if not isinstance(module_id, str) or (
-            not module_id.strip()
-        ):
+        if not isinstance(module_id, str) or (not module_id.strip()):
             return "invoke_channels requires 'module'."
 
         channel = call.arguments.get("channel")
 
-        if not isinstance(channel, str) or (
-            not channel.strip()
-        ):
+        if not isinstance(channel, str) or (not channel.strip()):
             return "invoke_channels requires 'channel'."
 
         if "payload" not in call.arguments:
@@ -862,20 +747,15 @@ class FinishVerb:
         self,
         *,
         call,
-        agent: "Agent",
+        agent: Agent,
     ) -> str:
         if agent.depth == 0:
-            return (
-                "finish is only available to subagents."
-            )
+            return "finish is only available to subagents."
 
         report = call.arguments.get("report")
 
         if not isinstance(report, str) or not report.strip():
-            return (
-                "finish requires "
-                "a non-empty 'report'."
-            )
+            return "finish requires a non-empty 'report'."
 
         agent.finish(
             report,

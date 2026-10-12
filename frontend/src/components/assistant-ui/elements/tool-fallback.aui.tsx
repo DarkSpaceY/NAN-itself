@@ -250,7 +250,9 @@ const formatUnknownValue = (value: unknown, space?: number): string => {
 
     const json = JSON.stringify(value, null, space);
     if (json !== undefined) return json;
-  } catch {}
+  } catch {
+    // Circular/unserializable value: intentionally fall through to the String() fallback below.
+  }
 
   try {
     return String(value);

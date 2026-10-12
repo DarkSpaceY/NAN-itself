@@ -104,9 +104,7 @@ def test_removal_detaches_dependent_reader(
 
     assert "a" in b_record.instance.dependencies
 
-    run(
-        facade._remove_record(a_record)
-    )
+    run(facade._remove_record(a_record))
 
     # The live dependent must not keep reading a removed Module.
     assert "a" not in b_record.instance.dependencies
@@ -137,9 +135,7 @@ def test_removal_releases_dataspace(
 
     assert "a" in facade.dataspaces
 
-    run(
-        facade._remove_record(a_record)
-    )
+    run(facade._remove_record(a_record))
 
     # No tombstone: the removed id no longer owns a DataSpace.
     assert "a" not in facade.dataspaces
@@ -163,9 +159,7 @@ def test_removal_persists_state_for_readd(
         id = "a"
 
         def serialize_state(self):
-            return {
-                "counter": self.counter
-            }
+            return {"counter": self.counter}
 
     a_record = _register(
         facade,
@@ -177,29 +171,17 @@ def test_removal_persists_state_for_readd(
     # Seed an OLDER disk snapshot.
     a_record.instance.counter = 1
 
-    facade.dataspaces["a"].publish(
-        {
-            "value": "old"
-        }
-    )
+    facade.dataspaces["a"].publish({"value": "old"})
 
-    facade._save_record_state(
-        a_record
-    )
+    facade._save_record_state(a_record)
 
     # Move the live state forward: this is the state as of
     # removal.
     a_record.instance.counter = 7
 
-    facade.dataspaces["a"].publish(
-        {
-            "value": "live"
-        }
-    )
+    facade.dataspaces["a"].publish({"value": "live"})
 
-    run(
-        facade._remove_record(a_record)
-    )
+    run(facade._remove_record(a_record))
 
     class AReadded(Module):
         id = "a"
@@ -216,13 +198,9 @@ def test_removal_persists_state_for_readd(
 
     # The state as of removal is restored, not the older
     # snapshot and not an empty state.
-    assert readded.instance.restored == {
-        "counter": 7
-    }
+    assert readded.instance.restored == {"counter": 7}
 
-    assert facade.dataspaces["a"].snapshot() == {
-        "value": "live"
-    }
+    assert facade.dataspaces["a"].snapshot() == {"value": "live"}
 
 
 # ============================================================================
@@ -273,9 +251,7 @@ def test_readd_reattaches_dependent_targeted(
 
     facade._rebuild_dependency_graph()
 
-    run(
-        facade._remove_record(a_record)
-    )
+    run(facade._remove_record(a_record))
 
     # B lost the reader; C never had one.
     assert "a" not in b_record.instance.dependencies
@@ -293,28 +269,14 @@ def test_readd_reattaches_dependent_targeted(
     # B regained a live reader onto A's DataSpace.
     assert "a" in b_record.instance.dependencies
 
-    facade.dataspaces["a"].publish(
-        {
-            "value": "after"
-        }
-    )
+    facade.dataspaces["a"].publish({"value": "after"})
 
-    assert (
-        b_record.instance.dependencies["a"].snapshot()
-        == {
-            "value": "after"
-        }
-    )
+    assert b_record.instance.dependencies["a"].snapshot() == {"value": "after"}
 
     # C declared no such dependency: it must be untouched.
-    assert (
-        c_record.instance.dependencies
-        is c_dependencies
-    )
+    assert c_record.instance.dependencies is c_dependencies
 
-    assert dict(
-        c_record.instance.dependencies
-    ) == {}
+    assert dict(c_record.instance.dependencies) == {}
 
 
 # ============================================================================
