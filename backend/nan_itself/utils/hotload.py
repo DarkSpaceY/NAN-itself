@@ -96,10 +96,7 @@ def detected_files(
                 part.startswith(".") or part == "__pycache__"
                 for part in path.relative_to(root).parts
             )
-            and not any(
-                part in exclude_dirs
-                for part in path.relative_to(root).parts[:-1]
-            )
+            and not any(part in exclude_dirs for part in path.relative_to(root).parts[:-1])
         )
     )
 
@@ -480,8 +477,6 @@ def evict_package(pkg_name: str | None) -> None:
             sys.meta_path.remove(finder)
 
     for name in [
-        name
-        for name in sys.modules
-        if name == pkg_name or name.startswith(pkg_name + ".")
+        name for name in sys.modules if name == pkg_name or name.startswith(pkg_name + ".")
     ]:
         sys.modules.pop(name, None)

@@ -36,10 +36,7 @@ def validate_module_class(
     if not isinstance(requires, tuple):
         raise TypeError(f"Module {cls.__name__}.requires must be tuple[str, ...]")
 
-    if any(
-        not isinstance(item, str) or not item
-        for item in requires
-    ):
+    if any(not isinstance(item, str) or not item for item in requires):
         raise TypeError(f"Module {cls.__name__!r}.requires contains invalid ids")
 
     if len(set(requires)) != len(requires):

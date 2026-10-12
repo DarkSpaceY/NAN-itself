@@ -2033,8 +2033,6 @@ COCO80_LABELS: tuple[str, ...] = (
 
 
 class VisionModule(Module):
-
-
     # ------------------------------------------------------------------
     # Configuration (instance attributes; tests may override)
     # ------------------------------------------------------------------

@@ -1923,9 +1923,7 @@ class TaskPayload(BaseModel):
 
 
 class VoiceModule(Module):
-
     requires: ClassVar[tuple[str, ...]] = ("audio",)
-
     channels: ClassVar[Mapping[str, ChannelSpec]] = {
         "say": ChannelSpec(
             TaskPayload,

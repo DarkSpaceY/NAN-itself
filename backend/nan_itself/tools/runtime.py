@@ -1096,9 +1096,7 @@ class ProviderRuntime:
         }
 
         removed = {
-            folder
-            for folder in self._local_tracker.known_keys()
-            if folder.is_relative_to(root)
+            folder for folder in self._local_tracker.known_keys() if folder.is_relative_to(root)
         } - current_folders
 
         for folder in removed:

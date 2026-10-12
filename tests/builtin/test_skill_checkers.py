@@ -20,9 +20,7 @@ CHECK_MODULE = REPO / "builtin" / "skills" / "writing-modules" / "scripts" / "ch
 
 CHECK_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "scripts" / "check_tool.py"
 
-EXAMPLE_MODULE = (
-    REPO / "builtin" / "skills" / "writing-modules" / "references" / "example-module"
-)
+EXAMPLE_MODULE = REPO / "builtin" / "skills" / "writing-modules" / "references" / "example-module"
 
 EXAMPLE_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "references" / "example-tool"
 
