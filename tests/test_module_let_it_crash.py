@@ -101,12 +101,11 @@ async def _settle(record) -> None:
 # ============================================================================
 
 
-_ASK_CRASH_SOURCE = """# @module
+_ASK_CRASH_SOURCE = """
 import asyncio
 
 
 class AskCrash(Module):
-    id = "ask_crash"
 
     def __init__(self):
         self.starts = 0
@@ -120,12 +119,11 @@ class AskCrash(Module):
 """
 
 
-_HEALTHY_SOURCE = """# @module
+_HEALTHY_SOURCE = """
 import asyncio
 
 
 class Healthy(Module):
-    id = "healthy"
 
     async def start(self):
         await asyncio.Event().wait()
@@ -216,12 +214,11 @@ def test_ask_failure_crashes_and_restarts(tmp_path, monkeypatch):
 # ============================================================================
 
 
-_TELL_CRASH_SOURCE = """# @module
+_TELL_CRASH_SOURCE = """
 import asyncio
 
 
 class TellCrash(Module):
-    id = "tell_crash"
 
     async def start(self):
         await asyncio.Event().wait()
@@ -286,7 +283,7 @@ def test_tell_failure_crashes_module(tmp_path, monkeypatch):
 # ============================================================================
 
 
-_FEED_CRASH_SOURCE = """# @module
+_FEED_CRASH_SOURCE = """
 import asyncio
 
 from pydantic import BaseModel
@@ -299,7 +296,6 @@ class Goal(BaseModel):
 
 
 class FeedCrash(Module):
-    id = "feed_crash"
 
     channels = {
         "goal": ChannelSpec(

@@ -55,14 +55,13 @@ def _facade(tmp_path: Path, monkeypatch) -> Facade:
 # ============================================================================
 
 
-_A_SOURCE = """# @module
+_A_SOURCE = """
 import asyncio
 
 from nan_itself.modules import Module
 
 
 class A(Module):
-    id = "a"
     requires = ("b",)
 
     async def start(self):
@@ -70,14 +69,13 @@ class A(Module):
 """
 
 
-_B_SOURCE = """# @module
+_B_SOURCE = """
 import asyncio
 
 from nan_itself.modules import Module
 
 
 class B(Module):
-    id = "b"
     requires = ("a",)
 
     async def start(self):

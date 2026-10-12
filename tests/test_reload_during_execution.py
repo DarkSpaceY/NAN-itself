@@ -174,13 +174,11 @@ class QueueLLM:
 
 
 MODULE_V1 = """
-# @module
 
 import asyncio
 
 
 class ExampleModule(Module):
-    id = "example"
     requires = ()
 
     async def start(self):
@@ -204,13 +202,11 @@ class ExampleModule(Module):
 
 
 MODULE_V2 = """
-# @module
 
 import asyncio
 
 
 class ExampleModule(Module):
-    id = "example"
     requires = ()
 
     async def start(self):
@@ -486,14 +482,12 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
 
 LOCAL_TOOL_V1_TEMPLATE = """
-# @tool
 
 import asyncio
 from pathlib import Path
 
 
 class Calculator(ToolSet):
-    id = "calc"
 
     @tool
     async def slow(self) -> str:
@@ -509,10 +503,8 @@ class Calculator(ToolSet):
 
 
 LOCAL_TOOL_V2 = """
-# @tool
 
 class Calculator(ToolSet):
-    id = "calc"
 
     @tool
     async def slow(self) -> str:

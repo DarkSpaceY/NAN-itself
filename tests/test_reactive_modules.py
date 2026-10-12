@@ -114,7 +114,7 @@ def test_module_base_feed_accepts_by_default():
 # Facade routing (never raises)
 # ============================================================================
 
-_PROBE_SOURCE = """# @module
+_PROBE_SOURCE = """
 import asyncio
 
 from pydantic import BaseModel
@@ -128,7 +128,6 @@ class Goal(BaseModel):
 
 
 class Probe(Module):
-    id = "probe"
 
     channels = {
         "goal": ChannelSpec(Goal, description="Navigation goal"),
@@ -224,9 +223,8 @@ def test_facade_routing_failure_modes(tmp_path, monkeypatch):
 # ============================================================================
 
 
-_CRASHING_SOURCE = """# @module
+_CRASHING_SOURCE = """
 class Crashing(Module):
-    id = "crashing"
 
     async def start(self):
         raise RuntimeError("no weights: drop model.onnx")

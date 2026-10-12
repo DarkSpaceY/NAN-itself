@@ -293,7 +293,6 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
         write_entry(
             source,
             """class Provider(ToolSet):
-    id = "example"
 
     @tool
     def echo(self, text: str) -> str:
@@ -313,7 +312,6 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
             write_entry(
                 source,
                 """class Provider(ToolSet):
-    id = "example"
 
     @tool
     def echo(self, text: str
@@ -327,7 +325,6 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
             write_entry(
                 source,
                 """class Provider(ToolSet):
-    id = "example"
 
     @tool
     def echo(self, text: str) -> str:
