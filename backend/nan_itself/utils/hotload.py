@@ -33,9 +33,9 @@ The transactional rule enforced by every consumer:
 from __future__ import annotations
 
 import contextlib
-import itertools
 import importlib
 import importlib.util
+import itertools
 import sys
 import time
 from importlib.abc import Loader, MetaPathFinder
@@ -285,7 +285,7 @@ _GENERATION = itertools.count()
 # Live package root name -> its finder, for eviction.
 _FINDERS: dict[
     str,
-    "_FolderFinder",
+    _FolderFinder,
 ] = {}
 
 

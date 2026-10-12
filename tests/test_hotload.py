@@ -15,14 +15,12 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from nan_itself.utils.hotload import (
     detected_files,
     directory_fingerprint,
     evict_package,
     load_folder_package,
 )
-
 
 # ============================================================================
 # detected_files / directory_fingerprint
