@@ -1,5 +1,3 @@
-# @module
-
 """
 Vision: seeing as an autonomous builtin Module.
 
@@ -55,7 +53,6 @@ import torch
 import yaml
 from loguru import logger
 from nan_itself.modules.model import Module, Turn
-from nan_itself.utils import paths as _paths
 from PIL import Image
 from pydantic import BaseModel
 from transformers import (
@@ -1891,9 +1888,9 @@ class VisionPipeline:
 
 class VisionConfig(BaseModel):
     """
-    Module-private config: config/modules/vision.yaml over these
-    defaults. Path-valued fields are repo-relative strings
-    (_resolve_path); `device` is the camera index/name.
+    Module-private config: config.yaml (next to this file) over
+    these defaults. Path-valued fields are module-folder-relative
+    strings (_resolve_path); `device` is the camera index/name.
     """
 
     device: int | str | None = None
@@ -1904,31 +1901,35 @@ class VisionConfig(BaseModel):
 
     vlm_enabled: bool = True
 
-    faces_registry: str = "data/databases/vision/faces.json"
+    faces_registry: str = "data/faces.json"
 
-    ocr_models_dir: str = "models/easyocr"
+    ocr_models_dir: str = "data/easyocr"
 
-    vlm_dir: str = "models/vision/vlm/SmolVLM2-500M-Video-Instruct"
+    vlm_dir: str = "data/vlm/SmolVLM2-500M-Video-Instruct"
+
+
+# This file lives at <module folder>/main.py; every configured
+# path resolves against that folder.
+_HOME = Path(__file__).resolve().parent
 
 
 def _resolve_path(value: str) -> Path:
     """
     Absolute (and ~/) passes through; relative resolves against
-    the repository root.
+    the module folder.
     """
     resolved = Path(value).expanduser()
 
-    return resolved if resolved.is_absolute() else _paths.repo_root() / resolved
+    return resolved if resolved.is_absolute() else _HOME / resolved
 
 
 def _load_config() -> VisionConfig:
     """
-    Module-private config: config/modules/vision.yaml over the
-    VisionConfig defaults. Missing or empty file = pure
-    defaults; anything unparsable is a loud construction
-    failure.
+    Module-private config: config.yaml over the VisionConfig
+    defaults. Missing or empty file = pure defaults; anything
+    unparsable is a loud construction failure.
     """
-    path = _paths.repo_root() / "config" / "modules" / "vision.yaml"
+    path = _HOME / "config.yaml"
 
     if not path.is_file():
         return VisionConfig()
@@ -2032,7 +2033,7 @@ COCO80_LABELS: tuple[str, ...] = (
 
 
 class VisionModule(Module):
-    id = "vision"
+
 
     # ------------------------------------------------------------------
     # Configuration (instance attributes; tests may override)
@@ -2174,7 +2175,7 @@ class VisionModule(Module):
 
         self._ocr_failed = self.ocr_enabled is False
 
-        self.objects_model_path = _paths.repo_root() / "models" / "vision" / "object" / "model.onnx"
+        self.objects_model_path = _resolve_path("data/object/model.onnx")
 
         self.objects_labels_path = self.objects_model_path.parent / "labels.txt"
 

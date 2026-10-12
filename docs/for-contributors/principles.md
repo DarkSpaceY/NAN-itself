@@ -37,14 +37,15 @@ this round produced). There is no separate persistent history store —
 the next round's snapshot is derived from the last turn, so anything
 the model saw is reconstructible exactly.
 
-## 5. One file = one unit; two parallel roots
+## 5. One folder = one unit; two parallel roots
 
 One file (or directory) is exactly one provider, module, or skill —
-no multi-unit files. Builtin (`builtin/`) and user territory
+no multi-unit files. Modules and local tools are folders with a
+main.py entry. Builtin (`builtin/`) and user territory
 (`workspace/`) are two parallel roots scanned with identical hot-reload
 semantics. A reload is a transaction: the replacement starts first,
 unregistered; it is committed only after it is fully connected; the old
-generation keeps serving until that moment. Deleting a source file
+generation keeps serving until that moment. Deleting the entry file (or the folder)
 disables its unit.
 
 ## 6. Bounded by design

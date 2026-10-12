@@ -1,5 +1,3 @@
-# @module
-
 """
 Network: the agent feeling its long-range nerves.
 
@@ -686,8 +684,6 @@ def _fmt_bps(bps: float) -> str:
 
 
 class NetworkModule(Module):
-    id = "network"
-
     poll_interval: float = 5.0
 
     events_render_limit: int = 3

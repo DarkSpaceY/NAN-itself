@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import sys
 import time
 from collections.abc import Mapping
 from copy import deepcopy
@@ -14,7 +13,12 @@ from typing import Any
 from loguru import logger
 
 from nan_itself.utils import blocklist as _blocklist
+from nan_itself.utils import hotload as _hotload
 from nan_itself.utils import paths as _paths
+from nan_itself.utils.hotload import (
+    SourceTracker,
+    directory_fingerprint,
+)
 
 from . import deps as _deps
 from . import loading as _loading
@@ -72,19 +76,20 @@ class Facade:
 
         project_root = _paths.repo_root()
 
-        # Builtin and workspace module files live in parallel
+        # Builtin and workspace module folders live in parallel
         # directory layouts and are scanned with exactly the same
-        # hot-reload logic. Deleting a source file removes its
-        # Module.
+        # hot-reload logic. Deleting a module folder (or its
+        # main.py) removes its Module.
         self.builtin_modules_dir = (project_root / "builtin" / "modules").resolve()
 
         self.workspace_modules_dir = (project_root / "workspace" / "modules").resolve()
 
-        self.data_dir = _paths.data_dir() / "modules"
+        # Legacy state layout (data/modules/{private,dataspace}/
+        # <id>.json); migrated into each folder's data/ on first
+        # restore, then only cleaned up.
+        self._legacy_private_dir = _paths.data_dir() / "modules" / "private"
 
-        self.private_dir = self.data_dir / "private"
-
-        self.dataspace_dir = self.data_dir / "dataspace"
+        self._legacy_dataspace_dir = _paths.data_dir() / "modules" / "dataspace"
 
         self.retry_interval = retry_interval
 
@@ -112,17 +117,10 @@ class Facade:
             set[str],
         ] = {}
 
-        # module source file -> latest fingerprint
-        self._source_fingerprints: dict[
-            Path,
-            tuple[int, int],
-        ] = {}
-
-        # module source file -> last load error for fingerprint
-        self._source_load_errors: dict[
-            Path,
-            BaseException,
-        ] = {}
+        # Change bookkeeping for module folders, shared with the
+        # tools and skills subsystems (fingerprints, sticky load
+        # errors, escalating retry).
+        self._source_tracker = SourceTracker()
 
         self._supervisor_task: asyncio.Task[None] | None = None
 
@@ -498,21 +496,20 @@ class Facade:
         self,
         record: ModuleRecord,
     ) -> None:
-        _persistence.restore_record_state(
-            record,
-            private_dir=self.private_dir,
-            dataspace_dir=self.dataspace_dir,
+        _persistence.migrate_legacy_state(
+            record.id,
+            record.instance.data_dir,
+            legacy_private_dir=self._legacy_private_dir,
+            legacy_dataspace_dir=self._legacy_dataspace_dir,
         )
+
+        _persistence.restore_record_state(record)
 
     def _save_record_state(
         self,
         record: ModuleRecord,
     ) -> None:
-        _persistence.save_record_state(
-            record,
-            private_dir=self.private_dir,
-            dataspace_dir=self.dataspace_dir,
-        )
+        _persistence.save_record_state(record)
 
     # ==================================================================
     # Supervisor
@@ -794,97 +791,97 @@ class Facade:
         self,
         root: Path,
     ) -> None:
+        root.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         # Blocked names never enter the candidate set (which also
         # unloads an already-loaded one, as a plain removal).
         blocked_names = _blocklist.blocked("modules")
 
         # One resolved-source index for the whole scan. Both the
         # removal lookup and the already-loaded lookup below would
-        # otherwise walk every record once per file.
+        # otherwise walk every record once per folder.
         by_source = {Path(record.source).resolve(): record for record in self.modules.values()}
 
-        current_files = {
+        # A folder is a candidate exactly when it carries main.py;
+        # a folder whose main.py is missing counts as removed (its
+        # data/ stays on disk, so a re-add restores state).
+        current_folders = {
             path.resolve()
-            for path in (root.rglob("*.py"))
+            for path in root.iterdir()
             if (
-                path.is_file()
+                path.is_dir()
                 and not path.name.startswith("_")
-                and path.stem not in blocked_names
-                and _loading.has_module_header(path)
+                and path.name not in blocked_names
+                and (path / "main.py").is_file()
             )
         }
 
-        known_files = {source for source in by_source if source.is_relative_to(root)}
+        known_folders = {source for source in by_source if source.is_relative_to(root)}
 
         # --------------------------------------------------------------
-        # Removed files
+        # Removed folders
         # --------------------------------------------------------------
 
-        for removed in known_files - current_files:
+        for removed in known_folders - current_folders:
             record = by_source.get(removed)
 
             if record is not None:
                 await self._remove_record(record)
 
         # --------------------------------------------------------------
-        # New / changed files
+        # New / changed folders
         # --------------------------------------------------------------
 
-        for path in sorted(current_files):
-            # The file can disappear between the rglob above
-            # and the stat here; treat it as already removed
-            # and let the next scan finalize the cleanup.
-            try:
-                fingerprint = self._fingerprint(path)
+        for folder in sorted(current_folders):
+            fingerprint = directory_fingerprint(
+                folder,
+                exclude_dirs=("data",),
+            )
 
-            except OSError:
+            loaded = folder in by_source
+
+            if not self._source_tracker.needs_load(
+                folder,
+                fingerprint,
+                loaded=loaded,
+            ):
                 continue
 
-            previous = self._source_fingerprints.get(path)
-
-            previous_error = self._source_load_errors.get(path)
-
-            # Don't repeatedly retry an unchanged broken file.
-            if previous == fingerprint and previous_error is not None:
-                continue
-
-            existing = by_source.get(path)
-
-            if previous == fingerprint and existing is not None:
-                continue
-
-            self._source_fingerprints[path] = fingerprint
-
-            self._source_load_errors.pop(
-                path,
-                None,
+            self._source_tracker.mark_seen(
+                folder,
+                fingerprint,
             )
 
             try:
-                await self._load_or_reload_file(
-                    path,
+                await self._load_or_reload_folder(
+                    folder,
                     fingerprint,
                 )
 
             except Exception as exc:
-                self._source_load_errors[path] = exc
+                self._source_tracker.mark_failed(
+                    folder,
+                    exc,
+                )
 
-                logger.exception(f"Failed to load Module file: {path}")
+                logger.exception(f"Failed to load Module folder: {folder}")
 
                 self._wake.set()
 
-    async def _load_or_reload_file(
+    async def _load_or_reload_folder(
         self,
-        path: Path,
+        folder: Path,
         fingerprint: tuple[int, int],
     ) -> None:
-        old = self._find_record_by_source(path)
+        old = self._find_record_by_source(folder)
 
         (
             cls,
             imported_name,
-            _,
-        ) = _loading.import_module_class(path)
+        ) = _loading.import_module_class(folder)
 
         _loading.validate_module_class(cls)
 
@@ -896,20 +893,16 @@ class Facade:
                 # start(), stop() or _reconcile().
                 self._register_module_class(
                     cls,
-                    source=str(path),
+                    source=str(folder),
                     source_fingerprint=(fingerprint),
                     imported_module_name=(imported_name),
                 )
 
             except Exception:
-                # The file was imported before the Facade was
-                # involved; drop that synthetic import so a rejected
-                # file leaves nothing behind.
-                if imported_name:
-                    sys.modules.pop(
-                        imported_name,
-                        None,
-                    )
+                # The folder was imported before the Facade was
+                # involved; evict that synthetic package so a
+                # rejected folder leaves nothing behind.
+                _hotload.evict_package(imported_name)
 
                 raise
 
@@ -917,8 +910,11 @@ class Facade:
 
             return
 
-        if old.id != cls.id:
-            raise RuntimeError(f"hot reload changed Module id in {path}: {old.id!r} -> {cls.id!r}")
+        if old.id != folder.name:
+            raise RuntimeError(
+                f"hot reload changed Module folder identity in {folder}: "
+                f"{old.id!r} -> {folder.name!r}"
+            )
 
         await hot_reload(
             self,
@@ -983,7 +979,9 @@ class Facade:
         """
         _loading.validate_module_class(cls)
 
-        module_id = cls.id
+        # Identity is the folder name; folders under one root are
+        # naturally unique.
+        module_id = Path(source).resolve().name
 
         if module_id in self.modules:
             existing = self.modules[module_id]
@@ -1056,7 +1054,10 @@ class Facade:
             )
 
         if source_fingerprint is not None:
-            self._source_fingerprints[Path(record.source).resolve()] = source_fingerprint
+            self._source_tracker.mark_seen(
+                Path(record.source).resolve(),
+                source_fingerprint,
+            )
 
     def _bind_instance(
         self,
@@ -1078,12 +1079,6 @@ class Facade:
                 return record
 
         return None
-
-    def _fingerprint(
-        self,
-        path: Path,
-    ) -> tuple[int, int]:
-        return _loading.fingerprint(path)
 
     # ==================================================================
     # Dependency graph
@@ -1159,11 +1154,7 @@ class Facade:
                 record.generation,
             )
 
-            if record.imported_module_name:
-                sys.modules.pop(
-                    record.imported_module_name,
-                    None,
-                )
+            _hotload.evict_package(record.imported_module_name)
 
             return
 
@@ -1172,28 +1163,16 @@ class Facade:
             None,
         )
 
-        if record.imported_module_name:
-            sys.modules.pop(
-                record.imported_module_name,
-                None,
-            )
+        _hotload.evict_package(record.imported_module_name)
 
         source_path = Path(record.source).resolve()
 
-        self._source_fingerprints.pop(
-            source_path,
-            None,
-        )
-
-        self._source_load_errors.pop(
-            source_path,
-            None,
-        )
+        self._source_tracker.forget(source_path)
 
         # Release the removed Module's in-memory DataSpace. Its
-        # state files under data/ are kept on purpose: they are
-        # what lets a later re-add restore the state as of this
-        # removal.
+        # state lives in the folder's data/ directory: when only
+        # main.py was deleted the folder (and state) survives a
+        # re-add; when the whole folder is gone, so is the state.
         self.dataspaces.pop(
             record.id,
             None,

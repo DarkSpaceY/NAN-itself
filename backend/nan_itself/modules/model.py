@@ -9,16 +9,17 @@ from siblings.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, ClassVar
 
+import yaml
 from pydantic import BaseModel
-
-MODULE_HEADER = "# @module"
 
 # Grace period for one Module to honour a stop. A Module's stop()
 # and its start() task are user code: a blocking implementation, or
@@ -265,6 +266,9 @@ class Module:
     A Module may use:
         self.llm -- LLM handle provisioned by the Facade when the
         composition root supplies one
+        self.home -- its own folder (derived from the defining
+        module's __file__); self.data_dir / self.config_path /
+        self.load_config() / self.resolve_path() derive from it
 
     A Module's start() represents its service lifetime.
 
@@ -288,8 +292,6 @@ class Module:
            do it on start()'s background threads before the loop.
     """
 
-    id: ClassVar[str]
-
     llm: Any | None = None
 
     requires: ClassVar[tuple[str, ...]] = ()
@@ -305,6 +307,83 @@ class Module:
         str,
         DataSpaceReader,
     ]
+
+    # ------------------------------------------------------------------
+    # Folder handles
+    # ------------------------------------------------------------------
+
+    @property
+    def home(self) -> Path:
+        """
+        The folder this Module was loaded from.
+
+        Derived from the defining module's __file__, so it is
+        available from __init__ onwards -- no injection, no
+        ordering constraint. A `_home` attribute (instance or
+        class level) overrides the derivation; cached on first
+        use.
+        """
+        cached = self.__dict__.get("_home")
+
+        if cached is None:
+            cached = type(self).__dict__.get("_home")
+
+        if cached is None:
+            defining = sys.modules[type(self).__module__]
+
+            file = getattr(defining, "__file__", None) or ""
+
+            cached = Path(file).resolve().parent
+
+            self.__dict__["_home"] = cached
+
+        return cached
+
+    @property
+    def data_dir(self) -> Path:
+        """
+        The Module's private data directory (not hot-reloaded).
+        """
+        return self.home / "data"
+
+    @property
+    def config_path(self) -> Path:
+        """
+        The Module's optional config.yaml.
+        """
+        return self.home / "config.yaml"
+
+    def load_config(self) -> dict[str, Any] | None:
+        """
+        Read config.yaml: dict payload, or None when missing or
+        empty. Anything unparsable or non-mapping raises, so a
+        broken config fails loudly instead of silently.
+        """
+        path = self.config_path
+
+        if not path.is_file():
+            return None
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        if data is None:
+            return None
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid module config YAML: {path}")
+
+        return data
+
+    def resolve_path(self, value: str) -> Path:
+        """
+        Resolve one configured path against the Module folder.
+
+        Absolute (and ~/) values pass through; relative values
+        resolve against self.home.
+        """
+        resolved = Path(value).expanduser()
+
+        return resolved if resolved.is_absolute() else self.home / resolved
 
     async def start(self) -> None:
         """
@@ -378,7 +457,7 @@ class Module:
         Return JSON-serializable private Module state.
 
         Facade stores the result under:
-            ./data/modules/private/<module_id>.json
+            <module folder>/data/private.json
         """
         return None
 

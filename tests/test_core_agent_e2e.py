@@ -92,9 +92,9 @@ def _load_inbox():
     """
     from nan_itself.modules.loading import import_module_class
 
-    path = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox.py"
+    folder = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox"
 
-    cls, _, _ = import_module_class(path)
+    cls, _ = import_module_class(folder)
 
     return cls()
 

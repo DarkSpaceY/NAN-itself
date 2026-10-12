@@ -35,7 +35,7 @@ def _load_audio_module():
     """
     spec = importlib.util.spec_from_file_location(
         "audio_module_test",
-        REPO / "builtin" / "modules" / "audio.py",
+        REPO / "builtin" / "modules" / "audio" / "main.py",
     )
 
     assert spec is not None and spec.loader is not None

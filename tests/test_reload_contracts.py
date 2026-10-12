@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 from nan_itself.modules import deps as deps_module
@@ -22,6 +23,7 @@ from nan_itself.tools.runtime import (
     ProviderRuntime,
 )
 from nan_itself.utils import paths as _paths
+from nan_itself.utils.hotload import directory_fingerprint
 
 
 def run(coro):
@@ -43,10 +45,16 @@ def _write_tool(
     provider_id: str,
     value: str,
 ) -> None:
-    path.write_text(
-        f"""# @tool
+    """
+    Write one tool folder (identity = folder name; the declared
+    id is ignored by the loader).
+    """
+    folder = path.with_suffix("")
 
-class Provider(ToolSet):
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(
+        f"""class Provider(ToolSet):
     id = {provider_id!r}
 
     @tool
@@ -72,9 +80,9 @@ def test_local_tool_reload_replaces_only_one_provider(
 
     tool_dir.mkdir(parents=True)
 
-    alpha = tool_dir / "alpha.py"
+    alpha = tool_dir / "alpha"
 
-    beta = tool_dir / "beta.py"
+    beta = tool_dir / "beta"
 
     _write_tool(
         alpha,
@@ -128,7 +136,7 @@ def test_local_tool_reload_replaces_only_one_provider(
     assert result_text(second) == "v2:hello"
 
 
-def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
+def test_local_tool_folder_identity_is_stable_when_id_changes(
     tmp_path,
     monkeypatch,
 ):
@@ -138,7 +146,7 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
     tool_dir.mkdir(parents=True)
 
-    source = tool_dir / "one.py"
+    source = tool_dir / "one"
 
     _write_tool(
         source,
@@ -150,7 +158,7 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
     run(runtime._scan_locals())
 
-    assert runtime.get_provider("alpha") is not None
+    assert runtime.get_provider("one") is not None
 
     assert runtime.get_provider("beta") is None
 
@@ -162,12 +170,13 @@ def test_local_tool_file_remains_one_to_one_when_provider_id_changes(
 
     run(runtime._scan_locals())
 
-    # One file owns one provider only.
+    # Identity is the folder name: a changed id declaration is
+    # ignored and the folder keeps owning exactly one provider.
     assert runtime.get_provider("alpha") is None
 
-    assert runtime.get_provider("beta") is not None
+    assert runtime.get_provider("one") is not None
 
-    assert runtime.provider_names() == ("beta",)
+    assert runtime.provider_names() == ("one",)
 
 
 def test_removed_local_tool_disappears_completely(
@@ -180,25 +189,25 @@ def test_removed_local_tool_disappears_completely(
 
     tool_dir.mkdir(parents=True)
 
-    source = tool_dir / "one.py"
+    source = tool_dir / "one"
 
     _write_tool(
         source,
-        provider_id="alpha",
-        value="alpha",
+        provider_id="one",
+        value="one",
     )
 
     runtime = ProviderRuntime()
 
     run(runtime._scan_locals())
 
-    assert runtime.get_provider("alpha") is not None
+    assert runtime.get_provider("one") is not None
 
-    source.unlink()
+    shutil.rmtree(source)
 
     run(runtime._scan_locals())
 
-    assert runtime.get_provider("alpha") is None
+    assert runtime.get_provider("one") is None
 
 
 # ============================================================================
@@ -422,15 +431,14 @@ def test_facade_workspace_module_reload_call_signature(
 
     workspace.mkdir(parents=True)
 
-    source = workspace / "example.py"
+    folder = workspace / "example"
 
-    source.write_text(
-        """# @module
-import asyncio
+    folder.mkdir(parents=True)
+
+    (folder / "main.py").write_text(
+        """import asyncio
 
 class Example(Module):
-    id = "example"
-
     async def start(self):
         await asyncio.Event().wait()
 """,
@@ -439,26 +447,23 @@ class Example(Module):
 
     facade = Facade()
 
-    first_fp = facade._fingerprint(source)
+    first_fp = directory_fingerprint(folder)
 
     run(
-        facade._load_or_reload_file(
-            source,
+        facade._load_or_reload_folder(
+            folder,
             first_fp,
         )
     )
 
-    first = facade._find_record_by_source(source)
+    first = facade._find_record_by_source(folder)
 
     assert first is not None
 
-    source.write_text(
-        """# @module
-import asyncio
+    (folder / "main.py").write_text(
+        """import asyncio
 
 class Example(Module):
-    id = "example"
-
     async def start(self):
         await asyncio.Event().wait()
 
@@ -468,17 +473,17 @@ class Example(Module):
         encoding="utf-8",
     )
 
-    second_fp = facade._fingerprint(source)
+    second_fp = directory_fingerprint(folder)
 
     # This must enter hot_reload() successfully.
     run(
-        facade._load_or_reload_file(
-            source,
+        facade._load_or_reload_folder(
+            folder,
             second_fp,
         )
     )
 
-    second = facade._find_record_by_source(source)
+    second = facade._find_record_by_source(folder)
 
     assert second is not None
     assert second.generation == 1
@@ -512,9 +517,9 @@ def test_module_reload_does_not_rebind_unrelated_module(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = modules_dir / "a.py"
+    a_source = modules_dir / "a"
 
-    b_source = modules_dir / "b.py"
+    b_source = modules_dir / "b"
 
     a_source.write_text(
         "# placeholder",

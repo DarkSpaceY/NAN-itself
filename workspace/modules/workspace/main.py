@@ -1,5 +1,3 @@
-# @module
-
 from __future__ import annotations
 
 import asyncio
@@ -11,8 +9,6 @@ from nan_itself.utils import paths as _paths
 
 
 class WorkspaceModule(Module):
-    id = "workspace"
-
     SCAN_INTERVAL = 1.0
 
     IGNORED_DIRS = frozenset({

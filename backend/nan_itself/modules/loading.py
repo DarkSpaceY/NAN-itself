@@ -1,193 +1,99 @@
 """
-Module source discovery primitives.
+Module folder discovery and import.
 
-Header sniffing, change fingerprints, dynamic import of a
-module file and Module class validation. Pure functions.
+One folder = one Module:
+
+    <name>/
+        main.py       entry; exactly one concrete Module subclass
+        other.py      siblings, seeded with the same vocabulary
+        config.yaml   optional (read by the Module itself)
+        data/         never imported, never fingerprinted
+
+Pure functions; no registry state.
 """
 
 from __future__ import annotations
 
-import hashlib
 import inspect
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any
 
+from nan_itself.utils import hotload
+
 from .model import (
-    MODULE_HEADER,
     Module,
     Turn,
 )
 
-
-def has_module_header(
-    path: Path,
-) -> bool:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-    head = "\n".join(text.splitlines()[:20])
-
-    return MODULE_HEADER in head
-
-
-def fingerprint(
-    path: Path,
-) -> tuple[int, int]:
-    stat = path.stat()
-
-    return (
-        stat.st_mtime_ns,
-        stat.st_size,
-    )
+MAIN_FILENAME = "main.py"
 
 
 def validate_module_class(
     cls: Any,
 ) -> None:
-    module_id = getattr(
-        cls,
-        "id",
-        None,
-    )
+    requires = getattr(cls, "requires", ())
 
-    if not isinstance(
-        module_id,
-        str,
-    ):
-        raise TypeError(f"Module {cls.__name__} must define a string id")
-
-    if not module_id:
-        raise ValueError(f"Module {cls.__name__} has empty id")
-
-    requires = getattr(
-        cls,
-        "requires",
-        (),
-    )
-
-    if not isinstance(
-        requires,
-        tuple,
-    ):
-        raise TypeError(f"Module {module_id!r}.requires must be tuple[str, ...]")
+    if not isinstance(requires, tuple):
+        raise TypeError(f"Module {cls.__name__}.requires must be tuple[str, ...]")
 
     if any(
-        not isinstance(
-            item,
-            str,
-        )
-        or not item
+        not isinstance(item, str) or not item
         for item in requires
     ):
-        raise TypeError(f"Module {module_id!r}.requires contains invalid ids")
+        raise TypeError(f"Module {cls.__name__!r}.requires contains invalid ids")
 
     if len(set(requires)) != len(requires):
-        raise ValueError(f"Module {module_id!r}.requires contains duplicates")
+        raise ValueError(f"Module {cls.__name__!r}.requires contains duplicates")
 
 
 def import_module_class(
-    path: Path,
+    folder: Path,
 ) -> tuple[
     Any,
     str,
-    ModuleType,
 ]:
     """
-    Import a module source file.
+    Import one Module folder and extract its class.
 
-    Returns the single concrete Module subclass it defines,
-    the synthetic module name it was imported under, and the
-    module object itself.
+    The folder is imported as a synthetic package seeded with the
+    module vocabulary (Module, Turn), so main.py and every
+    sibling work without any nan_itself imports. Returns the
+    single concrete Module subclass defined in main.py -- classes
+    defined in siblings are not entry candidates -- plus the
+    package root name for later eviction from sys.modules.
     """
-    digest = hashlib.sha1(
-        str(path).encode("utf-8"),
-        usedforsecurity=False,
-    ).hexdigest()[:12]
-
-    module_name = f"_dynamic_module_{path.stem}_{digest}"
-
-    sys.modules.pop(
-        module_name,
-        None,
+    pkg_name, main = hotload.load_folder_package(
+        folder,
+        kind="module",
+        seeds={"Module": Module, "Turn": Turn},
     )
 
-    # Compile from freshly read source instead of going through
-    # the import system: the bytecode cache (__pycache__) keys on
-    # coarse mtime + size, so an edit that keeps both (a one-
-    # character change within the same timestamp tick) would
-    # silently execute STALE code. Hot reload must never do that.
     try:
-        source = path.read_text(encoding="utf-8")
+        candidates = [
+            cls
+            for _, cls in inspect.getmembers(main, inspect.isclass)
+            if (
+                cls.__module__ == main.__name__
+                and issubclass(cls, Module)
+                and cls is not Module
+                and not inspect.isabstract(cls)
+            )
+        ]
 
-        code = compile(
-            source,
-            str(path),
-            "exec",
-        )
+    except BaseException:
+        hotload.evict_package(pkg_name)
 
-    except Exception:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
         raise
-
-    module = ModuleType(module_name)
-
-    module.__file__ = str(path)
-
-    # Inject the module vocabulary so hot-reload files work
-    # without any nan_itself imports. An explicit import of the
-    # same name simply shadows the injection.
-    module.__dict__["Module"] = Module
-
-    module.__dict__["Turn"] = Turn
-
-    sys.modules[module_name] = module
-
-    try:
-        exec(
-            code,
-            module.__dict__,
-        )
-
-    except Exception:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
-        raise
-
-    candidates = [
-        cls
-        for _, cls in inspect.getmembers(
-            module,
-            inspect.isclass,
-        )
-        if (
-            cls.__module__ == module.__name__
-            and issubclass(cls, Module)
-            and cls is not Module
-            and not inspect.isabstract(cls)
-        )
-    ]
 
     if len(candidates) != 1:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
+        hotload.evict_package(pkg_name)
 
         raise RuntimeError(
-            f"{path} must contain exactly one concrete Module; found {len(candidates)}"
+            f"{folder / MAIN_FILENAME} must contain exactly one concrete Module; "
+            f"found {len(candidates)}"
         )
 
     return (
         candidates[0],
-        module_name,
-        module,
+        pkg_name,
     )

@@ -15,7 +15,6 @@ for the runtime at import time.
 """
 
 from .model import (
-    MODULE_HEADER,
     ChannelSpec,
     DataSpace,
     DataSpaceReader,
@@ -30,7 +29,6 @@ __all__ = [
     "ChannelSpec",
     "DataSpace",
     "DataSpaceReader",
-    "MODULE_HEADER",
     "Module",
     "ModuleRecord",
     "ModuleState",

@@ -20,15 +20,15 @@ from nan_itself.tools.provider import Provider
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-SEARCH_FILE = PROJECT_ROOT / "builtin" / "tools" / "local" / "search.py"
+SEARCH_FOLDER = PROJECT_ROOT / "builtin" / "tools" / "local" / "search"
 
 
 def _build_provider(cls: type) -> Provider:
     return local.build_provider(
         local.local_provider_spec(
             name="search",
-            file=SEARCH_FILE,
-            source=str(SEARCH_FILE),
+            file=SEARCH_FOLDER,
+            source=str(SEARCH_FOLDER),
         ),
         cls,
     )
@@ -76,9 +76,9 @@ def _load_module() -> tuple[
     ModuleType,
     type,
 ]:
-    cls, module_name = local.load_class_from_file(SEARCH_FILE)
+    cls, pkg_name = local.load_class_from_folder(SEARCH_FOLDER)
 
-    return sys.modules[module_name], cls
+    return sys.modules[f"{pkg_name}.main"], cls
 
 
 def _install_fake_exec(
@@ -118,8 +118,6 @@ def test_loads_single_provider() -> None:
 
     assert cls.__name__ == "SearchProvider"
 
-    assert cls.id == "search"
-
     instance = cls()
 
     assert instance.tool_names() == ("web_search",)
@@ -148,8 +146,7 @@ async def test_web_search_parses_cli_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    # One load only: load_class_from_file re-execs the source
-    # each call, so the class's globals belong to the module
+    # The class's globals belong to the <pkg>.main module
     # object returned alongside it -- patch that one.
     module, cls = _load_module()
 
@@ -272,4 +269,4 @@ def test_settings_file_resolution() -> None:
 
     assert resolved is not None
 
-    assert resolved.endswith("config/searxng.yml")
+    assert resolved.endswith(str(SEARCH_FOLDER / "config.yaml"))

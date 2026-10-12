@@ -1,5 +1,3 @@
-# @module
-
 """
 System: the agent feeling its own body.
 
@@ -481,8 +479,6 @@ def _fmt_span(seconds: float | None) -> str | None:
 
 
 class SystemModule(Module):
-    id = "system"
-
     poll_interval: float = 5.0
 
     render_preview_cap: int = 80

@@ -93,9 +93,9 @@ def test_concurrent_reload_of_independent_modules_isolated(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = modules_dir / "a.py"
+    a_source = modules_dir / "a"
 
-    b_source = modules_dir / "b.py"
+    b_source = modules_dir / "b"
 
     class AOld(Module):
         id = "a"
@@ -253,7 +253,7 @@ def test_concurrent_reload_same_module_does_not_stop_old_twice(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
 
     class OldModule(Module):
         id = "example"
@@ -353,7 +353,7 @@ def test_reload_candidate_becomes_active_before_old_stop_finishes(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
 
     entered_stop = asyncio.Event()
 

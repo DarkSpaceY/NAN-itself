@@ -27,10 +27,21 @@ from nan_itself.modules.runtime import (
     Facade,
 )
 from nan_itself.utils import paths as _paths
+from nan_itself.utils.hotload import directory_fingerprint
 
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def _write_module(modules_dir: Path, name: str, source: str) -> Path:
+    folder = modules_dir / name
+
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(source, encoding="utf-8")
+
+    return folder
 
 
 def _facade(tmp_path: Path, monkeypatch) -> Facade:
@@ -80,24 +91,20 @@ async def _register_cycle(tmp_path: Path, monkeypatch) -> None:
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = modules_dir / "a.py"
-    b_source = modules_dir / "b.py"
-
-    a_source.write_text(_A_SOURCE, encoding="utf-8")
-
-    b_source.write_text(_B_SOURCE, encoding="utf-8")
+    a_folder = _write_module(modules_dir, "a", _A_SOURCE)
+    b_folder = _write_module(modules_dir, "b", _B_SOURCE)
 
     # Loading a alone is fine: the missing dependency is only
     # a warning, not a cycle.
-    await facade._load_or_reload_file(
-        a_source,
-        facade._fingerprint(a_source),
+    await facade._load_or_reload_folder(
+        a_folder,
+        directory_fingerprint(a_folder),
     )
 
     # Loading b completes the cycle: registration must fail fast.
-    await facade._load_or_reload_file(
-        b_source,
-        facade._fingerprint(b_source),
+    await facade._load_or_reload_folder(
+        b_folder,
+        directory_fingerprint(b_folder),
     )
 
 
@@ -134,17 +141,13 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True)
 
-    a_source = modules_dir / "a.py"
-    b_source = modules_dir / "b.py"
-
-    a_source.write_text(_A_SOURCE, encoding="utf-8")
-
-    b_source.write_text(_B_SOURCE, encoding="utf-8")
+    a_folder = _write_module(modules_dir, "a", _A_SOURCE)
+    b_folder = _write_module(modules_dir, "b", _B_SOURCE)
 
     async def scenario() -> None:
-        await facade._load_or_reload_file(
-            a_source,
-            facade._fingerprint(a_source),
+        await facade._load_or_reload_folder(
+            a_folder,
+            directory_fingerprint(a_folder),
         )
 
         record_before = facade.modules["a"]
@@ -155,9 +158,9 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
 
         # Loading b completes the cycle.
         with pytest.raises(RuntimeError) as exc_info:
-            await facade._load_or_reload_file(
-                b_source,
-                facade._fingerprint(b_source),
+            await facade._load_or_reload_folder(
+                b_folder,
+                directory_fingerprint(b_folder),
             )
 
         assert "Module dependency cycle detected" in str(exc_info.value)
@@ -181,10 +184,10 @@ def test_rejected_cycle_registration_leaves_live_state_untouched(
 
         # Nothing durable was written for a Module that never
         # finished registering.
-        assert not (facade.dataspace_dir / "b.json").exists()
+        assert not (modules_dir / "b" / "data" / "dataspace.json").exists()
 
-        # The rejected file left no synthetic import behind.
-        assert not any(name.startswith("_dynamic_module_b") for name in sys.modules)
+        # The rejected folder left no synthetic package behind.
+        assert not any(name.startswith("_nan_pkg_module_b") for name in sys.modules)
 
         # Both ends of the lifecycle still work afterwards.
         await facade.start()
@@ -236,7 +239,7 @@ def test_acyclic_chain_stops_dependents_first(tmp_path, monkeypatch):
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    for name in ("a.py", "b.py", "c.py"):
+    for name in ("a", "b", "c"):
         (modules_dir / name).write_text(
             "# placeholder",
             encoding="utf-8",
@@ -244,19 +247,19 @@ def test_acyclic_chain_stops_dependents_first(tmp_path, monkeypatch):
 
     facade._register_module_class(
         C,
-        source=str(modules_dir / "c.py"),
+        source=str(modules_dir / "c"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         B,
-        source=str(modules_dir / "b.py"),
+        source=str(modules_dir / "b"),
         source_fingerprint=(1, 1),
     )
 
     facade._register_module_class(
         A,
-        source=str(modules_dir / "a.py"),
+        source=str(modules_dir / "a"),
         source_fingerprint=(1, 1),
     )
 

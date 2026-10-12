@@ -1,4 +1,3 @@
-# @module
 """
 Notifier: queues short notifications the model hands down, and
 delivers them on a slow tick.
@@ -32,8 +31,6 @@ class SendPayload(BaseModel):
 
 
 class NotifierModule(Module):
-    id = "notifier"
-
     # Downlink: the model feeds via invoke_channels; the runtime
     # validates the schema and calls feed().
     channels: ClassVar[Mapping[str, ChannelSpec]] = {

@@ -261,9 +261,11 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
 
     workspace.mkdir(parents=True)
 
-    source = workspace / "example.py"
+    folder = workspace / "example"
 
-    source.write_text(
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(
         MODULE_V1,
         encoding="utf-8",
     )
@@ -377,19 +379,19 @@ async def test_module_reload_during_active_core_turn_keeps_snapshot_generation_i
         # Reload while Turn 1 is still blocked.
         # --------------------------------------------------------------
 
-        source.write_text(
+        (folder / "main.py").write_text(
             MODULE_V2,
             encoding="utf-8",
         )
 
         await asyncio.sleep(0)
 
-        new_fingerprint = modules._fingerprint(source)
+        from nan_itself.utils.hotload import directory_fingerprint
 
         await asyncio.wait_for(
-            modules._load_or_reload_file(
-                source,
-                new_fingerprint,
+            modules._load_or_reload_folder(
+                folder,
+                directory_fingerprint(folder),
             ),
             timeout=1.0,
         )
@@ -540,11 +542,13 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
     local_dir = tmp_path / "workspace" / "tools" / "local"
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    source = local_dir / "calc.py"
+    source = local_dir / "calc"
 
     marker = tmp_path / "started.txt"
 
-    source.write_text(
+    source.mkdir(parents=True, exist_ok=True)
+
+    (source / "main.py").write_text(
         LOCAL_TOOL_V1_TEMPLATE.format(marker=str(marker)),
         encoding="utf-8",
     )
@@ -579,28 +583,18 @@ async def test_local_tool_reload_keeps_inflight_call_on_old_provider(
         # Reload local tool while call is still running.
         # ----------------------------------------------------------
 
-        source.write_text(
+        (source / "main.py").write_text(
             LOCAL_TOOL_V2,
             encoding="utf-8",
         )
 
         await asyncio.sleep(0.01)
 
-        fingerprint = runtime._local_tracker.fingerprints.get(source.resolve())
-
-        new_fingerprint = runtime._local_tracker.fingerprints.get(source.resolve())
-
-        assert new_fingerprint == fingerprint
+        from nan_itself.utils.hotload import directory_fingerprint
 
         await runtime._reload_local_source(
             source,
-            runtime._local_tracker.fingerprints.get(
-                source.resolve(),
-                (
-                    source.stat().st_mtime_ns,
-                    source.stat().st_size,
-                ),
-            ),
+            directory_fingerprint(source),
         )
 
         new_provider = runtime.get_provider("calc")

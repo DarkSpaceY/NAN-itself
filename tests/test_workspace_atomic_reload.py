@@ -22,6 +22,13 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def write_entry(folder: Path, text: str) -> None:
+    """Write/replace the main.py of one entity folder."""
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(text, encoding="utf-8")
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -281,19 +288,17 @@ def test_local_tool_invalid_intermediate_file_keeps_old_provider(
         local_dir = tmp_path / "workspace" / "tools" / "local"
         local_dir.mkdir(parents=True, exist_ok=True)
 
-        source = local_dir / "example.py"
+        source = local_dir / "example"
 
-        source.write_text(
-            """# @tool
-
-class Provider(ToolSet):
+        write_entry(
+            source,
+            """class Provider(ToolSet):
     id = "example"
 
     @tool
     def echo(self, text: str) -> str:
         return "v1:" + text
 """,
-            encoding="utf-8",
         )
 
         runtime = ProviderRuntime()
@@ -305,33 +310,29 @@ class Provider(ToolSet):
 
             assert old_provider is not None
 
-            source.write_text(
-                """# @tool
-
-class Provider(ToolSet):
+            write_entry(
+                source,
+                """class Provider(ToolSet):
     id = "example"
 
     @tool
     def echo(self, text: str
 """,
-                encoding="utf-8",
             )
 
             await runtime._scan_locals()
 
             assert runtime.get_provider("example") is old_provider
 
-            source.write_text(
-                """# @tool
-
-class Provider(ToolSet):
+            write_entry(
+                source,
+                """class Provider(ToolSet):
     id = "example"
 
     @tool
     def echo(self, text: str) -> str:
         return "v2:" + text
 """,
-                encoding="utf-8",
             )
 
             await runtime._scan_locals()
@@ -454,24 +455,18 @@ def test_module_invalid_intermediate_file_keeps_old_generation(
 
         workspace.mkdir(parents=True)
 
-        source = workspace / "example.py"
+        source = workspace / "example"
 
-        valid_v1 = """# @module
-import asyncio
+        valid_v1 = """import asyncio
 
 class Example(Module):
-    id = "example"
-
     async def start(self):
         await asyncio.Event().wait()
 """
 
-        valid_v2 = """# @module
-import asyncio
+        valid_v2 = """import asyncio
 
 class Example(Module):
-    id = "example"
-
     async def start(self):
         await asyncio.Event().wait()
 
@@ -479,9 +474,9 @@ class Example(Module):
         return "v2"
 """
 
-        source.write_text(
+        write_entry(
+            source,
             valid_v1,
-            encoding="utf-8",
         )
 
         facade = Facade()
@@ -495,15 +490,11 @@ class Example(Module):
         assert old.generation == 0
 
         # Temporary incomplete Python source.
-        source.write_text(
-            """# @module
-
-class Example(Module):
-    id = "example"
-
+        write_entry(
+            source,
+            """class Example(Module):
     async def start(self)
 """,
-            encoding="utf-8",
         )
 
         await facade._scan_module_root(facade.workspace_modules_dir)
@@ -516,9 +507,9 @@ class Example(Module):
         assert current.generation == 0
 
         # Restore valid source.
-        source.write_text(
+        write_entry(
+            source,
             valid_v2,
-            encoding="utf-8",
         )
 
         async def fake_run_module(
@@ -556,15 +547,17 @@ class Example(Module):
     run(scenario())
 
 
-def test_module_losing_header_is_unregistered(
+def test_module_losing_entry_is_unregistered(
     tmp_path,
     monkeypatch,
 ):
     """
-    Stripping the `# @module` header must unregister the Module.
+    Deleting main.py must unregister the Module.
 
-    The file still exists, so this is not a deletion; but it is no
-    longer a Module source either. A stale record must not survive.
+    The folder still exists (with its data/), so this is not a
+    folder deletion; but it is no longer a Module either. A stale
+    record must not survive, and re-adding main.py registers a
+    fresh instance.
     """
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
@@ -574,19 +567,16 @@ def test_module_losing_header_is_unregistered(
 
         workspace.mkdir(parents=True)
 
-        source = workspace / "example.py"
+        source = workspace / "example"
 
-        source.write_text(
-            """# @module
-import asyncio
+        write_entry(
+            source,
+            """import asyncio
 
 class Example(Module):
-    id = "example"
-
     async def start(self):
         await asyncio.Event().wait()
 """,
-            encoding="utf-8",
         )
 
         facade = Facade()
@@ -595,21 +585,26 @@ class Example(Module):
 
         assert facade._find_record_by_source(source) is not None
 
-        # Same file, header removed.
-        source.write_text(
-            """import asyncio
-
-class Example(Module):
-    id = "example"
-
-    async def start(self):
-        await asyncio.Event().wait()
-""",
-            encoding="utf-8",
-        )
+        # Same folder, entry removed (data/ survives).
+        (source / "main.py").unlink()
 
         await facade._scan_module_root(facade.workspace_modules_dir)
 
         assert facade._find_record_by_source(source) is None
+
+        # Re-adding the entry registers a fresh instance.
+        write_entry(
+            source,
+            """import asyncio
+
+class Example(Module):
+    async def start(self):
+        await asyncio.Event().wait()
+""",
+        )
+
+        await facade._scan_module_root(facade.workspace_modules_dir)
+
+        assert facade._find_record_by_source(source) is not None
 
     run(scenario())

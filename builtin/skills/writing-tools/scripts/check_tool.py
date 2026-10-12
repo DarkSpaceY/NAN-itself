@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Static checker for NAN-itself local tool provider files.
+"""Static checker for NAN-itself local tool folders.
 
 Usage:
-    check_tool.py <tool.py> [<tool.py> ...]
+    check_tool.py <tool_folder> [<tool_folder> ...]
 
-Checks the loadable-file contract enforced by the local tool loader:
-  - the literal `# @tool` header within the first 20 lines
-  - exactly one ToolSet subclass
-  - a non-empty `id` assignment on the class
+Checks the folder contract enforced by the local tool loader:
+  - a main.py entry file exists
+  - main.py defines exactly one ToolSet subclass
+    (classes in sibling files are not entry candidates)
   - at least one @tool-decorated method
   - every @tool method has a docstring and fully annotated parameters
     (the JSON schema derives from the annotations)
@@ -15,8 +15,8 @@ Checks the loadable-file contract enforced by the local tool loader:
     the loader)
   - @tool methods are async (recommended contract; reported as a warning)
 
-Pure AST + text checks; the file is never imported or executed.
-Exits 0 when every file passes, 1 otherwise.
+Pure AST checks; no file is imported or executed.
+Exits 0 when every folder passes, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -25,8 +25,7 @@ import ast
 import sys
 from pathlib import Path
 
-HEADER = "# @tool"
-SCAN_LINES = 20
+ENTRY = "main.py"
 BASE_CLASS = "ToolSet"
 DECORATOR = "tool"
 
@@ -66,19 +65,24 @@ def is_tool_decorator(decorator: ast.expr) -> bool:
     return False
 
 
-def check(path: Path) -> Report:
-    report = Report(path)
+def check(folder: Path) -> Report:
+    report = Report(folder)
+
+    if not folder.is_dir():
+        report.error("not a folder")
+        return report
+
+    entry = folder / ENTRY
+
+    if not entry.is_file():
+        report.error(f"missing {ENTRY}")
+        return report
 
     try:
-        text = path.read_text(encoding="utf-8")
+        text = entry.read_text(encoding="utf-8")
     except OSError as exc:
         report.error(f"cannot read: {exc}")
         return report
-
-    head = "\n".join(text.splitlines()[:SCAN_LINES])
-
-    if HEADER not in head:
-        report.error(f"missing '{HEADER}' header within the first {SCAN_LINES} lines")
 
     try:
         tree = ast.parse(text)
@@ -104,29 +108,20 @@ def check(path: Path) -> Report:
 
     cls = subclasses[0]
 
-    module_id = None
+    has_id = any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "id" for target in node.targets)
+        or (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "id"
+            and node.value is not None
+        )
+        for node in cls.body
+    )
 
-    for node in cls.body:
-        if (
-            isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "id" for target in node.targets)
-            or (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "id"
-                and node.value is not None
-            )
-        ):
-            module_id = node.value
-
-    if module_id is None:
-        report.error("class does not assign `id`")
-    elif not (
-        isinstance(module_id, ast.Constant)
-        and isinstance(module_id.value, str)
-        and module_id.value.strip()
-    ):
-        report.error("`id` must be a non-empty string literal")
+    if has_id:
+        report.warn("class assigns `id`; identity is the folder name and `id` is ignored")
 
     tools = [
         node
@@ -180,11 +175,6 @@ def main(argv: list[str]) -> int:
 
     for argument in argv:
         path = Path(argument)
-
-        if not path.is_file():
-            print(f"FAIL: {path}: not a file")
-            ok = False
-            continue
 
         ok &= check(path).dump()
 

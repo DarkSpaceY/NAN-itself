@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from nan_itself.tools.watcher import (
+from nan_itself.utils.hotload import (
     BACKOFF_SCHEDULE,
     SourceTracker,
 )

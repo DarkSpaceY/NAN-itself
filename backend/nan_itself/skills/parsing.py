@@ -149,25 +149,12 @@ def skill_files(
     references/ and assets/ are conventions, not the
     exhaustive surface. A Skill directory may contain
     arbitrary additional files and folders and all of them
-    belong to the Skill.
-
-    Hidden entries (dot-prefixed path segments) and
-    __pycache__ are excluded; ordering is stable.
+    belong to the Skill. Hidden entries and __pycache__ are
+    excluded; ordering is stable.
     """
-    if not root.is_dir():
-        return ()
+    from nan_itself.utils.hotload import detected_files
 
-    return tuple(
-        sorted(
-            path.resolve()
-            for path in root.rglob("*")
-            if path.is_file()
-            and not any(
-                part.startswith(".") or part == "__pycache__"
-                for part in path.relative_to(root).parts
-            )
-        )
-    )
+    return detected_files(root, exclude_dirs=())
 
 
 def directory_fingerprint(
@@ -178,32 +165,8 @@ def directory_fingerprint(
 
     A single-file fingerprint would miss edits to bundled
     resources, so the whole directory is folded into one
-    value: summed mtimes and sizes plus the file count
-    (so additions and removals are detected too).
+    value.
     """
-    files = skill_files(root)
+    from nan_itself.utils.hotload import directory_fingerprint as _fingerprint
 
-    if not files:
-        return (0, 0)
-
-    total_mtime = 0
-
-    total_size = 0
-
-    for path in files:
-        try:
-            stat = path.stat()
-
-        except OSError:
-            continue
-
-        total_mtime += stat.st_mtime_ns
-
-        total_size += stat.st_size
-
-    count = len(files)
-
-    return (
-        total_mtime + count,
-        total_size + count,
-    )
+    return _fingerprint(root, exclude_dirs=())

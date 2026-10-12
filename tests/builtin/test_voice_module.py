@@ -43,7 +43,7 @@ def _load_voice_module():
     """
     spec = importlib.util.spec_from_file_location(
         "voice_module_test",
-        REPO / "builtin" / "modules" / "voice.py",
+        REPO / "builtin" / "modules" / "voice" / "main.py",
     )
 
     assert spec is not None and spec.loader is not None

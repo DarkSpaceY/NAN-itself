@@ -49,12 +49,14 @@ refresh when `resolve_tool` misses on the cached table.
 
 ### Local providers
 
-A local provider is a Python file whose first 20 lines contain the
-literal header `# @tool` and which defines exactly one concrete
-`ToolSet` subclass with a unique `ClassVar id`. The loader injects the
-local-tool vocabulary — `ToolSet`, `@tool`, `text_result`,
-`error_result` — into the file's namespace, so a provider file needs no
-framework imports to hot-reload.
+A local provider is a folder under `tools/local/` whose `main.py`
+defines exactly one concrete `ToolSet` subclass. The provider's
+identity is the folder name — there is no `id` to declare. The loader
+seeds the local-tool vocabulary — `ToolSet`, `@tool`, `text_result`,
+`error_result` — into every `.py` of the folder, so provider files
+need no framework imports to hot-reload; siblings import each other
+with normal package syntax (`from . import helper`). Anything under
+the folder's `data/` is never imported and never fingerprinted.
 
 `ToolSet` (`backend/nan_itself/tools/local.py`) is the base class for
 in-process providers. On construction it walks the class MRO base-first
@@ -92,21 +94,22 @@ Providers live in two parallel roots scanned with identical semantics:
 | Root | Contents |
 |---|---|
 | `builtin/tools/mcps/` | Shipped MCP YAML configs (one file = one provider) |
-| `builtin/tools/local/` | Shipped local Python providers (one file = one provider) |
+| `builtin/tools/local/` | Shipped local Python providers (one folder = one provider) |
 | `workspace/tools/mcps/` | User territory, same shape (starts empty) |
 | `workspace/tools/local/` | User territory, same shape (starts empty) |
 
 Discovery rules:
 
-- **One file = one provider.** An MCP YAML file declares exactly one
-  server; a local Python file defines exactly one concrete `ToolSet`.
-- A provider name belongs to exactly one source file; a second source
-  claiming a live name fails that source's reload and leaves the
-  existing provider intact.
-- Files whose name starts with `_` are ignored. Only `.yaml` / `.yml`
-  files are picked up under `mcps/`; only `.py` files that carry the
-  `# @tool` header are picked up under `local/` (recursively, unlike the
-  flat `mcps/` scan).
+- **One file = one MCP provider; one folder = one local provider.** An
+  MCP YAML file declares exactly one server; a local folder's `main.py`
+  defines exactly one concrete `ToolSet`.
+- A provider name belongs to exactly one source (the MCP file, or the
+  local folder); a second source claiming a live name fails that
+  source's reload and leaves the existing provider intact.
+- Sources whose name starts with `_` are ignored. Only `.yaml` / `.yml`
+  files are picked up under `mcps/` (flat scan); only folders with a
+  `main.py` are picked up under `local/` (flat scan; each folder is
+  fingerprinted as a whole, excluding `data/`).
 
 The live providers are held in `ProviderRuntime.providers` (name →
 `Provider`); MCP workers are additionally held in `_mcp_workers`.

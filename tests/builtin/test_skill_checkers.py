@@ -21,10 +21,10 @@ CHECK_MODULE = REPO / "builtin" / "skills" / "writing-modules" / "scripts" / "ch
 CHECK_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "scripts" / "check_tool.py"
 
 EXAMPLE_MODULE = (
-    REPO / "builtin" / "skills" / "writing-modules" / "references" / "example-module.py"
+    REPO / "builtin" / "skills" / "writing-modules" / "references" / "example-module"
 )
 
-EXAMPLE_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "references" / "example-tool.py"
+EXAMPLE_TOOL = REPO / "builtin" / "skills" / "writing-tools" / "references" / "example-tool"
 
 
 def _run(
@@ -32,7 +32,7 @@ def _run(
     target: Path,
 ) -> subprocess.CompletedProcess[str]:
     """
-    Run one checker script against one file, like the skill does.
+    Run one checker script against one folder, like the skill does.
     """
     return subprocess.run(
         [
@@ -104,9 +104,11 @@ def _tool_source(parameters: str) -> str:
 
 
 def test_check_module_rejects_list_requires(tmp_path: Path) -> None:
-    path = tmp_path / "fixture_module.py"
+    path = tmp_path / "fixture_module"
 
-    path.write_text(
+    path.mkdir()
+
+    (path / "main.py").write_text(
         _module_source('["a", "b"]'),
         encoding="utf-8",
     )
@@ -121,9 +123,11 @@ def test_check_module_rejects_list_requires(tmp_path: Path) -> None:
 
 
 def test_check_module_accepts_tuple_requires(tmp_path: Path) -> None:
-    path = tmp_path / "fixture_module.py"
+    path = tmp_path / "fixture_module"
 
-    path.write_text(
+    path.mkdir()
+
+    (path / "main.py").write_text(
         _module_source('("a", "b")'),
         encoding="utf-8",
     )
@@ -134,9 +138,11 @@ def test_check_module_accepts_tuple_requires(tmp_path: Path) -> None:
 
 
 def test_check_tool_rejects_var_positional(tmp_path: Path) -> None:
-    path = tmp_path / "fixture_tool.py"
+    path = tmp_path / "fixture_tool"
 
-    path.write_text(
+    path.mkdir()
+
+    (path / "main.py").write_text(
         _tool_source("*args: Any"),
         encoding="utf-8",
     )
@@ -149,9 +155,11 @@ def test_check_tool_rejects_var_positional(tmp_path: Path) -> None:
 
 
 def test_check_tool_rejects_var_keyword(tmp_path: Path) -> None:
-    path = tmp_path / "fixture_tool.py"
+    path = tmp_path / "fixture_tool"
 
-    path.write_text(
+    path.mkdir()
+
+    (path / "main.py").write_text(
         _tool_source("**kwargs: Any"),
         encoding="utf-8",
     )

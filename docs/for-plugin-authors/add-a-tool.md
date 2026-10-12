@@ -33,12 +33,11 @@ dependency with `uvx --with`.
 
 ## Add a local Python provider
 
-Create `builtin/tools/local/<name>.py` containing exactly one concrete
-`ToolSet` subclass:
+Create `builtin/tools/local/<name>/` with a `main.py` containing exactly
+one concrete `ToolSet` subclass:
 
 ```python
-# @tool
-"""One-line provider description."""
+"""One-line provider description (<name>/main.py)."""
 
 from __future__ import annotations
 
@@ -46,8 +45,6 @@ from typing import Any
 
 
 class MyProvider(ToolSet):
-
-    id = "<name>"
 
     @tool
     async def do_thing(self, query: str, limit: int = 10) -> Any:
@@ -60,28 +57,29 @@ class MyProvider(ToolSet):
         ...
 ```
 
-The loader injects `ToolSet`, `@tool`, `text_result` and `error_result`
-into the file's namespace, so the file needs no framework imports to
-hot-reload. An explicit import of the same name simply shadows the
-injection.
+The loader seeds `ToolSet`, `@tool`, `text_result` and `error_result`
+into every `.py` of the folder, so the files need no framework imports
+to hot-reload. Siblings import each other with normal package syntax
+(`from . import helper`). An explicit import of the same name simply
+shadows the seeding.
 
 Method rules:
 
-- Keep the `# @tool` header within the first 20 lines (convention: line
-  1, before the docstring).
-- Give the class a unique `id`.
+- The folder name is the provider identity — there is no `id` to
+  declare.
 - Fully type-annotate every parameter — the JSON schema derives from the
   annotations. `*args` / `**kwargs` are not supported.
 - The docstring's first line is the tool summary; the `Args:` section
   documents each parameter.
 - Put heavy imports inside the method body, not at module top level.
-- Anchor any repo-relative path through `nan_itself.utils.paths`; never
-  depend on the process working directory.
+- Put heavyweight payloads under `data/` in the folder — it is never
+  imported and never fingerprinted, so writes there never trigger a
+  reload.
 
 ## Verify
 
 Check that the provider loads without restarting the process: the runtime
-scans every second, so a valid new file appears through `list_tools` (as
+scans every second, so a valid new folder appears through `list_tools` (as
 `<name>/<tool>`) within a few seconds. Inspect it with `show_tool` and
 call it with `invoke_tool`.
 

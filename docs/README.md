@@ -14,7 +14,7 @@ with [for-users/](for-users/):
 1. [Get started](for-users/get-started.md) — from a fresh clone to a first
    conversation.
 2. [Configuration](for-users/configuration.md) — `settings.yaml` and
-   per-module `config/modules/*.yaml`.
+   per-module `config.yaml` inside each module folder.
 
 ### You want to write plugins
 
@@ -47,7 +47,7 @@ You want to work on NAN-itself itself. Start with
 | Document | Contents |
 |---|---|
 | [for-users/get-started.md](for-users/get-started.md) | Quick start: install, configure, start, converse. |
-| [for-users/configuration.md](for-users/configuration.md) | `settings.yaml` and per-module `config/modules/*.yaml`. |
+| [for-users/configuration.md](for-users/configuration.md) | `settings.yaml` and per-module `config.yaml` inside each module folder. |
 | [for-plugin-authors/add-a-tool.md](for-plugin-authors/add-a-tool.md) | Add an MCP or local Python tool provider. |
 | [for-plugin-authors/add-a-module.md](for-plugin-authors/add-a-module.md) | Add an ambient or reactive module. |
 | [for-plugin-authors/add-a-skill.md](for-plugin-authors/add-a-skill.md) | Add a skill package. |

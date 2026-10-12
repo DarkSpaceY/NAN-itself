@@ -1,12 +1,17 @@
 """
 Crash-safe persistence for module state.
 
-Two artifacts per module id, written atomically:
+Two artifacts per module, written atomically inside the
+module's own folder:
 
-    <data_dir>/private/<id>.json     serialize_state() payload
-    <data_dir>/dataspace/<id>.json   published DataSpace snapshot
+    <home>/data/private.json     serialize_state() payload
+    <home>/data/dataspace.json   published DataSpace snapshot
 
 A corrupt file only blocks its own module, never the others.
+
+Legacy layouts (data/modules/{private,dataspace}/<id>.json) are
+migrated into the folder on first restore, so an update from the
+old flat layout keeps its state.
 """
 
 from __future__ import annotations
@@ -19,19 +24,21 @@ from typing import Any
 
 from loguru import logger
 
+PRIVATE_FILENAME = "private.json"
+
+DATASPACE_FILENAME = "dataspace.json"
+
 
 def private_state_path(
-    private_dir: Path,
-    module_id: str,
+    data_dir: Path,
 ) -> Path:
-    return private_dir / f"{module_id}.json"
+    return data_dir / PRIVATE_FILENAME
 
 
 def dataspace_path(
-    dataspace_dir: Path,
-    module_id: str,
+    data_dir: Path,
 ) -> Path:
-    return dataspace_dir / f"{module_id}.json"
+    return data_dir / DATASPACE_FILENAME
 
 
 def read_json_file(path: Path) -> Any:
@@ -80,14 +87,64 @@ def atomic_write_json(
             temp_path.unlink()
 
 
+def _migrate_legacy_file(
+    legacy: Path,
+    target: Path,
+) -> None:
+    """
+    Move one legacy state file into the module folder (best
+    effort): only when the legacy file exists, the target does
+    not, and both sit on the same filesystem (os.replace).
+    """
+    if not legacy.is_file() or target.exists():
+        return
+
+    try:
+        target.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        os.replace(
+            legacy,
+            target,
+        )
+
+        logger.info(
+            "Migrated legacy Module state: {} -> {}",
+            legacy,
+            target,
+        )
+
+    except OSError:
+        logger.exception(
+            "Failed to migrate legacy Module state: {}",
+            legacy,
+        )
+
+
+def migrate_legacy_state(
+    module_id: str,
+    data_dir: Path,
+    *,
+    legacy_private_dir: Path,
+    legacy_dataspace_dir: Path,
+) -> None:
+    _migrate_legacy_file(
+        legacy_private_dir / f"{module_id}.json",
+        private_state_path(data_dir),
+    )
+
+    _migrate_legacy_file(
+        legacy_dataspace_dir / f"{module_id}.json",
+        dataspace_path(data_dir),
+    )
+
+
 def load_dataspace_state(
     record,
-    dataspace_dir: Path,
 ) -> bool:
-    path = dataspace_path(
-        dataspace_dir,
-        record.id,
-    )
+    path = dataspace_path(record.instance.data_dir)
 
     if not path.exists():
         return True
@@ -112,12 +169,8 @@ def load_dataspace_state(
 
 def load_private_state(
     record,
-    private_dir: Path,
 ) -> bool:
-    path = private_state_path(
-        private_dir,
-        record.id,
-    )
+    path = private_state_path(record.instance.data_dir)
 
     if not path.exists():
         return True
@@ -139,29 +192,25 @@ def load_private_state(
 
 def restore_record_state(
     record,
-    *,
-    private_dir: Path,
-    dataspace_dir: Path,
 ) -> None:
-    load_dataspace_state(record, dataspace_dir)
+    load_dataspace_state(record)
 
-    load_private_state(record, private_dir)
+    load_private_state(record)
 
 
 def save_record_state(
     record,
-    *,
-    private_dir: Path,
-    dataspace_dir: Path,
 ) -> None:
+    data_dir = record.instance.data_dir
+
     private_state = record.instance.serialize_state()
 
     atomic_write_json(
-        private_state_path(private_dir, record.id),
+        private_state_path(data_dir),
         private_state,
     )
 
     atomic_write_json(
-        dataspace_path(dataspace_dir, record.id),
+        dataspace_path(data_dir),
         record.data.snapshot(),
     )

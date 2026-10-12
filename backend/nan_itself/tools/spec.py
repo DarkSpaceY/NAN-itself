@@ -20,10 +20,6 @@ ProviderKind = Literal[
     "local",
 ]
 
-LOCAL_TOOL_HEADER = "# @tool"
-
-LOCAL_TOOL_HEADER_SCAN_LINES = 20
-
 # A hung tool call must never freeze the agent loop. Every call is
 # bounded; timeouts surface to the model as error results.
 DEFAULT_TOOL_TIMEOUT = 300.0
@@ -39,7 +35,7 @@ class ProviderSpec:
 
     kind="local":
         An in-process Python class tool provider. `file` points at
-        the source file it was loaded from, or stays None when the
+        the tool folder it was loaded from, or stays None when the
         class was registered directly.
     """
 

@@ -12,13 +12,28 @@ whole, see [architecture.md](../for-contributors/architecture.md).
 
 Modules live in two parallel roots scanned with identical semantics —
 `builtin/modules/` ships with the repo, `workspace/modules/` is user
-territory. **One file = one module**: a source file carries a
-`# @module` header within its first 20 lines and must define exactly
-one concrete `Module` subclass. Editing a file replaces the module
-live; deleting the file removes it.
+territory. **One folder = one module**: a directory whose `main.py`
+defines exactly one concrete `Module` subclass is one module; sibling
+`.py` files beside it belong to the same module and are seeded with
+the same vocabulary (`Module`, `Turn`) so they need no nan_itself
+imports and can import each other with normal package syntax
+(`from . import helper`). Editing any detected file replaces the
+module live; deleting `main.py` (or the folder) removes it.
 
-Each module owns `config/modules/<module_id>.yaml` and loads and
-validates it itself. See [../for-users/configuration.md](../for-users/configuration.md).
+A module folder looks like this:
+
+```
+my_module/
+    main.py       entry; exactly one Module subclass
+    helper.py     optional sibling, seeded like main.py
+    config.yaml   optional; the module loads it itself
+    data/         NOT hot-reloaded: models, databases, state
+```
+
+Each module owns its `config.yaml` and loads and validates it itself
+(see below). Anything under `data/` is invisible to the watcher and
+the loader — heavyweight payloads (model checkouts, registries) live
+there, and writes to it never trigger a reload.
 
 ## The modules package
 
@@ -42,18 +57,14 @@ explicitly.
 
 ## Module surface
 
-A module is a class with a string `id`, an optional `requires` tuple of
-dependency ids, and an instance lifecycle:
+A module is a class with an optional `requires` tuple of dependency
+ids and an instance lifecycle. Its identity is the folder name —
+there is no `id` to declare:
 
 ```python
-# @module
-"""One-line module description."""
-
-from nan_itself.modules import Module
-
+"""One-line module description (main.py)."""
 
 class MyModule(Module):
-    id = "my_module"
 
     requires = ("other_module",)   # optional dependencies
 
@@ -61,10 +72,19 @@ class MyModule(Module):
         ...
 ```
 
+`Module` and `Turn` are already in the namespace (seeded by the
+loader); anything else (`ChannelSpec` included) is imported
+explicitly.
+
 The base class provides the instance handles: `self.data` (the
 module-owned `DataSpace`), `self.dependencies` (read-only
-`DataSpaceReader` handles onto required modules' spaces), and
-`self.llm` (an LLM handle when the composition root supplies one).
+`DataSpaceReader` handles onto required modules' spaces), `self.llm`
+(an LLM handle when the composition root supplies one), and the
+folder handles `self.home` (the module folder), `self.data_dir`
+(`<home>/data`), `self.config_path` (`<home>/config.yaml`),
+`self.load_config()` (dict payload of config.yaml, or None), and
+`self.resolve_path(value)` — absolute/`~/` values pass through,
+relative values resolve against the module folder.
 
 The Facade owns everything else: discovery and hot reload, the
 dependency graph, lifecycle supervision and retry, DataSpace
@@ -95,16 +115,18 @@ appears.
 Registration is checked before it is applied. A module whose `requires`
 would close a dependency cycle is rejected before anything is written:
 it does not start, it leaves the registry untouched, and it does not
-disturb the modules already running — the source file is retried only
+disturb the modules already running — the folder is retried only
 once it changes. A *missing* dependency is not an error, though: a
 module may start while something it requires is absent.
 
-Deleting a source file removes its module. The Facade stops it,
-persists its state, releases its `DataSpace`, and detaches it from every
-module that required it — so a dependent stops seeing a removed module
-rather than reading its last published values. Adding the file back
+Deleting `main.py` (or the whole folder) removes the module. The
+Facade stops it, persists its state into the folder's `data/`,
+releases its `DataSpace`, and detaches it from every module that
+required it — so a dependent stops seeing a removed module rather
+than reading its last published values. Re-adding `main.py`
 registers a fresh instance, restores the persisted state, and
-re-attaches those dependents.
+re-attaches those dependents. Deleting the whole folder discards
+code, config, and state together.
 
 ### Performance rule
 
@@ -135,10 +157,10 @@ deliberately does not expose `publish()`.
 
 A `DataSpace` outlives the instance that publishes to it. A hot reload
 hands the *same* object to the replacement generation, so published
-facts survive an edit of the source file. Removing the source releases
-it, and a later re-add recreates it from the persisted snapshot.
-Nothing else keeps it alive: a dependent's reader is detached when the
-module it required goes away.
+facts survive an edit of the module folder. Removing the module
+releases it, and a later re-add recreates it from the persisted
+snapshot. Nothing else keeps it alive: a dependent's reader is
+detached when the module it required goes away.
 
 ## Turn coupling
 
@@ -151,13 +173,14 @@ module it required goes away.
 - The turn carries a single detached `DataSpace` snapshot shared by the
   whole dispatch tree, so every ask in one turn observes the same world.
 
-Private state is persisted as JSON under `data/modules/private/<id>.json`
-(`serialize_state()` payload) alongside the published DataSpace snapshot
-under `data/modules/dataspace/<id>.json`; both are restored when the
+Private state is persisted as JSON under `<module folder>/data/private.json`
+(`serialize_state() payload`) alongside the published DataSpace snapshot
+under `<module folder>/data/dataspace.json`; both are restored when the
 instance is (re)created. They are written when the Facade shuts down and
 again when it removes a module — that second write is what lets a
-deleted module come back with the state it had at the moment it went
-away. A corrupt file blocks only its own module.
+re-added module come back with the state it had at the moment it went
+away (as long as the folder itself survived). A corrupt file blocks only
+its own module.
 
 ## Channels — the model downlink
 
@@ -299,5 +322,5 @@ through its own `DataSpace` — the perception face already covers it.
   its private state, and that survives only if the module implements
   `serialize_state()` / `restore_state()` — both default to `None` and
   a no-op, so by default consumed payloads are dropped.
-- **One file = one module** is untouched; channels live in the module
+- **One folder = one module** is untouched; channels live in the module
   file alongside the rest of the class.

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Static checker for NAN-itself Module files.
+"""Static checker for NAN-itself Module folders.
 
 Usage:
-    check_module.py <module.py> [<module.py> ...]
+    check_module.py <module_folder> [<module_folder> ...]
 
-Checks the loadable-file contract enforced by the module loader:
-  - the literal `# @module` header within the first 20 lines
-  - exactly one concrete Module subclass
-  - a non-empty `id` assignment on the class
-  - `async def start(self)` and `async def ask(self, turn)` present
+Checks the folder contract enforced by the module loader:
+  - a main.py entry file exists
+  - main.py defines exactly one concrete Module subclass
+    (classes in sibling files are not entry candidates)
   - `requires` (if present) is a tuple of unique identifier strings
+  - `async def start(self)` and `async def ask(self, turn)` present
 
-Pure AST + text checks; the file is never imported or executed.
-Exits 0 when every file passes, 1 otherwise.
+Pure AST checks; no file is imported or executed.
+Exits 0 when every folder passes, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ import ast
 import sys
 from pathlib import Path
 
-HEADER = "# @module"
-SCAN_LINES = 20
+ENTRY = "main.py"
 BASES = {"Module"}
 
 
@@ -48,19 +47,24 @@ class Report:
         return not self.errors
 
 
-def check(path: Path) -> Report:
-    report = Report(path)
+def check(folder: Path) -> Report:
+    report = Report(folder)
+
+    if not folder.is_dir():
+        report.error("not a folder")
+        return report
+
+    entry = folder / ENTRY
+
+    if not entry.is_file():
+        report.error(f"missing {ENTRY}")
+        return report
 
     try:
-        text = path.read_text(encoding="utf-8")
+        text = entry.read_text(encoding="utf-8")
     except OSError as exc:
         report.error(f"cannot read: {exc}")
         return report
-
-    head = "\n".join(text.splitlines()[:SCAN_LINES])
-
-    if HEADER not in head:
-        report.error(f"missing '{HEADER}' header within the first {SCAN_LINES} lines")
 
     try:
         tree = ast.parse(text)
@@ -105,18 +109,8 @@ def check(path: Path) -> Report:
 
     assignments |= ann_assignments
 
-    module_id = assignments.get("id")
-
-    if module_id is None:
-        report.error("class does not assign `id`")
-    elif not (
-        isinstance(module_id, ast.Constant)
-        and isinstance(module_id.value, str)
-        and module_id.value.strip()
-    ):
-        report.error("`id` must be a non-empty string literal")
-    elif not module_id.value.replace("-", "_").isidentifier():
-        report.warn(f"`id` is unconventional: {module_id.value!r}")
+    if "id" in assignments:
+        report.warn("class assigns `id`; identity is the folder name and `id` is ignored")
 
     requires = assignments.get("requires")
 
@@ -181,11 +175,6 @@ def main(argv: list[str]) -> int:
 
     for argument in argv:
         path = Path(argument)
-
-        if not path.is_file():
-            print(f"FAIL: {path}: not a file")
-            ok = False
-            continue
 
         ok &= check(path).dump()
 

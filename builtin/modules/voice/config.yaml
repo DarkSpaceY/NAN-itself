@@ -1,10 +1,11 @@
-# Voice module (builtin/modules/voice.py): full-duplex speech.
+# Voice module (builtin/modules/voice/): full-duplex speech.
 # Consumes the audio module's PCM ring; owns VAD endpointing, STT,
 # the semantic/surface split (say task -> 0.6B SLM -> CosyVoice2)
 # and barge-in.
 #
-# Path convention: relative paths resolve against the repository
-# root; absolute paths pass through unchanged.
+# Path convention: relative paths resolve against the module
+# folder (builtin/modules/voice/); absolute paths pass through
+# unchanged.
 
 stt_model: base             # faster-whisper model size
 stt_language: null          # e.g. zh; null = auto-detect
@@ -13,17 +14,17 @@ fast_path_enabled: true     # trivial turns answered without the main agent
 
 tts_speed: 1.0              # CosyVoice speaking-rate multiplier
 
-whisper_models_dir: models/whisper
+whisper_models_dir: data/whisper
 
-slm_path: models/voice/slm/qwen3-0.6b
+slm_path: data/slm/qwen3-0.6b
 
 slm_repo_id: null           # HuggingFace repo for SLM auto-download; null = Qwen/Qwen3-0.6B
 
-tts_checkout_dir: models/voice/cosyvoice
+tts_checkout_dir: data/cosyvoice
 
-tts_model_dir: models/voice/tts/cosyvoice2-0.5b
+tts_model_dir: data/tts/cosyvoice2-0.5b
 
-tts_reference_wav: models/voice/tts/reference.wav
+tts_reference_wav: data/tts/reference.wav
 
 # Speaker diarization (pyannote embedding + local person-N registry).
 # The pyannote models are gated: accept the terms at
@@ -32,6 +33,6 @@ tts_reference_wav: models/voice/tts/reference.wav
 diarization_repo: pyannote/embedding
 diarization_token: ""        # HuggingFace read token
 diarization_threshold: 0.75  # cosine above this = same person
-diarization_models_dir: models/voice/diarization
+diarization_models_dir: data/diarization
 
-voices_registry: data/databases/audio/voice_speakers.json
+voices_registry: data/voice_speakers.json

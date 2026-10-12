@@ -16,16 +16,12 @@ This module owns:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import inspect
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 from typing import (
     Any,
-    ClassVar,
     get_type_hints,
 )
 
@@ -45,13 +41,14 @@ from .results import (
     text_result,
 )
 from .spec import (
-    LOCAL_TOOL_HEADER,
-    LOCAL_TOOL_HEADER_SCAN_LINES,
     PROVIDER_KIND_LOCAL,
     ProviderSpec,
 )
 
 _LOCAL_TOOL_MARKER = "_nan_local_tool"
+
+# Shared with the modules loader: main.py is the only entry.
+MAIN_FILENAME = "main.py"
 
 
 @dataclass(frozen=True)
@@ -156,9 +153,10 @@ def tool(
 class ToolSet:
     """
     Base class for in-process Python class tool providers.
-    """
 
-    id: ClassVar[str]
+    The provider's identity is the folder it was loaded from;
+    there is no separate id.
+    """
 
     def __init__(self) -> None:
         self._tool_methods: dict[
@@ -362,139 +360,67 @@ def validate_class(
     ):
         raise TypeError("Local tool provider must be a concrete ToolSet subclass")
 
-    provider_id = getattr(
-        cls,
-        "id",
-        None,
-    )
 
-    if not isinstance(provider_id, str) or not provider_id:
-        raise ValueError(
-            f"Local tool provider {getattr(cls, '__name__', cls)} must define a non-empty string id"
-        )
-
-
-def has_tool_header(
-    path: Path,
-) -> bool:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-    head = "\n".join(text.splitlines()[:LOCAL_TOOL_HEADER_SCAN_LINES])
-
-    return LOCAL_TOOL_HEADER in head
-
-
-def load_class_from_file(
-    path: Path,
+def load_class_from_folder(
+    folder: Path,
 ) -> tuple[
     type[ToolSet],
     str,
 ]:
     """
-    Import a local tool provider file and extract its class.
+    Import one local tool folder and extract its class.
 
-    Returns the class plus the synthetic module name it was
-    imported under, so callers can evict it from sys.modules
-    on reload/removal.
+    The folder is imported as a synthetic package seeded with the
+    local-tool vocabulary (ToolSet, tool, text_result,
+    error_result). Returns the single concrete ToolSet subclass
+    defined in main.py plus the package root name, so callers can
+    evict the whole generation from sys.modules on reload or
+    removal.
     """
-    path = path.resolve()
+    from nan_itself.utils import hotload
 
-    digest = hashlib.sha1(
-        str(path).encode("utf-8"),
-        usedforsecurity=False,
-    ).hexdigest()[:12]
-
-    module_name = f"_dynamic_tool_{path.stem}_{digest}"
-
-    sys.modules.pop(
-        module_name,
-        None,
+    pkg_name, main = hotload.load_folder_package(
+        folder,
+        kind="tool",
+        seeds={
+            "ToolSet": ToolSet,
+            "tool": tool,
+            "text_result": text_result,
+            "error_result": error_result,
+        },
     )
 
-    # Compile from freshly read source instead of going through
-    # the import system: the bytecode cache (__pycache__) keys on
-    # coarse mtime + size, so an edit that keeps both (a one-
-    # character change within the same timestamp tick) would
-    # silently execute STALE code. Hot reload must never do that.
     try:
-        source = path.read_text(encoding="utf-8")
-
-        code = compile(
-            source,
-            str(path),
-            "exec",
-        )
-
-    except Exception:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
-        raise
-
-    module: ModuleType = ModuleType(module_name)
-
-    module.__file__ = str(path)
-
-    # Inject the local-tool vocabulary so hot-reload files work
-    # without any nan_itself imports. An explicit import of the
-    # same name simply shadows the injection.
-    module.__dict__["ToolSet"] = ToolSet
-
-    module.__dict__["tool"] = tool
-
-    module.__dict__["text_result"] = text_result
-
-    module.__dict__["error_result"] = error_result
-
-    sys.modules[module_name] = module
-
-    try:
-        exec(
-            code,
-            module.__dict__,
-        )
-
-    except Exception:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
-        raise
-
-    candidates = [
-        cls
-        for _, cls in inspect.getmembers(
-            module,
-            inspect.isclass,
-        )
-        if (
-            cls.__module__ == module.__name__
-            and issubclass(
-                cls,
-                ToolSet,
+        candidates = [
+            cls
+            for _, cls in inspect.getmembers(main, inspect.isclass)
+            if (
+                cls.__module__ == main.__name__
+                and issubclass(
+                    cls,
+                    ToolSet,
+                )
+                and cls is not ToolSet
+                and not inspect.isabstract(cls)
             )
-            and cls is not ToolSet
-            and not inspect.isabstract(cls)
-        )
-    ]
+        ]
+
+    except BaseException:
+        hotload.evict_package(pkg_name)
+
+        raise
 
     if len(candidates) != 1:
-        sys.modules.pop(
-            module_name,
-            None,
-        )
+        hotload.evict_package(pkg_name)
 
         raise RuntimeError(
-            f"{path} must contain exactly one concrete ToolSet; found {len(candidates)}"
+            f"{folder / MAIN_FILENAME} must contain exactly one concrete ToolSet; "
+            f"found {len(candidates)}"
         )
 
     return (
         candidates[0],
-        module_name,
+        pkg_name,
     )
 
 

@@ -31,11 +31,26 @@ from nan_itself.modules.runtime import (
     Facade,
 )
 from nan_itself.utils import paths as _paths
+from nan_itself.utils.hotload import directory_fingerprint
 from pydantic import BaseModel
 
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def write_module(py_path: Path, text: str) -> Path:
+    """
+    Write a module folder; `py_path` is the legacy .../name.py
+    location and the source lands at .../name/main.py.
+    """
+    folder = py_path.with_suffix("")
+
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(text, encoding="utf-8")
+
+    return folder
 
 
 class Goal(BaseModel):
@@ -135,8 +150,8 @@ class Probe(Module):
 """
 
 
-def _write_probe(path: Path) -> None:
-    path.write_text(_PROBE_SOURCE, encoding="utf-8")
+def _write_probe(path: Path) -> Path:
+    return write_module(path, _PROBE_SOURCE)
 
 
 def _facade(tmp_path: Path, monkeypatch) -> Facade:
@@ -156,14 +171,14 @@ async def _running_probe(
 
     source = modules_dir / "probe.py"
 
-    _write_probe(source)
+    folder = _write_probe(source)
 
-    await facade._load_or_reload_file(
-        source,
-        facade._fingerprint(source),
+    await facade._load_or_reload_folder(
+        folder,
+        directory_fingerprint(folder),
     )
 
-    record = facade._find_record_by_source(source)
+    record = facade._find_record_by_source(folder)
 
     await facade._try_start(record)
 
@@ -229,14 +244,14 @@ async def _provisioning_failure_down(tmp_path: Path, monkeypatch) -> None:
 
     source = modules_dir / "crashing.py"
 
-    source.write_text(_CRASHING_SOURCE, encoding="utf-8")
+    folder = write_module(source, _CRASHING_SOURCE)
 
-    await facade._load_or_reload_file(
-        source,
-        facade._fingerprint(source),
+    await facade._load_or_reload_folder(
+        folder,
+        directory_fingerprint(folder),
     )
 
-    record = facade._find_record_by_source(source)
+    record = facade._find_record_by_source(folder)
 
     await facade._try_start(record)
 

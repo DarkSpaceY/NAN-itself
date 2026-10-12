@@ -1,5 +1,3 @@
-# @module
-
 """
 Inbox: everything addressed to the agent arrives here.
 
@@ -22,8 +20,6 @@ from loguru import logger
 
 
 class InboxModule(Module):
-    id = "inbox"
-
     max_size: int = 256
 
     def __init__(self) -> None:

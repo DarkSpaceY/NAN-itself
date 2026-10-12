@@ -61,7 +61,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +68,13 @@ import mcp.types as types
 from loguru import logger
 
 from nan_itself.utils import blocklist as _blocklist
+from nan_itself.utils import hotload as _hotload
 from nan_itself.utils import paths as _paths
+from nan_itself.utils.hotload import (
+    SourceTracker,
+    directory_fingerprint,
+    file_fingerprint,
+)
 
 from . import local as local_backend
 from . import mcp as mcp_backend
@@ -79,10 +84,6 @@ from .spec import (
     DEFAULT_TOOL_TIMEOUT,
     PROVIDER_KIND_LOCAL,
     ProviderSpec,
-)
-from .watcher import (
-    SourceTracker,
-    file_fingerprint,
 )
 
 # Grace period for one MCP worker to exit after being asked
@@ -244,13 +245,13 @@ class ProviderRuntime:
 
         self._local_tracker = SourceTracker()
 
-        # Local source file -> provider name from it.
+        # Local tool folder -> provider name from it.
         self._local_sources: dict[
             Path,
             set[str],
         ] = {}
 
-        # Local source file -> imported module name.
+        # Local tool folder -> imported package root name.
         self._local_imported_names: dict[
             Path,
             str,
@@ -352,14 +353,11 @@ class ProviderRuntime:
         finally:
             self._startup_future = None
 
-            # Evict dynamic tool modules before dropping the
+            # Evict dynamic tool packages before dropping the
             # name mapping: repeated start/stop cycles must
-            # not accumulate _dynamic_tool_* entries.
+            # not accumulate _nan_pkg_tool_* entries.
             for imported_name in self._local_imported_names.values():
-                sys.modules.pop(
-                    imported_name,
-                    None,
-                )
+                _hotload.evict_package(imported_name)
 
             self._mcp_sources.clear()
             self._local_sources.clear()
@@ -1025,7 +1023,7 @@ class ProviderRuntime:
         }
 
         removed = {
-            path for path in self._mcp_tracker.known_files() if path.is_relative_to(root)
+            path for path in self._mcp_tracker.known_keys() if path.is_relative_to(root)
         } - current_files
 
         for path in removed:
@@ -1085,56 +1083,62 @@ class ProviderRuntime:
         # removes an already-loaded one, as a plain removal).
         blocked_names = _blocklist.blocked("tools")
 
-        current_files = {
+        # One folder = one tool; main.py is the entry.
+        current_folders = {
             path.resolve()
-            for path in root.rglob("*.py")
+            for path in root.iterdir()
             if (
-                path.is_file()
+                path.is_dir()
                 and not path.name.startswith("_")
-                and path.stem not in blocked_names
-                and local_backend.has_tool_header(path)
+                and path.name not in blocked_names
+                and (path / "main.py").is_file()
             )
         }
 
         removed = {
-            path for path in self._local_tracker.known_files() if path.is_relative_to(root)
-        } - current_files
+            folder
+            for folder in self._local_tracker.known_keys()
+            if folder.is_relative_to(root)
+        } - current_folders
 
-        for path in removed:
-            await self._remove_local_source(path)
+        for folder in removed:
+            await self._remove_local_source(folder)
 
-        for path in sorted(current_files):
-            fingerprint = file_fingerprint(path)
+        for folder in sorted(current_folders):
+            fingerprint = directory_fingerprint(
+                folder,
+                exclude_dirs=("data",),
+            )
 
-            loaded = path in self._local_sources
+            loaded = folder in self._local_sources
 
             if not self._local_tracker.needs_load(
-                path,
+                folder,
                 fingerprint,
                 loaded=loaded,
             ):
                 continue
 
             self._local_tracker.mark_seen(
-                path,
+                folder,
                 fingerprint,
             )
 
             try:
                 await self._reload_local_source(
-                    path,
+                    folder,
                     fingerprint,
                 )
 
             except Exception as exc:
                 self._local_tracker.mark_failed(
-                    path,
+                    folder,
                     exc,
                 )
 
                 logger.exception(
                     "Failed to load local tool: {}",
-                    path,
+                    folder,
                 )
 
     # ------------------------------------------------------------------
@@ -1356,37 +1360,39 @@ class ProviderRuntime:
 
     async def _reload_local_source(
         self,
-        path: Path,
+        folder: Path,
         fingerprint: tuple[int, int],
     ) -> None:
-        path = path.resolve()
+        folder = folder.resolve()
 
         old_names = self._local_sources.get(
-            path,
+            folder,
             set(),
         )
 
         (
             cls,
             imported_name,
-        ) = local_backend.load_class_from_file(path)
+        ) = local_backend.load_class_from_folder(folder)
 
         local_backend.validate_class(cls)
 
-        provider_name = cls.id
+        # Identity is the folder name; folders under one root are
+        # naturally unique.
+        provider_name = folder.name
 
         existing = self.providers.get(provider_name)
 
         if existing is not None:
             source = Path(existing.spec.source).resolve()
 
-            if source != path:
+            if source != folder:
                 raise ValueError(f"Local tool '{provider_name}' is already provided by {source}")
 
         candidate_spec = local_backend.local_provider_spec(
             name=provider_name,
-            file=path,
-            source=str(path),
+            file=folder,
+            source=str(folder),
         )
 
         candidate = local_backend.build_provider(
@@ -1394,13 +1400,10 @@ class ProviderRuntime:
             cls,
         )
 
-        previous_imported = self._local_imported_names.get(path)
+        previous_imported = self._local_imported_names.get(folder)
 
         if previous_imported is not None and previous_imported != imported_name:
-            sys.modules.pop(
-                previous_imported,
-                None,
-            )
+            _hotload.evict_package(previous_imported)
 
         for name in old_names - {provider_name}:
             self.providers.pop(
@@ -1410,26 +1413,26 @@ class ProviderRuntime:
 
         self.providers[provider_name] = candidate
 
-        self._local_sources[path] = {
+        self._local_sources[folder] = {
             provider_name,
         }
 
-        self._local_imported_names[path] = imported_name
+        self._local_imported_names[folder] = imported_name
 
         logger.info(
             "Loaded local tool source '{}': {}",
-            path,
+            folder,
             provider_name,
         )
 
     async def _remove_local_source(
         self,
-        path: Path,
+        folder: Path,
     ) -> None:
-        path = path.resolve()
+        folder = folder.resolve()
 
         names = self._local_sources.pop(
-            path,
+            folder,
             set(),
         )
 
@@ -1439,7 +1442,7 @@ class ProviderRuntime:
             if provider is None:
                 continue
 
-            if Path(provider.spec.source).resolve() != path:
+            if Path(provider.spec.source).resolve() != folder:
                 continue
 
             self.providers.pop(
@@ -1448,21 +1451,17 @@ class ProviderRuntime:
             )
 
         imported_name = self._local_imported_names.pop(
-            path,
+            folder,
             None,
         )
 
-        if imported_name is not None:
-            sys.modules.pop(
-                imported_name,
-                None,
-            )
+        _hotload.evict_package(imported_name)
 
-        self._local_tracker.forget(path)
+        self._local_tracker.forget(folder)
 
         logger.info(
             "Removed local tool source '{}'",
-            path,
+            folder,
         )
 
     # ==================================================================
@@ -1531,14 +1530,11 @@ class ProviderRuntime:
 
             self._mcp_workers.clear()
 
-            # Evict dynamic tool modules before dropping the
+            # Evict dynamic tool packages before dropping the
             # name mapping: repeated start/stop cycles must
-            # not accumulate _dynamic_tool_* entries.
+            # not accumulate _nan_pkg_tool_* entries.
             for imported_name in self._local_imported_names.values():
-                sys.modules.pop(
-                    imported_name,
-                    None,
-                )
+                _hotload.evict_package(imported_name)
 
             self._mcp_sources.clear()
             self._local_sources.clear()

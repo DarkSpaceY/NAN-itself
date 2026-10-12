@@ -1,4 +1,3 @@
-# @tool
 """
 Builtin web search provider.
 
@@ -7,8 +6,9 @@ SearXNG core (no SearXNG instance required) and prints one JSON
 object per search. Every call runs a one-shot `uvx` subprocess —
 the package's own one-process-per-search model.
 
-Settings: `config/searxng.yml` (outgoing proxy, timeouts) is
-injected via SEARXNG_CLI_SETTINGS into every subprocess.
+Settings: config.yaml (next to this file; outgoing proxy,
+timeouts) is injected via SEARXNG_CLI_SETTINGS into every
+subprocess.
 """
 
 from __future__ import annotations
@@ -17,9 +17,8 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 from typing import Any
-
-from nan_itself.utils import paths as _paths
 
 SEARXNG_CLI_SPEC = "searxng-cli==0.1.0"
 
@@ -29,9 +28,12 @@ DEFAULT_MAX_RESULTS = 10
 
 DEFAULT_TIMEOUT_S = 30.0
 
+# This file lives at <tool folder>/main.py.
+_HOME = Path(__file__).resolve().parent
+
 
 def _settings_file() -> str | None:
-    default = _paths.repo_root() / "config" / "searxng.yml"
+    default = _HOME / "config.yaml"
 
     return str(default) if default.is_file() else None
 
@@ -46,8 +48,6 @@ def _uvx_command() -> str:
 
 
 class SearchProvider(ToolSet):
-    id = "search"
-
     @tool
     async def web_search(
         self,

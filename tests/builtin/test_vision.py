@@ -34,7 +34,7 @@ def _load_vision_module():
     """
     spec = importlib.util.spec_from_file_location(
         "vision_module_test",
-        REPO / "builtin" / "modules" / "vision.py",
+        REPO / "builtin" / "modules" / "vision" / "main.py",
     )
 
     assert spec is not None and spec.loader is not None

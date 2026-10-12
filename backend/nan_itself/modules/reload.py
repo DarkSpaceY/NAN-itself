@@ -62,12 +62,13 @@ IMPORTANT START CONTRACT:
 from __future__ import annotations
 
 import asyncio
-import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+from nan_itself.utils import hotload as _hotload
 
 from . import deps as _deps
 from .model import (
@@ -84,22 +85,25 @@ def _reject(
     reason,
 ) -> None:
     """
-    Cache a rejection so the sticky-error book reflects it.
+    Cache a rejection in the source tracker.
 
-    Without this, a rejected reload is skipped silently forever
-    because the fingerprint has already been updated.
+    Without this, a rejected reload is retried silently forever
+    on an unchanged fingerprint instead of backing off.
     """
-    facade._source_load_errors[Path(old.source).resolve()] = reason
+    facade._source_tracker.mark_failed(
+        Path(old.source).resolve(),
+        reason,
+    )
 
 
 def _evict_import(
     imported_name: str | None,
 ) -> None:
-    if imported_name:
-        sys.modules.pop(
-            imported_name,
-            None,
-        )
+    """
+    Evict one synthetic package generation (prefix sweep over
+    sys.modules plus finder uninstall).
+    """
+    _hotload.evict_package(imported_name)
 
 
 def _reload_lock(
@@ -484,16 +488,11 @@ async def _hot_reload_locked(
             logger.exception(f"Old module generation crashed during hot-reload swap: {old.id}")
 
     if old.imported_module_name and old.imported_module_name != imported_name:
-        sys.modules.pop(
-            old.imported_module_name,
-            None,
-        )
+        _hotload.evict_package(old.imported_module_name)
 
-    facade._source_fingerprints[Path(old.source).resolve()] = fingerprint
-
-    facade._source_load_errors.pop(
+    facade._source_tracker.mark_seen(
         Path(old.source).resolve(),
-        None,
+        fingerprint,
     )
 
     facade._wake.set()

@@ -1,8 +1,9 @@
-# Vision module (builtin/modules/vision.py): camera owner +
+# Vision module (builtin/modules/vision/): camera owner +
 # photometry/motion/faces/QR/OCR/YOLO/VLM layers.
 #
-# Path convention: relative paths resolve against the repository
-# root; absolute paths pass through unchanged.
+# Path convention: relative paths resolve against the module
+# folder (builtin/modules/vision/); absolute paths pass through
+# unchanged.
 
 device: null                # camera index/name; null = system default
 
@@ -12,11 +13,11 @@ ocr_enabled: true
 
 vlm_enabled: true
 
-faces_registry: data/databases/vision/faces.json
+faces_registry: data/faces.json
 
-ocr_models_dir: models/easyocr
+ocr_models_dir: data/easyocr
 
-vlm_dir: models/vision/vlm/SmolVLM2-500M-Video-Instruct
+vlm_dir: data/vlm/SmolVLM2-500M-Video-Instruct
 
 # Objects (YOLO) weights are auto-downloaded on first start from:
 # objects_repo: kshitijjjjjjjjjjjjjjjj/yolov8n-coco-onnx

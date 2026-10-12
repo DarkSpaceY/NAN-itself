@@ -67,12 +67,12 @@ suite enforces.
   (`repo_root()` / `data_dir()` / `models_dir()`). Never use
   cwd-relative defaults or private `parents[N]` lookups — the process
   must behave identically when started from any directory.
-- **One file = one unit.** Each source file in `builtin/` or
+- **One folder = one unit.** Each source folder in `builtin/` or
   `workspace/` declares exactly one provider, module class, or skill. For
   tool providers specifically: `builtin/tools/mcps/*.yaml` is one stdio
   MCP server per file (`name` / `command` / `args` / `env` / `cwd`), and
-  `builtin/tools/local/*.py` is one `ToolSet` subclass per file with a
-  `# @tool` header within the first 20 lines.
+  `builtin/tools/local/<name>/main.py` is one `ToolSet` subclass per
+  folder (identity = folder name; `data/` inside is never loaded).
 - **Reload is a transaction.** A replacement is started as an
   unregistered candidate and committed only after it is fully connected;
   the old generation keeps serving until that moment. Never mutate live

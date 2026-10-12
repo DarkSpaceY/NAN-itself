@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 from nan_itself.modules.model import (
@@ -30,10 +31,16 @@ def _write_tool(
     provider_id: str,
     body: str,
 ) -> None:
-    path.write_text(
-        f"""# @tool
+    """
+    Write one tool folder (identity = folder name; the declared
+    id is ignored by the loader).
+    """
+    folder = path.with_suffix("")
 
-class Provider(ToolSet):
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(
+        f"""class Provider(ToolSet):
     id = {provider_id!r}
 
 {body}
@@ -77,7 +84,7 @@ def test_module_long_running_candidate_can_commit_without_returning(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -174,7 +181,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -220,7 +227,7 @@ def test_module_candidate_immediate_start_failure_keeps_old_generation(
 
     assert old.instance.stop_calls == 0
 
-    assert facade._source_load_errors.get(source.resolve()) is not None
+    assert facade._source_tracker.errors.get(source.resolve()) is not None
 
 
 def test_module_candidate_start_failure_keeps_old_generation(
@@ -239,7 +246,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -291,7 +298,7 @@ def test_module_candidate_start_failure_keeps_old_generation(
 
         assert old.instance.stop_calls == 0
 
-        assert facade._source_load_errors.get(source.resolve()) is not None
+        assert facade._source_tracker.errors.get(source.resolve()) is not None
 
     run(scenario())
 
@@ -312,7 +319,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    source = modules_dir / "module.py"
+    source = modules_dir / "example"
     source.write_text(
         "# placeholder",
         encoding="utf-8",
@@ -363,7 +370,7 @@ def test_module_reload_restore_failure_keeps_old_generation(
 
     assert old.instance.stop_calls == 0
 
-    assert facade._source_load_errors.get(source.resolve()) is not None
+    assert facade._source_tracker.errors.get(source.resolve()) is not None
 
 
 def test_module_reload_dependency_cycle_keeps_old_generation(
@@ -393,8 +400,8 @@ def test_module_reload_dependency_cycle_keeps_old_generation(
     modules_dir = tmp_path / "workspace" / "modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
 
-    a_source = modules_dir / "a.py"
-    b_source = modules_dir / "b.py"
+    a_source = modules_dir / "a"
+    b_source = modules_dir / "b"
 
     a_source.write_text(
         "# placeholder",
@@ -494,7 +501,7 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
 
     tool_dir.mkdir(parents=True)
 
-    source = tool_dir / "example.py"
+    source = tool_dir / "example"
 
     _write_tool(
         source,
@@ -532,14 +539,14 @@ def test_local_tool_invalid_candidate_keeps_old_provider(
     assert new_provider is (old_provider)
 
 
-def test_local_tool_id_collision_keeps_old_provider(
+def test_local_tool_id_declaration_cannot_collide(
     tmp_path,
     monkeypatch,
 ):
     """
     Two files are independently owned.
 
-    Changing alpha.py so that it claims beta's provider id must fail
+    The beta folder main.py claims beta's provider id must fail
     without removing the existing alpha provider.
     """
 
@@ -549,9 +556,9 @@ def test_local_tool_id_collision_keeps_old_provider(
 
     tool_dir.mkdir(parents=True)
 
-    alpha = tool_dir / "alpha.py"
+    alpha = tool_dir / "alpha"
 
-    beta = tool_dir / "beta.py"
+    beta = tool_dir / "beta"
 
     _write_tool(
         alpha,
@@ -584,10 +591,12 @@ def test_local_tool_id_collision_keeps_old_provider(
     assert alpha_before is not None
     assert beta_before is not None
 
-    # alpha.py now tries to claim beta.
+    # beta's main.py claims id "alpha"; the declaration is
+    # ignored -- identity is the folder name -- so the reload
+    # succeeds and no collision can occur.
     _write_tool(
-        alpha,
-        provider_id="beta",
+        beta,
+        provider_id="alpha",
         body="""
     @tool
     def echo(self, text: str) -> str:
@@ -597,10 +606,14 @@ def test_local_tool_id_collision_keeps_old_provider(
 
     run(runtime._scan_locals())
 
-    # Failed reload must preserve both existing providers.
+    # alpha is untouched; beta keeps its folder identity.
     assert runtime.get_provider("alpha") is alpha_before
 
-    assert runtime.get_provider("beta") is beta_before
+    reloaded = runtime.get_provider("beta")
+
+    assert reloaded is not None
+
+    assert reloaded is not beta_before
 
 
 def test_removed_local_tool_does_not_remove_unrelated_provider(
@@ -608,7 +621,7 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
     monkeypatch,
 ):
     """
-    Removing one provider file must only remove that provider.
+    Removing one provider folder must only remove that provider.
     """
 
     monkeypatch.setattr(_paths, "repo_root", lambda: tmp_path)
@@ -617,9 +630,9 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 
     tool_dir.mkdir(parents=True)
 
-    alpha = tool_dir / "alpha.py"
+    alpha = tool_dir / "alpha"
 
-    beta = tool_dir / "beta.py"
+    beta = tool_dir / "beta"
 
     _write_tool(
         alpha,
@@ -649,7 +662,7 @@ def test_removed_local_tool_does_not_remove_unrelated_provider(
 
     assert beta_before is not None
 
-    alpha.unlink()
+    shutil.rmtree(alpha)
 
     run(runtime._scan_locals())
 

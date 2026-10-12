@@ -5,19 +5,18 @@ background daemon that senses, computes and acts at its own rhythm while
 the agent runs its turn loop; the agent reads its output as ambient
 context each turn. Modules are hot-reloaded, so no restart is needed.
 
-To add a module to the shipped set, create the file under
+To add a module to the shipped set, create the folder under
 `builtin/modules/`; to keep it in your own territory, create it under
 `workspace/modules/`. For the full contract, see
 [modules.md](modules.md).
 
-## Create the module file
+## Create the module folder
 
-Create `builtin/modules/<name>.py` containing exactly one concrete
-`Module` subclass:
+Create `builtin/modules/<name>/` with a `main.py` containing exactly one
+concrete `Module` subclass:
 
 ```python
-# @module
-"""One-line module description."""
+"""One-line module description (my_module/main.py)."""
 
 from __future__ import annotations
 
@@ -27,9 +26,7 @@ from loguru import logger
 
 class MyModule(Module):
 
-    id = "my-module"
-
-    requires: ClassVar[tuple[str, ...]] = ()   # ids of modules this reads
+    requires: ClassVar[tuple[str, ...]] = ()   # folder names this reads
 
     async def start(self) -> None:             # service lifetime
         while True:
@@ -44,14 +41,19 @@ class MyModule(Module):
         return "[MyModule] ..." or None
 ```
 
-- Keep the `# @module` header within the first 20 lines (convention:
-  line 1).
-- Define exactly one concrete `Module` subclass with a unique `id`.
-- `Module` and `Turn` are injected into the file namespace — do not
-  import them. Import anything else explicitly, for example
+- The folder name is the module identity — there is no `id` to declare.
+- Define exactly one concrete `Module` subclass in `main.py`; classes in
+  sibling files are not entry candidates.
+- `Module` and `Turn` are seeded into every `.py` of the folder — do not
+  import them. Siblings import each other with normal package syntax
+  (`from . import helper`). Import anything else explicitly, for example
   `from nan_itself.modules import ChannelSpec` for channels.
-- `requires` lists the ids of modules whose `DataSpace` this module
-  reads; those are exposed as `self.dependencies`.
+- `requires` lists the folder names of modules whose `DataSpace` this
+  module reads; those are exposed as `self.dependencies`.
+- Put models, databases and other heavyweight payloads under `data/` in
+  the folder — it is never imported and never fingerprinted, so writes
+  there never trigger a reload. Resolve configured paths with
+  `self.resolve_path(...)`: relative values resolve against the folder.
 
 ## Make it behave
 
@@ -69,17 +71,16 @@ class MyModule(Module):
   stalls the shared event loop — offload it to a thread.
 - **Publish small JSON facts only.** `self.data.publish(mapping)` is the
   uplink; frame data or large documents do not go through it.
-- **Anchor paths** through `nan_itself.utils.paths`.
 
 ## Read real examples
 
-- `builtin/modules/system.py` — a polling daemon that publishes
+- `builtin/modules/system/` — a polling daemon that publishes
   deterministic facts and renders a compact ambient block.
-- `builtin/modules/inbox.py` — a minimal state-only module with a
+- `builtin/modules/inbox/` — a minimal state-only module with a
   delivery API.
-- `builtin/modules/vision.py` / `audio.py` — capture and inference on
-  daemon threads.
-- `builtin/modules/voice.py` — adds the reactive channel downlink.
+- `builtin/modules/vision/` / `audio/` — capture and inference on
+  daemon threads; each owns its weights under `data/`.
+- `builtin/modules/voice/` — adds the reactive channel downlink.
 
 ## Add a reactive module (channels)
 
@@ -92,15 +93,16 @@ contract and the downlink verbs.
 
 ## Add module configuration
 
-A module that needs configuration owns exactly one file,
-`config/modules/<module_id>.yaml`, and loads and validates it itself. See
+A module that needs configuration owns exactly one file — `config.yaml`
+inside its folder — and loads and validates it itself (convenience:
+`self.load_config()`). See
 [../for-users/configuration.md](../for-users/configuration.md).
 
 ## Verify
 
 Check that the module loads without restarting the process: the Facade
-scans every second, so a valid new file appears (marked RUNNING) within a
-few seconds, and its `ask()` output shows up as ambient context on the
+scans every second, so a valid new folder appears (marked RUNNING) within
+a few seconds, and its `ask()` output shows up as ambient context on the
 next turn.
 
 ## Related

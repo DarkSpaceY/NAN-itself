@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 from nan_itself.utils import paths as _paths
 
@@ -49,8 +50,6 @@ def test_data_and_models_dirs_anchor_to_repo(
 
     assert _paths.data_dir() == REPO / "data"
 
-    assert _paths.models_dir() == REPO / "models"
-
 
 # ============================================================================
 # Runtime defaults under a foreign cwd
@@ -67,9 +66,9 @@ def test_facade_defaults_anchor_from_foreign_cwd(
 
     facade = Facade()
 
-    assert facade.data_dir == REPO / "data" / "modules"
-
     assert facade.builtin_modules_dir == REPO / "builtin" / "modules"
+
+    assert facade._legacy_private_dir == REPO / "data" / "modules" / "private"
 
 
 def test_settings_yaml_found_from_foreign_cwd(
@@ -117,7 +116,7 @@ def test_mcp_relative_cwd_anchors_to_repo(
 def _load_builtin_module(name: str):
     spec = importlib.util.spec_from_file_location(
         f"path_anchor_{name}",
-        REPO / "builtin" / "modules" / f"{name}.py",
+        REPO / "builtin" / "modules" / name / "main.py",
     )
 
     assert spec is not None and spec.loader is not None
@@ -141,16 +140,21 @@ def test_builtin_modules_anchor_from_foreign_cwd(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
+    # The vision/audio modules import optional perception deps.
+    pytest.importorskip("cv2")
+
+    pytest.importorskip("numpy")
+
     _chdir_out(monkeypatch, tmp_path)
 
     vision = _load_builtin_module("vision")
 
     audio = _load_builtin_module("audio")
 
-    assert (
-        vision.VisionModule().registry_path == REPO / "data" / "databases" / "vision" / "faces.json"
-    )
+    vision_home = REPO / "builtin" / "modules" / "vision"
 
-    assert (
-        audio.AudioModule().registry_path == REPO / "data" / "databases" / "audio" / "voices.json"
-    )
+    audio_home = REPO / "builtin" / "modules" / "audio"
+
+    assert vision.VisionModule().registry_path == vision_home / "data" / "faces.json"
+
+    assert audio.AudioModule().registry_path == audio_home / "data" / "voices.json"

@@ -52,11 +52,20 @@ def _register(
     modules_dir: Path,
     name: str,
 ):
-    return facade._register_module_class(
+    folder = modules_dir / name
+
+    # Locally-defined classes derive `home` from the test module;
+    # pin the class at the (virtual) module folder under tmp
+    # BEFORE registration so state restore/save target it.
+    cls._home = folder
+
+    record = facade._register_module_class(
         cls,
-        source=str(modules_dir / name),
+        source=str(folder),
         source_fingerprint=(1, 1),
     )
+
+    return record
 
 
 # ============================================================================
@@ -90,14 +99,14 @@ def test_removal_detaches_dependent_reader(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     b_record = _register(
         facade,
         B,
         modules_dir,
-        "b.py",
+        "b",
     )
 
     facade._rebuild_dependency_graph()
@@ -130,7 +139,7 @@ def test_removal_releases_dataspace(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     assert "a" in facade.dataspaces
@@ -165,7 +174,7 @@ def test_removal_persists_state_for_readd(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     # Seed an OLDER disk snapshot.
@@ -193,7 +202,7 @@ def test_removal_persists_state_for_readd(
         facade,
         AReadded,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     # The state as of removal is restored, not the older
@@ -232,21 +241,21 @@ def test_readd_reattaches_dependent_targeted(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     b_record = _register(
         facade,
         B,
         modules_dir,
-        "b.py",
+        "b",
     )
 
     c_record = _register(
         facade,
         C,
         modules_dir,
-        "c.py",
+        "c",
     )
 
     facade._rebuild_dependency_graph()
@@ -263,7 +272,7 @@ def test_readd_reattaches_dependent_targeted(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     # B regained a live reader onto A's DataSpace.
@@ -305,14 +314,14 @@ def test_readd_does_not_grant_reader_to_non_dependent(
         facade,
         C,
         modules_dir,
-        "c.py",
+        "c",
     )
 
     _register(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     assert "a" not in c_record.instance.dependencies
@@ -339,7 +348,7 @@ def test_dependent_registered_before_dependency_gets_reader(
         facade,
         B,
         modules_dir,
-        "b.py",
+        "b",
     )
 
     assert "a" not in b_record.instance.dependencies
@@ -349,7 +358,7 @@ def test_dependent_registered_before_dependency_gets_reader(
         facade,
         A,
         modules_dir,
-        "a.py",
+        "a",
     )
 
     assert "a" in b_record.instance.dependencies

@@ -1,13 +1,13 @@
 """
 Canonical filesystem anchors.
 
-Every repo-relative location (data/, models/) resolves through
+Every repo-relative location (data/, config/) resolves through
 this module so the process never depends on its working
 directory: launching nan from any cwd still writes inside the
 repository. Locations are fixed derivatives of the repository
 root -- there are no overrides. Core configuration lives in
-config/settings.yaml; each Module owns config/modules/<id>.yaml
-and loads it itself.
+config/settings.yaml; each Module owns config.yaml inside its
+own folder and loads it itself.
 
 Anchoring relies on the editable install: nan_itself.__file__
 resolves into <repo>/backend/nan_itself, so three levels up from
@@ -25,13 +25,8 @@ def repo_root() -> Path:
 
 
 def data_dir() -> Path:
-    """Root for all persistent module data."""
+    """Root for runtime data that is not owned by a Module folder."""
     return repo_root() / "data"
-
-
-def models_dir() -> Path:
-    """Root for all model weights."""
-    return repo_root() / "models"
 
 
 def persona_path() -> Path:

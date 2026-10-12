@@ -1,5 +1,3 @@
-# @module
-
 """
 Audio: hearing as an autonomous builtin Module.
 
@@ -64,8 +62,6 @@ except Exception:  # pragma: no cover - depends on runner native libs
     sherpa_onnx = None
 
 import contextlib
-
-from nan_itself.utils import paths as _paths
 
 # ======================================================================
 # Inlined audio DSP toolkit (formerly backend/nan_itself/utils/audio.py).
@@ -2045,43 +2041,48 @@ class WhisperWorkerProxy:
 
 class AudioConfig(BaseModel):
     """
-    Module-private config: config/modules/audio.yaml over these
-    defaults. Path-valued fields are repo-relative strings
-    (_resolve_path); `device` is the mic index/name.
+    Module-private config: config.yaml (next to this file) over
+    these defaults. Path-valued fields are module-folder-relative
+    strings (_resolve_path); `device` is the mic index/name.
     """
 
     device: int | str | None = None
 
-    speaker_model: str = "models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
+    speaker_model: str = "data/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx"
 
-    voices_registry: str = "data/databases/audio/voices.json"
+    voices_registry: str = "data/voices.json"
 
-    tagger_model: str = "models/audio_tag/model.int8.onnx"
+    tagger_model: str = "data/audio_tag/model.int8.onnx"
 
-    tagger_labels: str = "models/audio_tag/class_labels_indices.csv"
+    tagger_labels: str = "data/audio_tag/class_labels_indices.csv"
 
-    emotion_model: str = "models/emotion/emotion2vec_plus_base.onnx"
+    emotion_model: str = "data/emotion/emotion2vec_plus_base.onnx"
 
-    emotion_head: str = "models/emotion/emotion2vec_head.json"
+    emotion_head: str = "data/emotion/emotion2vec_head.json"
+
+
+# This file lives at <module folder>/main.py; every configured
+# path resolves against that folder.
+_HOME = Path(__file__).resolve().parent
 
 
 def _resolve_path(value: str) -> Path:
     """
     Absolute (and ~/) passes through; relative resolves against
-    the repository root.
+    the module folder.
     """
     resolved = Path(value).expanduser()
 
-    return resolved if resolved.is_absolute() else _paths.repo_root() / resolved
+    return resolved if resolved.is_absolute() else _HOME / resolved
 
 
 def _load_config() -> AudioConfig:
     """
-    Module-private config: config/modules/audio.yaml over the
-    AudioConfig defaults. Missing or empty file = pure defaults;
-    anything unparsable is a loud construction failure.
+    Module-private config: config.yaml over the AudioConfig
+    defaults. Missing or empty file = pure defaults; anything
+    unparsable is a loud construction failure.
     """
-    path = _paths.repo_root() / "config" / "modules" / "audio.yaml"
+    path = _HOME / "config.yaml"
 
     if not path.is_file():
         return AudioConfig()
@@ -2098,8 +2099,6 @@ def _load_config() -> AudioConfig:
 
 
 class AudioModule(Module):
-    id = "audio"
-
     # ------------------------------------------------------------------
     # Configuration (instance attributes; tests may override)
     # ------------------------------------------------------------------

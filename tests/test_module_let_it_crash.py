@@ -60,14 +60,20 @@ async def _load_and_start(
 
     path = modules_dir / filename
 
-    path.write_text(source, encoding="utf-8")
+    folder = path.with_suffix("")
 
-    await facade._load_or_reload_file(
-        path,
-        facade._fingerprint(path),
+    folder.mkdir(parents=True, exist_ok=True)
+
+    (folder / "main.py").write_text(source, encoding="utf-8")
+
+    from nan_itself.utils.hotload import directory_fingerprint
+
+    await facade._load_or_reload_folder(
+        folder,
+        directory_fingerprint(folder),
     )
 
-    record = facade._find_record_by_source(path)
+    record = facade._find_record_by_source(folder)
 
     await facade._try_start(record)
 
@@ -100,7 +106,7 @@ import asyncio
 
 
 class AskCrash(Module):
-    id = "ask-crash"
+    id = "ask_crash"
 
     def __init__(self):
         self.starts = 0
@@ -215,7 +221,7 @@ import asyncio
 
 
 class TellCrash(Module):
-    id = "tell-crash"
+    id = "tell_crash"
 
     async def start(self):
         await asyncio.Event().wait()
@@ -293,7 +299,7 @@ class Goal(BaseModel):
 
 
 class FeedCrash(Module):
-    id = "feed-crash"
+    id = "feed_crash"
 
     channels = {
         "goal": ChannelSpec(
@@ -327,7 +333,7 @@ async def _feed_crash_channel_write(tmp_path: Path, monkeypatch) -> None:
 
     # A schema-invalid payload is a model input error, not a
     # crash: rejected at the boundary, module keeps running.
-    rejected = facade.write_module_channel("feed-crash", "goal", {"priority": 3})
+    rejected = facade.write_module_channel("feed_crash", "goal", {"priority": 3})
 
     assert rejected.startswith("rejected")
 
@@ -337,11 +343,11 @@ async def _feed_crash_channel_write(tmp_path: Path, monkeypatch) -> None:
 
     # A feed() exception crashes the module; the model still
     # gets a plain failure string naming the module.
-    result = facade.write_module_channel("feed-crash", "goal", {"text": "go"})
+    result = facade.write_module_channel("feed_crash", "goal", {"text": "go"})
 
     assert "crashed" in result
 
-    assert "feed-crash" in result
+    assert "feed_crash" in result
 
     assert "restarted" in result
 

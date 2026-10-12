@@ -956,9 +956,9 @@ def _turn(depth=0):
 
 
 def _load_inbox(max_size=256):
-    path = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox.py"
+    folder = Path(__file__).resolve().parents[1] / "builtin" / "modules" / "inbox"
 
-    cls, _, _ = import_module_class(path)
+    cls, _ = import_module_class(folder)
 
     inbox = cls()
 

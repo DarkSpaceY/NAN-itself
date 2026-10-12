@@ -1,4 +1,3 @@
-# @tool
 """
 Digest provider: file hashing utilities, kept deliberately small
 to show the full local-provider contract.

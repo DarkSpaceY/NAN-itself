@@ -1,5 +1,3 @@
-# @module
-
 """
 Voice: the first bidirectional (reactive) builtin Module.
 
@@ -70,7 +68,6 @@ from nan_itself.modules import (
     ChannelSpec,
     Module,
 )
-from nan_itself.utils import paths as _paths
 from pydantic import BaseModel
 
 # ======================================================================
@@ -894,9 +891,9 @@ class AudioPipeline:
 
 class WhisperTranscriber:
     """
-    Lazy faster-whisper adapter. model files stay under the repo
-    models/whisper cache; import happens on first use so units
-    without the package still collect cleanly.
+    Lazy faster-whisper adapter. model files stay under the
+    module data/whisper cache; import happens on first use so
+    units without the package still collect cleanly.
     """
 
     def __init__(
@@ -1056,9 +1053,9 @@ class WhisperTranscriber:
 CosyVoice2 TTS adapter (the voice module's speech surface).
 
 Backed by an upstream FunAudioLLM/CosyVoice checkout (cloned to
-models/voice/cosyvoice/ by convention, overridable via env at
-the module layer) injected into sys.path here -- the repo itself
-stays free of third-party code.
+data/cosyvoice/ in the module folder by convention, overridable
+via env at the module layer) injected into sys.path here -- the
+repo itself stays free of third-party code.
 
 Contract:
     load()      heavy provisioning; raises loudly so the Facade
@@ -1156,7 +1153,7 @@ class CosyVoiceTTS:
         """
         The upstream runtime is source-only (not on PyPI), so
         first-run provisioning shallow-clones the checkout into
-        models/voice/cosyvoice. A failing clone raises out of
+        data/cosyvoice. A failing clone raises out of
         load(): DOWN + backoff, never a silent limbo.
         """
         if self.checkout_dir.is_dir():
@@ -1380,7 +1377,7 @@ def _allowlist_block() -> str:
 class SmallDialogue:
     """
     Lazy Qwen3-0.6B adapter. Weights live under
-    models/voice/slm/<snapshot>; a missing directory downloads
+    data/slm/<snapshot>; a missing directory downloads
     from the Hub during provisioning (honors HF_ENDPOINT and
     proxy env vars) -- a failing download raises out of load(),
     so the Facade marks the module DOWN and retries.
@@ -1743,10 +1740,10 @@ class PyannoteEmbedder:
     """
     Lazy pyannote speaker-embedding adapter.
 
-    Weights live under models/voice/diarization/; a missing
+    Weights live under data/diarization/; a missing
     snapshot downloads from the Hub during provisioning (the
     gated pyannote models require accepting their terms on
-    huggingface.co and a token in config/modules/voice.yaml).
+    huggingface.co and a token in config.yaml).
     A failing download raises out of load(): DOWN + backoff,
     never a silent limbo.
     """
@@ -1835,10 +1832,9 @@ class PyannoteEmbedder:
 
 class VoiceConfig(BaseModel):
     """
-    Module-private config: config/modules/voice.yaml over these
-    defaults. Path-valued fields are repo-relative strings
-    (_resolve_path); whisper weights are shared with the audio
-    module.
+    Module-private config: config.yaml (next to this file) over
+    these defaults. Path-valued fields are module-folder-relative
+    strings (_resolve_path).
     """
 
     stt_model: str = "base"
@@ -1849,17 +1845,17 @@ class VoiceConfig(BaseModel):
 
     tts_speed: float = 1.0
 
-    whisper_models_dir: str = "models/whisper"
+    whisper_models_dir: str = "data/whisper"
 
-    slm_path: str = "models/voice/slm/qwen3-0.6b"
+    slm_path: str = "data/slm/qwen3-0.6b"
 
     slm_repo_id: str | None = None
 
-    tts_checkout_dir: str = "models/voice/cosyvoice"
+    tts_checkout_dir: str = "data/cosyvoice"
 
-    tts_model_dir: str = "models/voice/tts/cosyvoice2-0.5b"
+    tts_model_dir: str = "data/tts/cosyvoice2-0.5b"
 
-    tts_reference_wav: str = "models/voice/tts/reference.wav"
+    tts_reference_wav: str = "data/tts/reference.wav"
 
     diarization_repo: str = "pyannote/embedding"
 
@@ -1867,28 +1863,33 @@ class VoiceConfig(BaseModel):
 
     diarization_threshold: float = 0.75
 
-    diarization_models_dir: str = "models/voice/diarization"
+    diarization_models_dir: str = "data/diarization"
 
-    voices_registry: str = "data/databases/audio/voice_speakers.json"
+    voices_registry: str = "data/voice_speakers.json"
+
+
+# This file lives at <module folder>/main.py; every configured
+# path resolves against that folder.
+_HOME = Path(__file__).resolve().parent
 
 
 def _resolve_path(value: str) -> Path:
     """
     Absolute (and ~/) passes through; relative resolves against
-    the repository root.
+    the module folder.
     """
     resolved = Path(value).expanduser()
 
-    return resolved if resolved.is_absolute() else _paths.repo_root() / resolved
+    return resolved if resolved.is_absolute() else _HOME / resolved
 
 
 def _load_config() -> VoiceConfig:
     """
-    Module-private config: config/modules/voice.yaml over the
-    VoiceConfig defaults. Missing or empty file = pure defaults;
-    anything unparsable is a loud construction failure.
+    Module-private config: config.yaml over the VoiceConfig
+    defaults. Missing or empty file = pure defaults; anything
+    unparsable is a loud construction failure.
     """
-    path = _paths.repo_root() / "config" / "modules" / "voice.yaml"
+    path = _HOME / "config.yaml"
 
     if not path.is_file():
         return VoiceConfig()
@@ -1922,7 +1923,6 @@ class TaskPayload(BaseModel):
 
 
 class VoiceModule(Module):
-    id = "voice"
 
     requires: ClassVar[tuple[str, ...]] = ("audio",)
 

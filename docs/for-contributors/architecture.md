@@ -96,11 +96,11 @@ flowchart TB
 layouts — builtin (`builtin/tools/`) and workspace
 (`workspace/tools/`) — with identical hot-reload semantics:
 
-- **One file = one provider.** An MCP YAML file declares exactly one
-  stdio server (`name` / `command` / `args` / `env` / `cwd`; a relative
-  `cwd` is repo-anchored, never process-cwd-anchored). A local Python
-  file contains exactly one `ToolSet` subclass, marked with a
-  `# @tool` header in its first 20 lines.
+- **One file = one MCP provider; one folder = one local provider.**
+  An MCP YAML file declares exactly one stdio server (`name` / `command`
+  / `args` / `env` / `cwd`; a relative `cwd` is repo-anchored, never
+  process-cwd-anchored). A local tool folder's `main.py` contains
+  exactly one `ToolSet` subclass; identity is the folder name.
 - **Reload transaction.** Replacement workers are first started as
   unregistered candidates; only after a candidate is fully connected is
   it committed into the live tables and the old generation asked to
@@ -246,10 +246,11 @@ Two parallel provider layouts, scanned with identical semantics —
 ## config/
 
 Core configuration lives in `config/settings.yaml` (loaded by
-`config.py`); each Module owns `config/modules/<module_id>.yaml`
-and loads and validates it itself, keeping modules independent of
-any shared config machinery; `searxng.yml` configures the bundled
-SearxNG instance used by the search tool. There are no
+`config.py`); each Module owns `config.yaml` inside
+its own folder and loads and validates it itself, keeping modules
+independent of any shared config machinery; the search tool's
+`config.yaml` (inside its folder) configures the bundled SearxNG
+instance. There are no
 environment variables. See [configuration.md](../for-users/configuration.md).
 
 ## tests/

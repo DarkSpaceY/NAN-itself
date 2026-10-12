@@ -6,10 +6,9 @@ Layering (dependencies point downward only):
     server ──> runtime ──> { mcp, local } ──> provider
 
     shared leaves (imported by the layers above, import nothing
-    from siblings): spec, results, watcher
+    from siblings): spec, results
         spec     <- provider, mcp, local, runtime
         results  <- provider, local, runtime, server
-        watcher  <- runtime (hot-reload bookkeeping)
 
 Import from this package, never from sibling modules.
 """
@@ -30,8 +29,6 @@ from .server import (
 )
 from .spec import (
     DEFAULT_TOOL_TIMEOUT,
-    LOCAL_TOOL_HEADER,
-    LOCAL_TOOL_HEADER_SCAN_LINES,
     PROVIDER_KIND_LOCAL,
     PROVIDER_KIND_MCP,
     ProviderKind,
@@ -49,8 +46,6 @@ __all__ = [
     "ProviderKind",
     "PROVIDER_KIND_MCP",
     "PROVIDER_KIND_LOCAL",
-    "LOCAL_TOOL_HEADER",
-    "LOCAL_TOOL_HEADER_SCAN_LINES",
     "DEFAULT_TOOL_TIMEOUT",
     # runtime
     "ProviderRuntime",
