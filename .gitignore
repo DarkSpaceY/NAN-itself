@@ -25,9 +25,6 @@ data/
 # else the user drops in here stays local.
 workspace/*
 !workspace/persona.md
-!workspace/modules/
-workspace/modules/*
-!workspace/modules/workspace.py
 
 # Model weights (large binaries, managed outside git)
 models/
