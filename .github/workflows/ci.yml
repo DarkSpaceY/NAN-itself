@@ -25,6 +25,9 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check backend builtin tests
 
+      - name: Type check (mypy)
+        run: uv run mypy
+
   lint-frontend:
     runs-on: ubuntu-latest
     defaults:

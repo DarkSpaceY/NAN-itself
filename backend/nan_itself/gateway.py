@@ -86,13 +86,15 @@ class Gateway:
 
         # ---------- 前端静态文件托管 ----------
         if self.frontend_dir and self.frontend_dir.exists():
-            assets_dir = self.frontend_dir / "assets"
+            frontend_dir = self.frontend_dir
+
+            assets_dir = frontend_dir / "assets"
             if assets_dir.exists():
                 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
             @app.get("/{full_path:path}")
             async def serve_spa(full_path: str):
-                index_path = self.frontend_dir / "index.html"
+                index_path = frontend_dir / "index.html"
                 if index_path.exists():
                     return FileResponse(str(index_path))
                 return {"error": "Frontend not built"}

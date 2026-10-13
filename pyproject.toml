@@ -77,6 +77,8 @@ Issues = "https://github.com/DarkSpaceY/NAN-itself/issues"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.18.0",
+    "pre-commit>=4.0.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.14.0",
@@ -125,3 +127,19 @@ module-root = "backend"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# Loose-start mypy: framework code only (builtin/ plugins are hot-reloaded
+# and depend on optional extras), new code should not add new errors.
+[tool.mypy]
+python_version = "3.12"
+files = ["backend/nan_itself"]
+exclude = ["^builtin/", "^tests/", "^models/", "^paper_search/"]
+mypy_path = "backend"
+explicit_package_bases = true
+
+# Global looseness for the existing codebase; tighten incrementally.
+check_untyped_defs = true
+warn_unused_ignores = false
+warn_return_any = false
+disallow_untyped_defs = false
+ignore_missing_imports = true

@@ -12,20 +12,17 @@ import {
   useState,
   useSyncExternalStore,
   type PropsWithChildren,
-} from "react";
-import {
-  AssistantRuntimeProvider,
-  useExternalStoreRuntime,
-} from "@assistant-ui/react";
-import type { ThreadMessageLike } from "@assistant-ui/react";
+} from 'react';
+import { AssistantRuntimeProvider, useExternalStoreRuntime } from '@assistant-ui/react';
+import type { ThreadMessageLike } from '@assistant-ui/react';
 
-import { Store, type NanState } from "../store";
-import { Mapper, type HistoryRound } from "../history/mapper";
-import type { RoundStore } from "../persistence/db";
-import { roundsToMessages } from "../convert";
-import { Thread } from "@/components/assistant-ui/elements/thread.aui";
-import { RecordTool } from "./RecordTool";
-import { PauseControlContext, type PauseControl } from "./pause";
+import { Store, type NanState } from '../store';
+import { Mapper, type HistoryRound } from '../history/mapper';
+import type { RoundStore } from '../persistence/db';
+import { roundsToMessages } from '../convert';
+import { Thread } from '@/components/assistant-ui/elements/thread.aui';
+import { RecordTool } from './RecordTool';
+import { PauseControlContext, type PauseControl } from './pause';
 
 export interface AppProps {
   store: Store;
@@ -38,11 +35,11 @@ export interface AppProps {
 // shadcn 主题用 .dark class（不走媒体查询），这里同步系统偏好。
 function useDarkMode() {
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => document.documentElement.classList.toggle("dark", mq.matches);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => document.documentElement.classList.toggle('dark', mq.matches);
     apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, []);
 }
 
@@ -76,21 +73,21 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
   // ── 暂停 ───────────────────────────────────────────────────────
   // 状态由后端 status 事件回传（协作式，可能在当前 step 跑完后才生效）。
   // 点「暂停」后到后端确认之前是 pending；pending 时再点 = 撤回请求。
-  const isPaused = nanState.status === "paused";
+  const isPaused = nanState.status === 'paused';
   const [pausePending, setPausePending] = useState(false);
 
   // 后端把状态置为 paused 即视为确认，撤回 pending 标记：
   // 属于「订阅外部系统、在回调里更新 state」的模式，而非 effect 体内直接 setState。
   useEffect(() => {
     return store.subscribe(() => {
-      if (store.getState().status === "paused") setPausePending(false);
+      if (store.getState().status === 'paused') setPausePending(false);
     });
   }, [store]);
 
   const pauseControl = useMemo<PauseControl>(() => {
     const pending = pausePending && !isPaused;
     return {
-      state: isPaused ? "paused" : pending ? "pending" : "running",
+      state: isPaused ? 'paused' : pending ? 'pending' : 'running',
       paused: isPaused,
       pending,
       toggle: () => {
@@ -155,9 +152,9 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
     convertMessage: (m) => m,
     onNew: async ({ content }) => {
       const text = content
-        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
         .map((c) => c.text)
-        .join("\n");
+        .join('\n');
       if (text.trim()) sendInput(text);
     },
     onCancel: undefined,
@@ -168,16 +165,8 @@ export function App({ store, mapper, db, sendInput, setPaused }: AppProps) {
       <AssistantRuntimeProvider runtime={runtime}>
         {/* 固定高度容器：composer 的 sticky 底部停靠依赖它。
             data-* 供 CSS 响应：暂停确认后，所有「进行中」的呼吸点静止。 */}
-        <div
-          className="relative h-dvh"
-          data-agent-status={nanState.status}
-          data-paused={isPaused}
-        >
-          <Thread
-            components={threadComponents}
-            autoFocus
-            pendingInputs={pendingInputs}
-          />
+        <div className="relative h-dvh" data-agent-status={nanState.status} data-paused={isPaused}>
+          <Thread components={threadComponents} autoFocus pendingInputs={pendingInputs} />
         </div>
       </AssistantRuntimeProvider>
     </PauseControlContext.Provider>

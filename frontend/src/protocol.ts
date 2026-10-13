@@ -11,18 +11,18 @@
 
 /** 事件类型（信封 t 字段）。surface.* 为阶段4预留，回放时忽略。 */
 export type EventType =
-  | "user_input"
-  | "turn_started"
-  | "status"
-  | "output_started"
-  | "output_delta"
-  | "output_done"
-  | "output_cancelled"
-  | "record_started"
-  | "record_detail"
-  | "record_done"
-  | "record_failed"
-  | "record_void"
+  | 'user_input'
+  | 'turn_started'
+  | 'status'
+  | 'output_started'
+  | 'output_delta'
+  | 'output_done'
+  | 'output_cancelled'
+  | 'record_started'
+  | 'record_detail'
+  | 'record_done'
+  | 'record_failed'
+  | 'record_void'
   | `surface.${string}`;
 
 /** 每个事件的公共头部。 */
@@ -54,7 +54,7 @@ export type TurnStartedContent = Record<string, never>;
 
 /** status.content */
 export interface StatusContent {
-  state: "working" | "idle" | "paused";
+  state: 'working' | 'idle' | 'paused';
   agent_hash?: string;
   parent_hash?: string;
   depth?: number;
@@ -81,15 +81,15 @@ export type OutputCancelledContent = AgentIdentity;
 
 /** record_started.content 的 category（core._RECORD_CATEGORY + verbs）。 */
 export type RecordCategory =
-  | "tool_call"
-  | "skill_invoke"
-  | "channel_write"
-  | "sleep"
-  | "finish"
-  | "subagent_spawn"
-  | "subagent_report"
-  | "module_query"
-  | "unknown";
+  | 'tool_call'
+  | 'skill_invoke'
+  | 'channel_write'
+  | 'sleep'
+  | 'finish'
+  | 'subagent_spawn'
+  | 'subagent_report'
+  | 'module_query'
+  | 'unknown';
 
 /**
  * record_started 的 payload 按 category 变形；前端按 category 解释，
@@ -102,7 +102,7 @@ export interface RecordStartedContent extends AgentIdentity {
 
 /** record_detail.content.entries 元素（core._result_entries 的两种 kind）。 */
 export interface DetailEntry {
-  kind: "field" | "text";
+  kind: 'field' | 'text';
   label?: string;
   value?: unknown;
   text?: string;
@@ -127,7 +127,7 @@ export type RecordVoidContent = AgentIdentity;
 // ------------------------------------------------------------------
 
 export interface HelloMessage {
-  t: "hello";
+  t: 'hello';
   seq: number;
   content: {
     boot?: string;
@@ -138,7 +138,7 @@ export interface HelloMessage {
 
 /** pong 心跳应答。 */
 export interface PongMessage {
-  t: "pong";
+  t: 'pong';
   content: Record<string, unknown>;
 }
 
@@ -150,24 +150,24 @@ export type ServerMessage = (Envelope & { t: EventType }) | HelloMessage | PongM
 // ------------------------------------------------------------------
 
 export interface InputMessage {
-  t: "input";
+  t: 'input';
   text: string;
   /** 回执去重 id；断线重连补发时网关按 mid 保证恰好一次。 */
   mid?: string;
 }
 
 export interface PingMessage {
-  t: "ping";
+  t: 'ping';
 }
 
 /** 请求暂停自主循环（协作式：当前轮跑完才停，不开新轮）。 */
 export interface PauseMessage {
-  t: "pause";
+  t: 'pause';
 }
 
 /** 请求恢复自主循环。 */
 export interface ResumeMessage {
-  t: "resume";
+  t: 'resume';
 }
 
 export type ClientMessage = InputMessage | PingMessage | PauseMessage | ResumeMessage;
@@ -177,29 +177,29 @@ export type ClientMessage = InputMessage | PingMessage | PauseMessage | ResumeMe
 // ------------------------------------------------------------------
 
 const KNOWN_EVENT_TYPES = new Set([
-  "user_input",
-  "turn_started",
-  "status",
-  "output_started",
-  "output_delta",
-  "output_done",
-  "output_cancelled",
-  "record_started",
-  "record_detail",
-  "record_done",
-  "record_failed",
-  "record_void",
+  'user_input',
+  'turn_started',
+  'status',
+  'output_started',
+  'output_delta',
+  'output_done',
+  'output_cancelled',
+  'record_started',
+  'record_detail',
+  'record_done',
+  'record_failed',
+  'record_void',
 ]);
 
 /** 是否为 bus 事件信封（区别于 hello / pong）。 */
 export function isEnvelope(msg: unknown): msg is Envelope {
   return (
-    typeof msg === "object" &&
+    typeof msg === 'object' &&
     msg !== null &&
-    typeof (msg as Envelope).seq === "number" &&
-    typeof (msg as Envelope).ts === "number" &&
-    typeof (msg as Envelope).t === "string" &&
-    typeof (msg as Envelope).content === "object" &&
+    typeof (msg as Envelope).seq === 'number' &&
+    typeof (msg as Envelope).ts === 'number' &&
+    typeof (msg as Envelope).t === 'string' &&
+    typeof (msg as Envelope).content === 'object' &&
     (msg as Envelope).content !== null
   );
 }
@@ -210,9 +210,9 @@ export function isEnvelope(msg: unknown): msg is Envelope {
  * - "surface"：surface.* 预留事件，回放/直播均忽略（阶段4再消费）
  * - "unknown"：未知类型，保守忽略
  */
-export function classifyEvent(env: Envelope): "live" | "surface" | "unknown" {
-  if (env.t.startsWith("surface.")) return "surface";
-  return KNOWN_EVENT_TYPES.has(env.t) ? "live" : "unknown";
+export function classifyEvent(env: Envelope): 'live' | 'surface' | 'unknown' {
+  if (env.t.startsWith('surface.')) return 'surface';
+  return KNOWN_EVENT_TYPES.has(env.t) ? 'live' : 'unknown';
 }
 
 // ------------------------------------------------------------------
@@ -221,7 +221,7 @@ export function classifyEvent(env: Envelope): "live" | "surface" | "unknown" {
 
 /** 客户端回执 id（输入去重用）。 */
 export function newMid(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
   return `mid-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

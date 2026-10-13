@@ -2,11 +2,11 @@
 // 后端不负责历史；这里只在前端本地存（会话生命周期由用户管理）。
 // 无 IndexedDB 环境（隐私模式/测试）退化为内存 Map。
 
-import type { HistoryRound } from "../history/mapper";
+import type { HistoryRound } from '../history/mapper';
 
-const DB_NAME = "nan-history";
+const DB_NAME = 'nan-history';
 const DB_VERSION = 1;
-const STORE = "rounds";
+const STORE = 'rounds';
 
 export interface RoundStore {
   saveRound(round: HistoryRound): Promise<void>;
@@ -43,7 +43,7 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: "key" });
+        db.createObjectStore(STORE, { keyPath: 'key' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -84,20 +84,20 @@ export function idbRoundStore(): RoundStore {
   return {
     async saveRound(round) {
       const dbi = await db();
-      const tx = dbi.transaction(STORE, "readwrite");
+      const tx = dbi.transaction(STORE, 'readwrite');
       await reqAsPromise(tx.objectStore(STORE).put(round));
     },
 
     async loadRounds() {
       const dbi = await db();
-      const tx = dbi.transaction(STORE, "readonly");
+      const tx = dbi.transaction(STORE, 'readonly');
       const all = await reqAsPromise(tx.objectStore(STORE).getAll() as IDBRequest<HistoryRound[]>);
       return all.sort((a, b) => a.ts - b.ts);
     },
 
     async clear() {
       const dbi = await db();
-      const tx = dbi.transaction(STORE, "readwrite");
+      const tx = dbi.transaction(STORE, 'readwrite');
       await reqAsPromise(tx.objectStore(STORE).clear());
     },
   };
@@ -105,5 +105,5 @@ export function idbRoundStore(): RoundStore {
 
 /** 环境探测：无 indexedDB 时退化。 */
 export function createRoundStore(): RoundStore {
-  return typeof indexedDB !== "undefined" ? idbRoundStore() : memoryRoundStore();
+  return typeof indexedDB !== 'undefined' ? idbRoundStore() : memoryRoundStore();
 }

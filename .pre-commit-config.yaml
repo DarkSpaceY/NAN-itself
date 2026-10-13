@@ -1,0 +1,28 @@
+# Pre-commit: fast local checks only. Type checking (mypy) and tests run in CI.
+# Install: uv sync && uv run pre-commit install
+# Run all: uv run pre-commit run --all-files
+repos:
+  # ---- Python ----
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^(backend|builtin|tests)/
+      - id: ruff-format
+        files: ^(backend|builtin|tests)/
+
+  # ---- Frontend (React/TS in frontend/) ----
+  - repo: local
+    hooks:
+      - id: frontend-eslint
+        name: frontend eslint
+        entry: npm run lint:fix --prefix frontend
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/
+      - id: frontend-prettier
+        name: frontend prettier
+        entry: npx --prefix frontend prettier --write
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx|css|json)$

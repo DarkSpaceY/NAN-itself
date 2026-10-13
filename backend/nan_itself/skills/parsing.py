@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -86,9 +86,10 @@ def read_metadata(
 
     validate_description(description, skill_file)
 
+    # 上面两个校验器不通过（含 None）即抛 SkillValidationError。
     return SkillMetadata(
-        name=name,
-        description=description,
+        name=cast(str, name),
+        description=cast(str, description),
         source=skill_file,
         frontmatter=MappingProxyType(dict(frontmatter)),
     )

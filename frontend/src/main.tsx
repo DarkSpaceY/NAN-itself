@@ -1,14 +1,14 @@
 // NAN frontend — entry
 // 数据层（store/ws/mapper/db，框架无关）+ React 呈现层（assistant-ui）。
 
-import "./style.css";
-import { createRoot } from "react-dom/client";
-import { createElement } from "react";
+import './style.css';
+import { createRoot } from 'react-dom/client';
+import { createElement } from 'react';
 
-import { Store } from "./store";
-import { Mapper } from "./history/mapper";
-import { createRoundStore } from "./persistence/db";
-import { App } from "./ui/App";
+import { Store } from './store';
+import { Mapper } from './history/mapper';
+import { createRoundStore } from './persistence/db';
+import { App } from './ui/App';
 
 const store = new Store();
 const mapper = new Mapper();
@@ -17,7 +17,7 @@ const db = createRoundStore();
 let sendInput: (text: string) => void = () => {};
 let setPaused: (paused: boolean) => void = () => {};
 
-const root = createRoot(document.getElementById("root")!);
+const root = createRoot(document.getElementById('root')!);
 root.render(
   createElement(App, {
     store,
@@ -34,13 +34,13 @@ async function boot() {
     const rounds = await db.loadRounds();
     if (rounds.length > 0) mapper.seed(rounds);
   } catch (err) {
-    console.warn("[nan] history restore failed", err);
+    console.warn('[nan] history restore failed', err);
   }
 
-  const useMock = new URLSearchParams(location.search).has("mock");
+  const useMock = new URLSearchParams(location.search).has('mock');
 
   if (useMock) {
-    const { createMockClient } = await import("./dev/mock");
+    const { createMockClient } = await import('./dev/mock');
     const mock = createMockClient({
       onEnvelope: (env) => {
         store.applyMessage(env);
@@ -54,16 +54,15 @@ async function boot() {
     return;
   }
 
-  const wsUrl =
-    (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
-  const { WsClient } = await import("./ws");
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const { WsClient } = await import('./ws');
   const client = new WsClient({
     url: wsUrl,
     store,
     onEnvelope: (env) => mapper.feed(env),
     onHello: (bootId) => mapper.onHello(bootId),
   });
-  store.setConnection("connecting");
+  store.setConnection('connecting');
   client.connect();
   sendInput = (text) => client.sendInput(text);
   setPaused = (paused) => (paused ? client.pause() : client.resume());

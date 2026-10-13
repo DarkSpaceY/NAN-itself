@@ -12,12 +12,9 @@
 // 展开：行动类默认可展开；轻量动作仅在失败且有内容时可展开。
 // 失败信息不藏在折叠里：收起时直接铺在行下（最多两行）。
 
-import { memo, useState, type ReactNode } from "react";
-import type {
-  ToolCallMessagePartComponent,
-  ToolCallMessagePartStatus,
-} from "@assistant-ui/react";
-import { ChevronRightIcon } from "lucide-react";
+import { memo, useState, type ReactNode } from 'react';
+import type { ToolCallMessagePartComponent, ToolCallMessagePartStatus } from '@assistant-ui/react';
+import { ChevronRightIcon } from 'lucide-react';
 
 // ------------------------------------------------------------------
 // 数据
@@ -31,14 +28,14 @@ interface RecordEntry {
 }
 
 interface RecordResult {
-  state?: "running" | "done" | "failed" | "void";
+  state?: 'running' | 'done' | 'failed' | 'void';
   title?: string;
   entries?: RecordEntry[];
   error?: { type: string; message: string };
   durationS?: number;
 }
 
-type RunState = "running" | "done" | "failed";
+type RunState = 'running' | 'done' | 'failed';
 
 /**
  * convert.ts 的约定：进行中的记录没有 result，完成后才带 result 出现。
@@ -47,12 +44,12 @@ type RunState = "running" | "done" | "failed";
  */
 function runStateOf(result?: RecordResult, status?: ToolCallMessagePartStatus): RunState {
   if (!result) {
-    if (status?.type === "incomplete") return status.reason === "error" ? "failed" : "done";
-    return "running";
+    if (status?.type === 'incomplete') return status.reason === 'error' ? 'failed' : 'done';
+    return 'running';
   }
-  if (result.state === "failed") return "failed";
-  if (result.state === "running") return "running";
-  return "done";
+  if (result.state === 'failed') return 'failed';
+  if (result.state === 'running') return 'running';
+  return 'done';
 }
 
 /** ≥1s 才显示——无限运行的流里，毫秒级耗时只是噪音。 */
@@ -61,15 +58,15 @@ function formatDuration(s?: number): string | null {
   if (s < 10) return `${s.toFixed(1)}s`;
   if (s < 60) return `${Math.round(s)}s`;
   const m = Math.floor(s / 60);
-  return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}s`;
+  return `${m}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
 }
 
 // ------------------------------------------------------------------
 // 分类 → 呈现
 // ------------------------------------------------------------------
 
-type Shape = "ring" | "dot" | "pip" | "diamond";
-type Weight = "sense" | "act" | "light";
+type Shape = 'ring' | 'dot' | 'pip' | 'diamond';
+type Weight = 'sense' | 'act' | 'light';
 
 interface CategoryStyle {
   /** 行首动词；title 跟在后面。 */
@@ -81,38 +78,37 @@ interface CategoryStyle {
 }
 
 const CATEGORY_STYLES: Record<string, CategoryStyle> = {
-  module_query: { verb: "观察", shape: "ring", weight: "sense", expandable: true },
-  invoke_tool: { verb: "使用", shape: "dot", weight: "act", expandable: true },
-  invoke_skill: { verb: "运用技能", shape: "dot", weight: "act", expandable: true },
-  spawn: { verb: "派出", shape: "dot", weight: "act", expandable: true },
-  list_tools: { verb: "盘点工具", shape: "pip", weight: "light", expandable: false },
-  list_skills: { verb: "盘点技能", shape: "pip", weight: "light", expandable: false },
-  list_channels: { verb: "盘点通道", shape: "pip", weight: "light", expandable: false },
-  show_tool: { verb: "查看工具", shape: "pip", weight: "light", expandable: false },
-  show_skill: { verb: "查看技能", shape: "pip", weight: "light", expandable: false },
-  show_channels: { verb: "查看通道", shape: "pip", weight: "light", expandable: false },
-  sleep: { verb: "休息", shape: "pip", weight: "light", expandable: false },
-  finish: { verb: "收尾", shape: "diamond", weight: "light", expandable: false },
+  module_query: { verb: '观察', shape: 'ring', weight: 'sense', expandable: true },
+  invoke_tool: { verb: '使用', shape: 'dot', weight: 'act', expandable: true },
+  invoke_skill: { verb: '运用技能', shape: 'dot', weight: 'act', expandable: true },
+  spawn: { verb: '派出', shape: 'dot', weight: 'act', expandable: true },
+  list_tools: { verb: '盘点工具', shape: 'pip', weight: 'light', expandable: false },
+  list_skills: { verb: '盘点技能', shape: 'pip', weight: 'light', expandable: false },
+  list_channels: { verb: '盘点通道', shape: 'pip', weight: 'light', expandable: false },
+  show_tool: { verb: '查看工具', shape: 'pip', weight: 'light', expandable: false },
+  show_skill: { verb: '查看技能', shape: 'pip', weight: 'light', expandable: false },
+  show_channels: { verb: '查看通道', shape: 'pip', weight: 'light', expandable: false },
+  sleep: { verb: '休息', shape: 'pip', weight: 'light', expandable: false },
+  finish: { verb: '收尾', shape: 'diamond', weight: 'light', expandable: false },
 };
 
 const FALLBACK_STYLE: CategoryStyle = {
-  verb: "使用",
-  shape: "dot",
-  weight: "act",
+  verb: '使用',
+  shape: 'dot',
+  weight: 'act',
   expandable: true,
 };
 
-const styleOf = (category: string): CategoryStyle =>
-  CATEGORY_STYLES[category] ?? FALLBACK_STYLE;
+const styleOf = (category: string): CategoryStyle => CATEGORY_STYLES[category] ?? FALLBACK_STYLE;
 
 // ------------------------------------------------------------------
 // 原子
 // ------------------------------------------------------------------
 
 const STATE_LABEL: Record<RunState, string> = {
-  running: "进行中",
-  done: "",
-  failed: "失败",
+  running: '进行中',
+  done: '',
+  failed: '失败',
 };
 
 function Dot({ shape, state }: { shape: Shape; state: RunState }) {
@@ -175,7 +171,7 @@ function Row({ weight, shape, state, expandable, open, onToggle, meta, children 
   );
 }
 
-function Entry({ label, tone, children }: { label?: string; tone?: "error"; children: ReactNode }) {
+function Entry({ label, tone, children }: { label?: string; tone?: 'error'; children: ReactNode }) {
   return (
     <div className="nan-entry" data-tone={tone}>
       <span className="nan-entry-label">{label}</span>
@@ -194,7 +190,7 @@ function Detail({ open, result }: { open: boolean; result: RecordResult }) {
           </Entry>
         )}
         {result.entries?.map((e, i) =>
-          e.kind === "text" ? (
+          e.kind === 'text' ? (
             <pre key={i} className="nan-entry-text">
               {e.text}
             </pre>
@@ -232,9 +228,9 @@ function ActivityRow({
   const [open, setOpen] = useState(false);
 
   // 已知类别没有 title 时只显示动词；未知类别回退显示原始 toolName
-  const title = r.title ?? (toolName in CATEGORY_STYLES ? "" : toolName);
+  const title = r.title ?? (toolName in CATEGORY_STYLES ? '' : toolName);
   const hasBody = Boolean(r.entries?.length || r.error);
-  const expandable = hasBody && (cat.expandable || state === "failed");
+  const expandable = hasBody && (cat.expandable || state === 'failed');
   // 失败信息始终可见：收起、或根本不可展开时，直接铺在行下
   const showInlineError = Boolean(r.error) && (!expandable || !open);
 
@@ -247,7 +243,7 @@ function ActivityRow({
         expandable={expandable}
         open={open}
         onToggle={() => setOpen((v) => !v)}
-        meta={state === "running" ? null : formatDuration(r.durationS)}
+        meta={state === 'running' ? null : formatDuration(r.durationS)}
       >
         <span className="nan-verb">{cat.verb}</span>
         {title && title !== cat.verb && <span className="nan-title">{title}</span>}
@@ -277,11 +273,11 @@ function QueryRow({
   const [open, setOpen] = useState(false);
 
   // 失败的观察回到普通行语义：得能看到错误
-  if (state === "failed") return <ActivityRow toolName={toolName} result={r} status={status} />;
+  if (state === 'failed') return <ActivityRow toolName={toolName} result={r} status={status} />;
 
   const entries = r.entries ?? [];
-  const inline = entries.filter((e) => e.kind === "field").slice(0, 2);
-  const more = entries.filter((e) => e.kind === "field").length - inline.length;
+  const inline = entries.filter((e) => e.kind === 'field').slice(0, 2);
+  const more = entries.filter((e) => e.kind === 'field').length - inline.length;
   const expandable = entries.length > inline.length;
 
   return (
@@ -293,7 +289,7 @@ function QueryRow({
         expandable={expandable}
         open={open}
         onToggle={() => setOpen((v) => !v)}
-        meta={state === "running" ? null : formatDuration(r.durationS)}
+        meta={state === 'running' ? null : formatDuration(r.durationS)}
       >
         <span className="nan-title">{r.title || toolName}</span>
         {inline.map((f, i) => (
@@ -322,7 +318,7 @@ function RecordLine({
   result?: RecordResult;
   status?: ToolCallMessagePartStatus;
 }) {
-  return toolName === "module_query" ? (
+  return toolName === 'module_query' ? (
     <QueryRow toolName={toolName} result={result} status={status} />
   ) : (
     <ActivityRow toolName={toolName} result={result} status={status} />
@@ -331,10 +327,10 @@ function RecordLine({
 
 const RecordToolImpl: ToolCallMessagePartComponent = (props) => {
   // __group__ / __sense__ 是 convert.ts 合成的折叠 part，不是真实工具名
-  if (props.toolName === "__group__") {
+  if (props.toolName === '__group__') {
     return <RecordGroupImpl result={props.result} toolCallId={props.toolCallId} />;
   }
-  if (props.toolName === "__sense__") {
+  if (props.toolName === '__sense__') {
     return <RecordSenseGroupImpl result={props.result} />;
   }
   return (
@@ -368,16 +364,14 @@ const userToggled = new Map<string, boolean>();
 
 const RecordGroupImpl = ({
   result,
-  toolCallId = "group",
+  toolCallId = 'group',
 }: {
   result?: unknown;
   toolCallId?: string;
 }) => {
-  const r = ((result ?? {}) as GroupResult);
+  const r = (result ?? {}) as GroupResult;
   const records = r.records ?? [];
-  const [toggled, setToggled] = useState<boolean | null>(
-    () => userToggled.get(toolCallId) ?? null,
-  );
+  const [toggled, setToggled] = useState<boolean | null>(() => userToggled.get(toolCallId) ?? null);
 
   const toggle = () => {
     const open = toggled ?? r.turnOpen === true;
@@ -389,21 +383,21 @@ const RecordGroupImpl = ({
   // 展开跟随轮生命周期（convert 塞进 result 的 turnOpen），不跟着
   // 单条 record 的完成抖动；用户点过就以用户为准（跨重挂载生效）。
   const open = toggled ?? r.turnOpen === true;
-  const running = records.some((x) => !x.result || x.result.state === "running");
-  const failedCount = records.filter((r) => r.result?.state === "failed").length;
+  const running = records.some((x) => !x.result || x.result.state === 'running');
+  const failedCount = records.filter((r) => r.result?.state === 'failed').length;
   const durationS = records.reduce((a, r) => a + (r.result?.durationS ?? 0), 0);
 
   // 收起时仍要让人知道「现在在做什么」：露出最新一条进行中的标题
-  let liveTitle = "";
+  let liveTitle = '';
   for (let i = records.length - 1; i >= 0; i--) {
     const rec = records[i];
-    if (!rec.result || rec.result.state === "running") {
+    if (!rec.result || rec.result.state === 'running') {
       liveTitle = rec.result?.title ?? styleOf(rec.toolName).verb;
       break;
     }
   }
 
-  const state: RunState = running ? "running" : failedCount > 0 ? "failed" : "done";
+  const state: RunState = running ? 'running' : failedCount > 0 ? 'failed' : 'done';
 
   return (
     <div className="nan-activity-group" data-open={open}>
@@ -448,11 +442,11 @@ const RecordSenseGroupImpl = ({ result }: { result?: unknown }) => {
   const [toggled, setToggled] = useState<boolean | null>(null);
 
   const running = records.some((r) => !r.result);
-  const failedCount = records.filter((r) => r.result?.state === "failed").length;
+  const failedCount = records.filter((r) => r.result?.state === 'failed').length;
   const durationS = records.reduce((a, r) => a + (r.result?.durationS ?? 0), 0);
   // 感知组默认收起（摘要行本身就是内容）；有失败时展开，错误不能被藏住
   const open = toggled ?? failedCount > 0;
-  const state: RunState = running ? "running" : failedCount > 0 ? "failed" : "done";
+  const state: RunState = running ? 'running' : failedCount > 0 ? 'failed' : 'done';
 
   return (
     <div className="nan-activity-group" data-open={open}>

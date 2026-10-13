@@ -180,7 +180,8 @@ class LLMProvider:
                 max_retries=max_retries,
             )
         else:
-            self.client = AsyncAnthropic(
+            # 双后端动态分发：client 实际类型由 provider 分支决定。
+            self.client = AsyncAnthropic(  # type: ignore[assignment]
                 api_key=api_key,
                 base_url=base_url,
                 timeout=timeout,
@@ -393,7 +394,10 @@ class LLMProvider:
     @staticmethod
     def _openai_message(
         message: Message,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
+        """
+        Map one message; None means it carries nothing and is dropped.
+        """
         if message.role == "system":
             return {
                 "role": "system",
@@ -489,7 +493,8 @@ class LLMProvider:
         if tools:
             kwargs["tools"] = tools
 
-        async with self.client.messages.stream(**kwargs) as stream:
+        # 双后端动态分发：此路径仅在 provider == "anthropic" 时执行。
+        async with self.client.messages.stream(**kwargs) as stream:  # type: ignore[attr-defined]
             current_tool_id: str | None = None
             current_tool_name: str | None = None
             current_tool_json = ""
@@ -794,19 +799,19 @@ class LLMProvider:
         # concatenated, order preserved).
         merged: list[dict[str, Any]] = []
 
-        for message in result:
+        for entry in result:
             previous = merged[-1] if merged else None
 
             if (
                 previous is not None
                 and previous.get("role") == "user"
-                and message.get("role") == "user"
+                and entry.get("role") == "user"
             ):
-                previous["content"].extend(message["content"])
+                previous["content"].extend(entry["content"])
 
                 continue
 
-            merged.append(message)
+            merged.append(entry)
 
         return system_prompt, merged
 

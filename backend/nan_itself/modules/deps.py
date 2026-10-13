@@ -26,7 +26,7 @@ def build_dependency_maps(
 ]:
     dependencies = {module_id: set(record.cls.requires) for module_id, record in modules.items()}
 
-    dependents = {module_id: set() for module_id in modules}
+    dependents: dict[str, set[str]] = {module_id: set() for module_id in modules}
 
     for (
         module_id,

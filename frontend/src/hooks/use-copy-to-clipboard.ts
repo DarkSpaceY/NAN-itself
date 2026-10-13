@@ -1,18 +1,14 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 
 export type UseCopyToClipboardOptions = {
   copiedDuration?: number;
 };
 
-export const useCopyToClipboard = ({
-  copiedDuration = 3000,
-}: UseCopyToClipboardOptions = {}) => {
+export const useCopyToClipboard = ({ copiedDuration = 3000 }: UseCopyToClipboardOptions = {}) => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
-  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scopeGenerationRef = useRef(0);
 
   useEffect(
@@ -28,7 +24,7 @@ export const useCopyToClipboard = ({
   );
 
   const copyToClipboard = (value: string) => {
-    if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
+    if (!value || typeof navigator === 'undefined' || !navigator.clipboard) {
       return;
     }
 

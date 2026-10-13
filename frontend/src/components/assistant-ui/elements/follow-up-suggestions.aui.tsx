@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { AuiIf, useAuiState, ThreadPrimitive } from "@assistant-ui/react";
-import { useCallback, useEffect, useRef, useState, type FC } from "react";
+import { AuiIf, useAuiState, ThreadPrimitive } from '@assistant-ui/react';
+import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 
 const FollowupSuggestionsRow: FC = () => {
   const suggestions = useAuiState((s) => s.thread.suggestions);
@@ -16,7 +16,7 @@ const FollowupSuggestionsRow: FC = () => {
     // scrollLeft runs 0..-max in RTL; normalize to hidden width per physical edge.
     const fromStart = Math.abs(el.scrollLeft);
     // getComputedStyle forces a style recalc per scroll event; direction is stable, read it once.
-    const rtl = (rtlRef.current ??= getComputedStyle(el).direction === "rtl");
+    const rtl = (rtlRef.current ??= getComputedStyle(el).direction === 'rtl');
     const [left, right] = rtl
       ? [maxScroll - fromStart, fromStart]
       : [fromStart, maxScroll - fromStart];
@@ -37,8 +37,8 @@ const FollowupSuggestionsRow: FC = () => {
   }, [updateFades]);
 
   const maskImage = `linear-gradient(to right, ${
-    fades.left ? "transparent, black 2rem" : "black"
-  }, ${fades.right ? "black calc(100% - 2rem), transparent" : "black"})`;
+    fades.left ? 'transparent, black 2rem' : 'black'
+  }, ${fades.right ? 'black calc(100% - 2rem), transparent' : 'black'})`;
 
   return (
     <div
@@ -71,11 +71,7 @@ const FollowupSuggestionsRow: FC = () => {
 
 export const ThreadFollowupSuggestions: FC = () => (
   <AuiIf
-    condition={(s) =>
-      !s.thread.isEmpty &&
-      !s.thread.isRunning &&
-      s.thread.suggestions.length > 0
-    }
+    condition={(s) => !s.thread.isEmpty && !s.thread.isRunning && s.thread.suggestions.length > 0}
   >
     <FollowupSuggestionsRow />
   </AuiIf>

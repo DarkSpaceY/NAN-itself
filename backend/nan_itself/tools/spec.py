@@ -10,10 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Final, Literal
 
-PROVIDER_KIND_MCP = "mcp"
-PROVIDER_KIND_LOCAL = "local"
+# Final: inferred as Literal values so they type-check as ProviderKind.
+PROVIDER_KIND_MCP: Final = "mcp"
+PROVIDER_KIND_LOCAL: Final = "local"
 
 ProviderKind = Literal[
     "mcp",

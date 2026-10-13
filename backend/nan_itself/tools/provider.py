@@ -84,6 +84,9 @@ class Provider:
                 arguments,
             )
 
+        # kind != "local" 即 MCP 后端；connect() 构造时总会挂上 session。
+        assert self.session is not None
+
         return await self.session.call_tool(
             name,
             arguments or {},

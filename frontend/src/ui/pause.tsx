@@ -5,11 +5,11 @@
 //   pending  → 已请求，等当前步骤结束；点击 = 撤回请求
 //   paused   → 后端已确认；点击 = 继续
 
-import { createContext, useContext } from "react";
-import { LoaderIcon, PauseIcon, PlayIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { createContext, useContext } from 'react';
+import { LoaderIcon, PauseIcon, PlayIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-export type PauseState = "running" | "pending" | "paused";
+export type PauseState = 'running' | 'pending' | 'paused';
 
 export interface PauseControl {
   state: PauseState;
@@ -27,9 +27,9 @@ export function usePauseControl(): PauseControl | null {
 }
 
 const COPY: Record<PauseState, { label: string; hint: string }> = {
-  running: { label: "暂停", hint: "当前步骤结束后暂停" },
-  pending: { label: "暂停中", hint: "正在等待当前步骤结束，点击取消" },
-  paused: { label: "继续", hint: "继续运行" },
+  running: { label: '暂停', hint: '当前步骤结束后暂停' },
+  pending: { label: '暂停中', hint: '正在等待当前步骤结束，点击取消' },
+  paused: { label: '继续', hint: '继续运行' },
 };
 
 /**
@@ -41,7 +41,7 @@ export function PauseButton({ className }: { className?: string }) {
   if (!ctl) return null;
 
   const { label, hint } = COPY[ctl.state];
-  const Icon = ctl.state === "paused" ? PlayIcon : PauseIcon;
+  const Icon = ctl.state === 'paused' ? PlayIcon : PauseIcon;
 
   return (
     <button
@@ -49,11 +49,11 @@ export function PauseButton({ className }: { className?: string }) {
       onClick={ctl.toggle}
       title={hint}
       aria-label={hint}
-      aria-busy={ctl.state === "pending"}
+      aria-busy={ctl.state === 'pending'}
       data-state={ctl.state}
-      className={cn("nan-pause", className)}
+      className={cn('nan-pause', className)}
     >
-      {ctl.state === "pending" ? (
+      {ctl.state === 'pending' ? (
         <LoaderIcon className="size-3.5 animate-spin [animation-duration:0.9s]" />
       ) : (
         <Icon className="size-3.5 fill-current" />

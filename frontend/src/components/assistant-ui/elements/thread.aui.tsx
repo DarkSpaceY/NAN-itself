@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 // NAN 的对话流。
 //
@@ -10,22 +10,22 @@
 //   - composer 永远停靠底部，永远可发送（输入进 Inbox，下一步看到）。
 //   - 不做分支 / 编辑 / 重新生成 / 点赞 / 语音 / 附件 / 建议：NAN 不提供这些语义。
 
-import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
+import { MarkdownText } from '@/components/assistant-ui/elements/markdown-text';
 import {
   Reasoning,
   ReasoningContent,
   ReasoningRoot,
   ReasoningText,
   ReasoningTrigger,
-} from "@/components/assistant-ui/elements/reasoning.aui";
-import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
+} from '@/components/assistant-ui/elements/reasoning.aui';
+import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.aui';
 import {
   ToolGroupContent,
   ToolGroupRoot,
   ToolGroupTrigger,
-} from "@/components/assistant-ui/elements/tool-group.aui";
-import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
-import { cn } from "@/lib/utils";
+} from '@/components/assistant-ui/elements/tool-group.aui';
+import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button';
+import { cn } from '@/lib/utils';
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -37,22 +37,16 @@ import {
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
   useAuiState,
-} from "@assistant-ui/react";
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  CheckIcon,
-  ClockIcon,
-  CopyIcon,
-} from "lucide-react";
-import { PauseButton, usePauseControl } from "@/ui/pause";
+} from '@assistant-ui/react';
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, ClockIcon, CopyIcon } from 'lucide-react';
+import { PauseButton, usePauseControl } from '@/ui/pause';
 import {
   createContext,
   useContext,
   type ComponentType,
   type FC,
   type PropsWithChildren,
-} from "react";
+} from 'react';
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -69,38 +63,27 @@ export type ThreadComponents = {
   AssistantMessage?: ComponentType | undefined;
   Welcome?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
-  ToolGroup?:
-    | ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>>
-    | undefined;
-  ReasoningGroup?:
-    | ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>>
-    | undefined;
+  ToolGroup?: ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>> | undefined;
+  ReasoningGroup?: ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>> | undefined;
   TaskGroup?: ComponentType<{ group: ThreadGroupPart }> | undefined;
 };
 
 const messageGroupBy = groupPartByType({
-  reasoning: ["group-chainOfThought", "group-reasoning"],
-  "tool-call": ["group-chainOfThought", "group-tool"],
-  "standalone-tool-call": [],
+  reasoning: ['group-chainOfThought', 'group-reasoning'],
+  'tool-call': ['group-chainOfThought', 'group-tool'],
+  'standalone-tool-call': [],
 });
 
-type ThreadGroupKey =
-  | "group-chainOfThought"
-  | "group-reasoning"
-  | "group-tool"
-  | "group-task";
+type ThreadGroupKey = 'group-chainOfThought' | 'group-reasoning' | 'group-tool' | 'group-task';
 
-const TASK_GROUP_PATH: readonly ThreadGroupKey[] = [
-  "group-chainOfThought",
-  "group-task",
-];
+const TASK_GROUP_PATH: readonly ThreadGroupKey[] = ['group-chainOfThought', 'group-task'];
 
 const taskAwareGroupBy = (
   part: Parameters<typeof messageGroupBy>[0],
   context?: Parameters<typeof messageGroupBy>[1],
 ): readonly ThreadGroupKey[] => {
   const path = messageGroupBy(part, context);
-  return part.type === "tool-call" &&
+  return part.type === 'tool-call' &&
     part.messages !== undefined &&
     path.length > 0 &&
     !context?.toolUIs?.[part.toolName]?.length
@@ -117,8 +100,7 @@ export type ThreadProps = {
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
 
-const ThreadComponentsContext =
-  createContext<ThreadComponents>(EMPTY_COMPONENTS);
+const ThreadComponentsContext = createContext<ThreadComponents>(EMPTY_COMPONENTS);
 
 const isEmptyView = (s: AssistantState) => s.thread.messages.length === 0;
 
@@ -145,11 +127,10 @@ const ThreadRoot: FC<{ autoFocus: boolean; pendingInputs?: readonly string[] }> 
       className="aui-root aui-thread-root bg-background @container flex h-full flex-col"
       style={{
         // 宽屏下限制行长（中文约 45 字/行）；窄窗口仍是 100%
-        ["--thread-max-width" as string]: "44rem",
-        ["--composer-bg" as string]:
-          "color-mix(in oklab, var(--color-muted) 30%, transparent)",
-        ["--composer-radius" as string]: "1rem",
-        ["--composer-padding" as string]: "8px",
+        ['--thread-max-width' as string]: '44rem',
+        ['--composer-bg' as string]: 'color-mix(in oklab, var(--color-muted) 30%, transparent)',
+        ['--composer-radius' as string]: '1rem',
+        ['--composer-padding' as string]: '8px',
       }}
     >
       {/* 锚底：Agent 持续输出，视口应当跟随最新内容 */}
@@ -164,20 +145,15 @@ const ThreadRoot: FC<{ autoFocus: boolean; pendingInputs?: readonly string[] }> 
           </AuiIf>
 
           {/* 步骤间距由 .nan-stream 按相邻角色决定（见 style.css） */}
-          <div
-            data-slot="aui_message-group"
-            className="nan-stream pb-8 empty:hidden"
-          >
-            <ThreadPrimitive.Messages>
-              {() => <ThreadMessage />}
-            </ThreadPrimitive.Messages>
+          <div data-slot="aui_message-group" className="nan-stream pb-8 empty:hidden">
+            <ThreadPrimitive.Messages>{() => <ThreadMessage />}</ThreadPrimitive.Messages>
           </div>
 
           {/* 页脚：内容从 composer 上方柔和淡出，而不是被硬切 */}
           <ThreadPrimitive.ViewportFooter
             className={cn(
-              "aui-thread-viewport-footer bg-background sticky bottom-0 mt-auto flex flex-col gap-4 overflow-visible pb-4 md:pb-6",
-              "before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-background before:to-transparent",
+              'aui-thread-viewport-footer bg-background sticky bottom-0 mt-auto flex flex-col gap-4 overflow-visible pb-4 md:pb-6',
+              'before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-background before:to-transparent',
             )}
           >
             <ThreadScrollToBottom />
@@ -206,7 +182,7 @@ const ThreadMessage: FC = () => {
     useContext(ThreadComponentsContext);
   const role = useAuiState((s) => s.message.role);
 
-  return role === "user" ? <UserMessage /> : <AssistantMessageComponent />;
+  return role === 'user' ? <UserMessage /> : <AssistantMessageComponent />;
 };
 
 const ThreadScrollToBottom: FC = () => {
@@ -241,9 +217,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const pause = usePauseControl();
   // 暂停时告诉用户：话会被收下，但要继续后才会被看到
   const placeholder =
-    pause?.state === "paused"
-      ? "已暂停，输入的内容会在继续后被看到"
-      : "说点什么，下一步就会看到";
+    pause?.state === 'paused' ? '已暂停，输入的内容会在继续后被看到' : '说点什么，下一步就会看到';
 
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
@@ -317,13 +291,11 @@ const AssistantMessage: FC = () => {
         <MessagePrimitive.GroupedParts groupBy={groupBy}>
           {({ part, children }) => {
             switch (part.type) {
-              case "group-chainOfThought":
+              case 'group-chainOfThought':
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
-              case "group-task":
-                return TaskGroupComponent ? (
-                  <TaskGroupComponent group={part} />
-                ) : null;
-              case "group-tool":
+              case 'group-task':
+                return TaskGroupComponent ? <TaskGroupComponent group={part} /> : null;
+              case 'group-tool':
                 if (ToolGroup) {
                   return <ToolGroup group={part}>{children}</ToolGroup>;
                 }
@@ -331,18 +303,16 @@ const AssistantMessage: FC = () => {
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
                       count={part.indices.length}
-                      active={part.status.type === "running"}
+                      active={part.status.type === 'running'}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
-              case "group-reasoning": {
+              case 'group-reasoning': {
                 if (ReasoningGroup) {
-                  return (
-                    <ReasoningGroup group={part}>{children}</ReasoningGroup>
-                  );
+                  return <ReasoningGroup group={part}>{children}</ReasoningGroup>;
                 }
-                const running = part.status.type === "running";
+                const running = part.status.type === 'running';
                 return (
                   <ReasoningRoot streaming={running}>
                     <ReasoningTrigger active={running} />
@@ -352,15 +322,15 @@ const AssistantMessage: FC = () => {
                   </ReasoningRoot>
                 );
               }
-              case "text":
+              case 'text':
                 return <MarkdownText />;
-              case "reasoning":
+              case 'reasoning':
                 return <Reasoning {...part} />;
-              case "tool-call":
+              case 'tool-call':
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
-              case "data":
+              case 'data':
                 return part.dataRendererUI;
-              case "indicator":
+              case 'indicator':
                 // 与时间线同一个「进行中」的点，而不是另一种符号
                 return (
                   <span
@@ -392,9 +362,7 @@ const AssistantMessage: FC = () => {
 const AssistantCopy: FC = () => {
   return (
     <AuiIf
-      condition={(s) =>
-        s.message.parts.some((p) => p.type === "text" && p.text.trim() !== "")
-      }
+      condition={(s) => s.message.parts.some((p) => p.type === 'text' && p.text.trim() !== '')}
     >
       <ActionBarPrimitive.Root
         autohide="always"

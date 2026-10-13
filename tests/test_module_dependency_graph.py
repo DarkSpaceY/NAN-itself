@@ -243,23 +243,16 @@ def test_acyclic_chain_stops_dependents_first(tmp_path, monkeypatch):
             encoding="utf-8",
         )
 
-    facade._register_module_class(
-        C,
-        source=str(modules_dir / "c"),
-        source_fingerprint=(1, 1),
-    )
+    for name, cls in (("a", A), ("b", B), ("c", C)):
+        # Pin home at the (virtual) module folder under tmp so
+        # stop()'s state save never writes to the real tests/ dir.
+        cls._home = modules_dir / name
 
-    facade._register_module_class(
-        B,
-        source=str(modules_dir / "b"),
-        source_fingerprint=(1, 1),
-    )
-
-    facade._register_module_class(
-        A,
-        source=str(modules_dir / "a"),
-        source_fingerprint=(1, 1),
-    )
+        facade._register_module_class(
+            cls,
+            source=str(modules_dir / name),
+            source_fingerprint=(1, 1),
+        )
 
     facade._rebuild_dependency_graph()
 

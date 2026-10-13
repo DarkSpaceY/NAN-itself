@@ -141,6 +141,9 @@ async def refresh_tools(
     `timeout` bounds the list_tools round trip; a hung
     server must not freeze the caller.
     """
+    # refresh_tools 只作用于 MCP provider；connect() 构造时总会挂上 session。
+    assert provider.session is not None
+
     request = provider.session.list_tools()
 
     if timeout is None:

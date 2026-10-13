@@ -45,6 +45,7 @@ from ..modules.model import (
     Turn,
 )
 from ..utils.llm import (
+    FinishReason,
     LLMRequest,
     LLMResponse,
     ToolDefinition,
@@ -142,7 +143,7 @@ class StepEngine:
         text_parts: list[str] = []
         tool_calls: list = []
         usage = Usage()
-        finish_reason: str = "unknown"
+        finish_reason: FinishReason = "unknown"
         stream_id: str | None = None
         first_text: float | None = None
 

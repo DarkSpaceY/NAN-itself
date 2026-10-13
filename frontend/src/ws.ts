@@ -10,8 +10,8 @@ import {
   type ClientMessage,
   type Envelope,
   type ServerMessage,
-} from "./protocol";
-import type { Store } from "./store";
+} from './protocol';
+import type { Store } from './store';
 
 /** 最小 socket 接口（测试可注入 mock）。 */
 export interface MinimalSocket {
@@ -75,7 +75,7 @@ export class WsClient {
     this.clearTimers();
     this.socket?.close();
     this.socket = null;
-    this.store.setConnection("closed");
+    this.store.setConnection('closed');
   }
 
   /**
@@ -86,42 +86,42 @@ export class WsClient {
    * 关心暂停与输入的先后关系。
    */
   sendInput(text: string): string {
-    if (this.store.getState().status === "paused") {
-      this.send({ t: "resume" });
+    if (this.store.getState().status === 'paused') {
+      this.send({ t: 'resume' });
     }
 
     const mid = newMid();
-    this.send({ t: "input", text, mid });
+    this.send({ t: 'input', text, mid });
     return mid;
   }
 
   /** 请求暂停自主循环（协作式：后端在轮边界生效）。 */
   pause(): void {
-    this.send({ t: "pause" });
+    this.send({ t: 'pause' });
   }
 
   /** 请求恢复自主循环。 */
   resume(): void {
-    this.send({ t: "resume" });
+    this.send({ t: 'resume' });
   }
 
   // -- 内部 ----------------------------------------------------------
 
   private dial(): void {
     if (this.closedByUser) return;
-    this.store.setConnection("connecting");
+    this.store.setConnection('connecting');
     const socket = this.makeSocket(this.url);
     this.socket = socket;
 
-    socket.addEventListener("open", () => {
+    socket.addEventListener('open', () => {
       // 只处理最新一次拨号的事件（旧 socket 的迟到事件直接忽略）
       if (this.socket !== socket) return;
       this.attempt = 0;
-      this.store.setConnection("open");
+      this.store.setConnection('open');
       this.startHeartbeat();
     });
 
-    socket.addEventListener("message", (ev) => {
+    socket.addEventListener('message', (ev) => {
       if (this.socket !== socket) return;
       let msg: unknown;
       try {
@@ -129,14 +129,10 @@ export class WsClient {
       } catch {
         return;
       }
-      if (
-        msg &&
-        typeof msg === "object" &&
-        (msg as ServerMessage).t === "hello"
-      ) {
+      if (msg && typeof msg === 'object' && (msg as ServerMessage).t === 'hello') {
         // 新连接：重置本地模型，随后重放重建
         this.store.resetForReplay();
-        const hello = msg as Extract<ServerMessage, { t: "hello" }>;
+        const hello = msg as Extract<ServerMessage, { t: 'hello' }>;
         this.store.applyHello(hello as never);
         // 必须在重放事件到达之前定下游标
         this.onHello?.(hello.content?.boot ?? null);
@@ -146,12 +142,12 @@ export class WsClient {
       if (this.onEnvelope && isEnvelope(msg)) this.onEnvelope(msg);
     });
 
-    socket.addEventListener("close", () => {
+    socket.addEventListener('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
       this.stopHeartbeat();
       if (this.closedByUser) {
-        this.store.setConnection("closed");
+        this.store.setConnection('closed');
         return;
       }
       this.scheduleReconnect();
@@ -161,19 +157,16 @@ export class WsClient {
   }
 
   private scheduleReconnect(): void {
-    const delay = Math.min(
-      this.backoffBaseMs * 2 ** this.attempt,
-      this.backoffMaxMs,
-    );
+    const delay = Math.min(this.backoffBaseMs * 2 ** this.attempt, this.backoffMaxMs);
     this.attempt += 1;
-    this.store.setConnection("connecting");
+    this.store.setConnection('connecting');
     this.retryTimer = setTimeout(() => this.dial(), delay);
   }
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.send({ t: "ping" });
+      this.send({ t: 'ping' });
     }, 30_000);
   }
 

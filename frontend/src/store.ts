@@ -3,17 +3,13 @@
 // output/record 事件不在这里聚合——历史渲染所需的 parts 映射在
 // mapper 中；本 store 只推进 lastSeq 参与去重。
 
-import {
-  classifyEvent,
-  isEnvelope,
-  type Envelope,
-} from "./protocol";
+import { classifyEvent, isEnvelope, type Envelope } from './protocol';
 
 // ------------------------------------------------------------------
 // 状态模型
 // ------------------------------------------------------------------
 
-export type ConnectionState = "connecting" | "open" | "closed";
+export type ConnectionState = 'connecting' | 'open' | 'closed';
 
 export interface Round {
   seq: number;
@@ -28,14 +24,14 @@ export interface NanState {
   /** 已应用的最大事件 seq（hello 之后用于去重重放）。 */
   lastSeq: number;
   /** 最近一次 status 事件的状态。 */
-  status: "working" | "idle" | "paused" | null;
+  status: 'working' | 'idle' | 'paused' | null;
   /** 对话轮：user_input 边界，append-only。 */
   rounds: Round[];
 }
 
 export function initialState(): NanState {
   return {
-    connection: "closed",
+    connection: 'closed',
     bootId: null,
     lastSeq: 0,
     status: null,
@@ -55,7 +51,7 @@ export function initialState(): NanState {
  * - 未知 / surface.* 事件忽略
  */
 export function applyEvent(state: NanState, env: Envelope): NanState {
-  if (classifyEvent(env) !== "live") return state;
+  if (classifyEvent(env) !== 'live') return state;
   if (env.seq <= state.lastSeq) return state;
 
   const next: NanState = {
@@ -64,22 +60,17 @@ export function applyEvent(state: NanState, env: Envelope): NanState {
   };
 
   switch (env.t) {
-    case "user_input": {
-      const text = typeof env.content.text === "string" ? env.content.text : "";
-      const mid = typeof env.content.mid === "string" ? env.content.mid : undefined;
-      next.rounds = [
-        ...state.rounds,
-        { seq: env.seq, ts: env.ts, text, mid },
-      ];
+    case 'user_input': {
+      const text = typeof env.content.text === 'string' ? env.content.text : '';
+      const mid = typeof env.content.mid === 'string' ? env.content.mid : undefined;
+      next.rounds = [...state.rounds, { seq: env.seq, ts: env.ts, text, mid }];
       return next;
     }
 
-    case "status": {
+    case 'status': {
       const state_ = env.content.state;
       next.status =
-        state_ === "working" || state_ === "idle" || state_ === "paused"
-          ? state_
-          : state.status;
+        state_ === 'working' || state_ === 'idle' || state_ === 'paused' ? state_ : state.status;
       return next;
     }
   }
@@ -127,8 +118,7 @@ export class Store {
   /** hello 握手：记录 bootId。seq 不在此消费——重放事件的 seq 可能
    * 低于 hello.seq，lastSeq 只能随事件自身推进。 */
   applyHello(hello: { seq: number; content?: { boot?: string } }): void {
-    const bootId =
-      typeof hello.content?.boot === "string" ? hello.content.boot : null;
+    const bootId = typeof hello.content?.boot === 'string' ? hello.content.boot : null;
     if (bootId === this.state.bootId) return;
     this.set({ ...this.state, bootId });
   }

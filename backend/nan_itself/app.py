@@ -5,6 +5,7 @@ import contextlib
 import os
 import signal
 import uuid
+from typing import cast
 
 from loguru import logger
 
@@ -18,7 +19,7 @@ from .modules import (
 from .skills import SkillRuntime
 from .tools import ProviderRuntime
 from .utils import paths as _paths
-from .utils.llm import LLMProvider
+from .utils.llm import LLMProvider, ProviderName
 
 settings = get_settings()
 
@@ -45,7 +46,8 @@ async def run_agent_process() -> None:
     # --------------------------------------------------------------
 
     llm = LLMProvider(
-        provider=settings.llm.provider,
+        # 配置值（str）；LLMProvider.__init__ 运行时按 openai/anthropic 分发。
+        provider=cast(ProviderName, settings.llm.provider),
         api_key=settings.llm.api_key,
         model=settings.llm.model,
         base_url=settings.llm.base_url,

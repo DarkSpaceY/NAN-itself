@@ -12,25 +12,25 @@
 //   游标，重放里 seq 更小的事件全部跳过（同 boot 内 seq 才可比）
 // - surface.* / 未知事件不产生 parts
 
-import { classifyEvent, type Envelope } from "../protocol";
+import { classifyEvent, type Envelope } from '../protocol';
 
 // ------------------------------------------------------------------
 // parts 模型
 // ------------------------------------------------------------------
 
-export type ToolState = "running" | "done" | "failed" | "void";
+export type ToolState = 'running' | 'done' | 'failed' | 'void';
 
 export interface TextPart {
-  kind: "text";
+  kind: 'text';
   id: string; // 事件 id（assistant 流）或 round 派生 id（user）
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   text: string;
   streaming?: boolean;
   cancelled?: boolean;
 }
 
 export interface ToolPart {
-  kind: "tool";
+  kind: 'tool';
   id: string; // record 事件 id
   category: string;
   state: ToolState;
@@ -72,10 +72,10 @@ export function toolTitle(category: string, payload: Record<string, unknown>): s
     payload.channel,
   ];
   for (const c of candidates) {
-    if (typeof c === "string" && c.trim()) return c;
+    if (typeof c === 'string' && c.trim()) return c;
   }
   const keys = Object.keys(payload);
-  if (keys.length > 0) return `${category}(${keys.slice(0, 3).join(", ")})`;
+  if (keys.length > 0) return `${category}(${keys.slice(0, 3).join(', ')})`;
   return category;
 }
 
@@ -199,7 +199,7 @@ export class Mapper {
       // 瞬时状态不跨刷新：重载后的轮不是「正在流」。若这一轮其实还没
       // 结束，后续 delta 会把 streaming 再置上（见 feed 的 output_delta）。
       for (const p of r.parts) {
-        if (p.kind === "text") p.streaming = false;
+        if (p.kind === 'text') p.streaming = false;
       }
       this.rounds.push(r);
       this.byKey.set(r.key, r);
@@ -214,7 +214,7 @@ export class Mapper {
   // -- 事件入口 --------------------------------------------------------
 
   feed(env: Envelope): void {
-    if (classifyEvent(env) !== "live") return;
+    if (classifyEvent(env) !== 'live') return;
     if (env.seq <= this.lastSeq) return;
     this.lastSeq = env.seq;
 
@@ -223,67 +223,67 @@ export class Mapper {
 
   private handle(env: Envelope): void {
     switch (env.t) {
-      case "turn_started":
+      case 'turn_started':
         this.onTurnStarted(env);
         return;
-      case "user_input":
+      case 'user_input':
         this.onUserInput(env);
         return;
-      case "output_started":
+      case 'output_started':
         this.onOutputStarted(env);
         return;
-      case "output_delta":
+      case 'output_delta':
         this.updateTextPart(env, (p) => {
-          p.text += typeof env.content.text === "string" ? env.content.text : "";
+          p.text += typeof env.content.text === 'string' ? env.content.text : '';
           // delta 到达即说明这一路流还活着（刷新恢复的场景）
           p.streaming = true;
         });
         return;
-      case "output_done":
+      case 'output_done':
         this.updateTextPart(env, (p) => {
           p.streaming = false;
         });
         return;
-      case "output_cancelled":
+      case 'output_cancelled':
         this.updateTextPart(env, (p) => {
           p.streaming = false;
           p.cancelled = true;
         });
         return;
-      case "record_started":
+      case 'record_started':
         this.onRecordStarted(env);
         return;
-      case "record_detail":
+      case 'record_detail':
         this.updateToolPart(env, (p) => {
           p.entries = Array.isArray(env.content.entries)
             ? (env.content.entries as Array<Record<string, unknown>>)
             : undefined;
         });
         return;
-      case "record_done":
+      case 'record_done':
         this.updateToolPart(env, (p) => {
-          p.state = "done";
+          p.state = 'done';
           p.durationS =
-            typeof env.content.duration_s === "number" ? env.content.duration_s : undefined;
+            typeof env.content.duration_s === 'number' ? env.content.duration_s : undefined;
         });
         return;
-      case "record_failed": {
+      case 'record_failed': {
         const err = env.content.error;
         this.updateToolPart(env, (p) => {
-          p.state = "failed";
+          p.state = 'failed';
           p.error =
-            typeof err === "object" && err !== null
+            typeof err === 'object' && err !== null
               ? {
-                  type: String((err as Record<string, unknown>).type ?? ""),
-                  message: String((err as Record<string, unknown>).message ?? ""),
+                  type: String((err as Record<string, unknown>).type ?? ''),
+                  message: String((err as Record<string, unknown>).message ?? ''),
                 }
               : undefined;
         });
         return;
       }
-      case "record_void":
+      case 'record_void':
         this.updateToolPart(env, (p) => {
-          p.state = "void";
+          p.state = 'void';
         });
         return;
     }
@@ -296,7 +296,7 @@ export class Mapper {
    * pending（输入框上方的等待卡），等 turn_started 消费。
    */
   private onUserInput(env: Envelope): void {
-    const text = typeof env.content.text === "string" ? env.content.text : "";
+    const text = typeof env.content.text === 'string' ? env.content.text : '';
     if (!text) return;
     this.pendingTexts.push(text);
     // 通知等待卡：没有轮变化，只推版本号
@@ -335,9 +335,9 @@ export class Mapper {
       bootId: env.boot_id ?? null,
       closed: false,
       parts: consumed.map((text, i): Part => ({
-        kind: "text",
+        kind: 'text',
         id: `${key}:u${i}`,
-        role: "user",
+        role: 'user',
         text,
       })),
     };
@@ -396,8 +396,8 @@ export class Mapper {
     const seen = this.partIndex.get(id);
     if (seen) {
       const part = seen.round.parts[seen.index];
-      if (part?.kind === "text") {
-        part.text = "";
+      if (part?.kind === 'text') {
+        part.text = '';
         part.streaming = true;
         part.cancelled = false;
         this.emit(seen.round);
@@ -408,10 +408,10 @@ export class Mapper {
     const round = this.ensureOpen(env);
 
     const part: TextPart = {
-      kind: "text",
+      kind: 'text',
       id,
-      role: "assistant",
-      text: "",
+      role: 'assistant',
+      text: '',
       streaming: true,
     };
     round.parts.push(part);
@@ -421,16 +421,16 @@ export class Mapper {
 
   private onRecordStarted(env: Envelope): void {
     const round = this.ensureOpen(env);
-    const category = String(env.content.category ?? "unknown");
+    const category = String(env.content.category ?? 'unknown');
     const payload =
-      typeof env.content.payload === "object" && env.content.payload !== null
+      typeof env.content.payload === 'object' && env.content.payload !== null
         ? (env.content.payload as Record<string, unknown>)
         : {};
     const part: ToolPart = {
-      kind: "tool",
+      kind: 'tool',
       id: env.id!,
       category,
-      state: "running",
+      state: 'running',
       title: toolTitle(category, payload),
     };
     round.parts.push(part);
@@ -442,7 +442,7 @@ export class Mapper {
     const loc = this.partIndex.get(env.id!);
     if (!loc) return;
     const part = loc.round.parts[loc.index];
-    if (!part || part.kind !== "text") return;
+    if (!part || part.kind !== 'text') return;
     mutate(part);
     this.emit(loc.round);
   }
@@ -451,7 +451,7 @@ export class Mapper {
     const loc = this.partIndex.get(env.id!);
     if (!loc) return;
     const part = loc.round.parts[loc.index];
-    if (!part || part.kind !== "tool") return;
+    if (!part || part.kind !== 'tool') return;
     mutate(part);
     this.emit(loc.round);
   }
