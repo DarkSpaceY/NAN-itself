@@ -8,7 +8,7 @@ Layers implemented (docs/vision-design.md):
     L3  structure     optical flow, motion blob, saliency
     L4  events        glance slicing (the visual utterance)
     L5  objects       faces via face_recognition; YOLO if a model
-                      has been dropped into models/vision/object
+                      has been dropped into data/object
     L6  semantics     person registry, QR, OCR (easyocr)
     L7  caption       VLM caption of the current glance
                       (SmolVLM2-500M-Video-Instruct)
@@ -1239,7 +1239,7 @@ class QrScanner:
 class OcrReader:
     """
     Lazy easyocr adapter. Model weights are expected under the
-    repo models/easyocr directory; init is heavy (seconds), so
+    module's data/easyocr directory; init is heavy (seconds), so
     the module gates calls behind its own interval.
     """
 
@@ -1289,7 +1289,7 @@ class YoloOnnxDetector:
     contract (output [1, 4+classes, N]).
 
     Activates with the auto-downloaded COCO YOLOv8n at
-    models/vision/object/model.onnx (labels.txt written alongside,
+    data/object/model.onnx (labels.txt written alongside,
     one name per line, background not listed). A custom export can
     replace both files by hand.
     Missing model -> load() raises -> the failure propagates out
@@ -1514,7 +1514,7 @@ class VlmCaptioner:
     Deliberately the most cross-platform path available: plain
     transformers/torch runs on any OS (CPU), CUDA (NVIDIA) and
     MPS (Apple Silicon) -- no MLX, no GGUF toolchain, no per-OS
-    builds. Weights live under models/vision/vlm/<snapshot>;
+    builds. Weights live under data/vlm/<snapshot>;
     a missing directory is downloaded from the Hub during module
     provisioning in start() (respects HF_ENDPOINT / proxy env
     vars), never inside the tick loops; a failing download
@@ -2101,7 +2101,7 @@ class VisionModule(Module):
 
     # First-run weight source for the objects backend (standard
     # COCO-80 pretrained YOLOv8n). Missing weights are downloaded
-    # into models/vision/object/ during provisioning.
+    # into data/object/ during provisioning.
     objects_repo: str = "kshitijjjjjjjjjjjjjjjj/yolov8n-coco-onnx"
 
     objects_filename: str = "yolov8n.onnx"

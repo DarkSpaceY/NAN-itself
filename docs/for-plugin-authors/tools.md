@@ -2,7 +2,8 @@
 
 A tool is a callable capability the agent reaches through the
 `invoke_tool` verb. Tools are grouped into **providers**; each provider
-is one source file, loaded and hot-reloaded by
+is one source (an MCP YAML file or a local tool folder), loaded and
+hot-reloaded by
 [`ProviderRuntime`](../../backend/nan_itself/tools/runtime.py). This
 document describes the tool subsystem: its two provider kinds, the
 source layout, the reload model, the call bounds, and the verb surface.
@@ -21,7 +22,7 @@ Two interchangeable kinds exist, distinguished by `ProviderSpec.kind`
 | Kind | Source | Backend | Live object |
 |---|---|---|---|
 | `mcp` | one YAML file | stdio MCP server (subprocess) | `Provider.stack` + `Provider.session` |
-| `local` | one Python file | in-process Python class | `Provider.instance` (a `ToolSet`) |
+| `local` | one folder (`main.py`) | in-process Python class | `Provider.instance` (a `ToolSet`) |
 
 Both kinds populate the same `Provider.tools` table (`dict[str,
 mcp.types.Tool]`) and are invoked through the same `Provider.call_tool`
@@ -122,15 +123,15 @@ connection but is not visible through `providers` until the transaction
 commits. Only after the candidate is fully connected is it committed
 into the live tables, and only then is the old generation asked to stop.
 Old and new generations of the same provider name therefore coexist
-during the handoff. Deleting a source file removes its provider.
+during the handoff. Deleting a source removes its provider.
 
 A dedicated supervisor task reconciles sources every
 `providers.scan_interval` seconds (1.0 s default), reaps dead MCP
 workers, and reschedules failed sources with the shared exponential
 backoff. Local providers are rebuilt by re-reading and re-compiling the
-source file (never through the bytecode cache, which could serve stale
-code); the previous synthetic module name is evicted from `sys.modules`.
-A degraded provider never kills the runtime.
+folder's Python sources (never through the bytecode cache, which could
+serve stale code); the previous synthetic module name is evicted from
+`sys.modules`. A degraded provider never kills the runtime.
 
 ## Call bounds and results
 
@@ -183,7 +184,8 @@ The shipped providers are:
   `touchpoint`).
 - Local Python providers in
   [`builtin/tools/local/`](../../builtin/tools/local/) (the web search
-  provider `SearchProvider`, id `search`, exposing `web_search`).
+  provider in `search/`, folder name = provider name, exposing
+  `web_search`).
 
 The tool surface is still evolving; the sources above are the
 authoritative list.

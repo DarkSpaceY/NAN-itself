@@ -1779,7 +1779,7 @@ class PyannoteEmbedder:
                     "pyannote weights are not cached and no HF "
                     "token is configured; accept the model terms "
                     "on huggingface.co and set "
-                    "diarization_token in config/modules/voice.yaml"
+                    "diarization_token in config.yaml"
                 ) from None
 
             path = huggingface_hub.snapshot_download(

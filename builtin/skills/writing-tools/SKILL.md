@@ -1,33 +1,38 @@
 ---
 name: writing-tools
 description: >-
-  How to write a tool provider for NAN-itself: a local Python provider file
-  in builtin/tools/local/ or workspace/tools/local/ (# @tool header, one
-  ToolSet subclass, @tool methods with type-annotation-derived
-  schema), or an MCP server YAML in tools/mcps/. Use when the user asks to
-  create, fix, or extend a tool.
+  How to write a tool provider for NAN-itself: a local Python provider
+  folder in builtin/tools/local/ or workspace/tools/local/ (one ToolSet
+  subclass in main.py, @tool methods with type-annotation-derived
+  schema), or an MCP server YAML in tools/mcps/. Use when the user asks
+  to create, fix, or extend a tool.
 ---
 
 # Writing a Tool
 
-Tools come in two interchangeable kinds, both hot-reloaded from
-`builtin/tools/` (shipped) and `workspace/tools/` (user territory):
-**one file = one provider** in both cases.
+Tools come in two kinds, both hot-reloaded from `builtin/tools/`
+(shipped) and `workspace/tools/` (user territory): MCP = **one YAML
+file**, local Python = **one folder**.
 
 ## Kind 1: local Python provider
 
-File: `tools/local/<name>.py`.
+Folder: `tools/local/<name>/` with a `main.py` defining exactly one
+concrete `ToolSet` subclass. The provider's identity is the **folder
+name** — there is no `id` to declare; a declared `id` is ignored.
 
-- First 20 lines must contain the literal header `# @tool` (convention:
-  line 1, before the docstring).
-- Exactly one `ToolSet` subclass per file, with a unique
-  ClassVar `id`.
+```
+<name>/
+├── main.py        # the ToolSet subclass (required)
+├── helper.py      # optional siblings (`from . import helper`)
+├── config.yaml    # optional (e.g. search's searxng settings)
+└── data/          # private, never imported / fingerprinted
+```
+
 - `ToolSet`, `@tool`, `text_result` and `error_result` are
-  **injected** into the file namespace — the file needs no framework
-  imports to hot-reload.
+  **injected** into every `.py` of the folder — the files need no
+  framework imports to hot-reload.
 
 ```python
-# @tool
 """One-line provider description."""
 
 from __future__ import annotations
@@ -36,8 +41,6 @@ from typing import Any
 
 
 class MyProvider(ToolSet):
-    id = "<name>"
-
     @tool
     async def do_thing(self, query: str, limit: int = 10) -> Any:
         """What the tool does (model-facing summary).
@@ -64,8 +67,9 @@ Method rules:
 - Every call is timeout-bounded (300 s default,
   `providers.tool_timeout` in settings); timeouts surface as error
   results, never hang the loop.
-- Subprocesses / network calls: never depend on the process cwd; anchor
-  repo-relative paths through `nan_itself.utils.paths`.
+- Subprocesses / network calls: never depend on the process cwd;
+  anchor repo-relative paths to the provider folder
+  (`Path(__file__).resolve().parent`) or the repo root.
 
 ## Kind 2: MCP server
 
@@ -89,8 +93,9 @@ in-process capabilities.
 
 ## Checklist
 
-- [ ] `# @tool` in the first 20 lines; exactly one provider subclass
-- [ ] unique `id`; every `@tool` method fully annotated with a docstring
+- [ ] exactly one ToolSet subclass in `main.py`; folder name = provider
+      name
+- [ ] every `@tool` method fully annotated with a docstring
 - [ ] heavy imports inside method bodies
 - [ ] no cwd-relative paths; secrets come from settings/env, never
       hardcoded
@@ -98,10 +103,10 @@ in-process capabilities.
 Validate before finishing:
 
 ```bash
-uv run python builtin/skills/writing-tools/scripts/check_tool.py <tool.py>
+uv run python builtin/skills/writing-tools/scripts/check_tool.py builtin/tools/local/<name>
 ```
 
-Details: [references/example-tool.py](references/example-tool.py)
+Details: [references/example-tool/](references/example-tool/)
 (annotated local provider),
 [references/mcp-yaml.md](references/mcp-yaml.md) (full YAML field
 reference and recipes).

@@ -26,7 +26,7 @@ organized so you can go straight to the page that matches what you need.
 | Document | Contents |
 |---|---|
 | [Get started](docs/for-users/get-started.md) | Quick start: install, configure, start, converse |
-| [Configuration](docs/for-users/configuration.md) | core `settings.yaml` + per-module `config/modules/*.yaml` reference |
+| [Configuration](docs/for-users/configuration.md) | core `settings.yaml` + per-plugin `config.yaml` reference |
 | [Add a tool](docs/for-plugin-authors/add-a-tool.md) | Create an MCP or local Python tool provider |
 | [Add a module](docs/for-plugin-authors/add-a-module.md) | Create an ambient or reactive module |
 | [Add a skill](docs/for-plugin-authors/add-a-skill.md) | Create a skill package |
@@ -46,10 +46,10 @@ organized so you can go straight to the page that matches what you need.
 - **Hot-reloadable tool providers** — two interchangeable kinds, reloaded
   live from source with zero restarts:
   - **MCP providers**: one YAML file = one stdio MCP server.
-  - **Local providers**: one Python file = one in-process tool class.
+  - **Local providers**: one folder = one in-process tool class.
 - **Parallel builtin + workspace sources** — builtin and workspace tool
   directories are scanned with identical hot-reload semantics; deleting a
-  source file disables its provider.
+  source disables its provider.
 - **Ambient perception modules** — audio, vision (photometry → flow →
   faces → YOLO → OCR → VLM captioning), inbox, network and system modules
   run as background daemons and contribute ambient context every turn.
@@ -98,10 +98,11 @@ uv run nan-itself
 
 The gateway listens on `http://127.0.0.1:8765` by default; the web UI is
 served from the same port. On first run the perception modules download
-their model weights (`models/`, gitignored). A module whose weights are
-missing or fail to load crashes loudly at start, shows the error, and
-keeps retrying with backoff — it revives automatically once the weights
-land. Nothing runs silently at half capacity.
+their model weights into each module folder's `data/` (gitignored). A
+module whose weights are missing or fail to load crashes loudly at
+start, shows the error, and keeps retrying with backoff — it revives
+automatically once the weights land. Nothing runs silently at half
+capacity.
 
 ## Development
 
@@ -114,7 +115,7 @@ CI runs the framework/contract suite. Tests for the builtin content —
 the shipped modules and tools that pull in the full local-inference
 stack — live in `tests/builtin/` and are excluded there.
 
-Contributor conventions (path anchoring, one-file-one-provider, hot-reload
+Contributor conventions (path anchoring, one-folder-one-unit, hot-reload
 contracts) are documented in
 [docs/for-contributors/develop.md](docs/for-contributors/develop.md).
 
@@ -123,22 +124,22 @@ contracts) are documented in
 ```
 NAN-itself/
 ├── builtin/              # Shipped sources (hot-reloadable)
-│   ├── modules/          # Ambient + reactive modules (audio, voice, vision, ...)
+│   ├── modules/          # Ambient + reactive modules, one folder each
+│   │                     # (audio, voice, vision, ...; data/ holds weights + state)
 │   ├── skills/           # Built-in skills
 │   └── tools/
 │       ├── mcps/         # MCP server configs (one YAML = one provider)
-│       └── local/        # Local Python tool providers (one file = one provider)
+│       └── local/        # Local tool providers (one folder = one provider)
 ├── workspace/            # User-editable overrides (same layout as builtin/)
-├── config/               # settings.yaml, per-module configs, tool settings (e.g. searxng.yml)
+├── config/               # settings.yaml
 ├── backend/nan_itself/   # Framework source
 │   ├── agent/            # Core agent loop (turns, engine, verbs)
 │   ├── tools/            # Provider runtime (MCP + local backends, hot reload)
 │   ├── modules/          # Module machinery (Facade, channels, persistence)
 │   ├── skills/           # Skill machinery
 │   ├── gateway.py        # HTTP gateway
-│   └── utils/            # paths, backoff, vision/audio helpers
+│   └── utils/            # paths, hotload (shared detection/loading), backoff
 ├── frontend/             # Demo web UI
-├── models/               # Model weights (gitignored, auto-downloaded)
 ├── docs/                 # Documentation
 └── tests/                # Pytest suite
 ```

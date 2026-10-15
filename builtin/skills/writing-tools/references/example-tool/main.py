@@ -3,8 +3,8 @@ Digest provider: file hashing utilities, kept deliberately small
 to show the full local-provider contract.
 
 Annotated example of a local Python tool provider:
-- `# @tool` header in the first 20 lines (before the docstring),
-- exactly one ToolSet subclass with a unique `id`,
+- one folder; `main.py` defines exactly one ToolSet subclass
+  (identity = the folder name; a declared `id` is ignored),
 - @tool methods fully annotated (schema derives from annotations),
 - docstring with an Args: section for every parameter,
 - no framework imports: ToolSet / @tool / text_result /
@@ -18,8 +18,6 @@ from typing import Any
 
 
 class DigestProvider(ToolSet):
-    id = "digest"
-
     @tool
     async def sha256(
         self,

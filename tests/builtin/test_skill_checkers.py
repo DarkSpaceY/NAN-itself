@@ -49,7 +49,6 @@ def _module_source(requires: str) -> str:
     tuple or a list can be exercised side by side.
     """
     return (
-        "# @module\n"
         '"""Checker fixture module."""\n'
         "\n"
         "from __future__ import annotations\n"
@@ -58,8 +57,6 @@ def _module_source(requires: str) -> str:
         "\n"
         "\n"
         "class FixtureModule(Module):\n"
-        "\n"
-        '    id = "fixture"\n'
         "\n"
         "    requires: ClassVar[tuple[str, ...]] = "
         f"{requires}\n"

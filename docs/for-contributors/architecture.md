@@ -17,10 +17,9 @@ NAN-itself/
 ├── backend/nan_itself/   # Framework source (Python package `nan_itself`)
 ├── builtin/              # Shipped tools / modules / skills
 ├── workspace/            # User-editable tools / modules / skills + persona
-├── config/               # settings.yaml, searxng.yml
+├── config/               # settings.yaml
 ├── frontend/             # Web UI (React + assistant-ui; see "frontend/" below)
 ├── infraend/             # Planned infra backend (not covered here)
-├── models/               # Downloaded model weights (runtime-managed)
 ├── docs/                 # This documentation
 └── tests/                # Contract and integration tests
 ```
@@ -231,7 +230,7 @@ never relies on timing heuristics.
 
 Two parallel provider layouts, scanned with identical semantics —
 `builtin/` ships with the repo, `workspace/` is user territory
-(deleting a source file removes its provider; edits hot-reload).
+(deleting a source removes its provider; edits hot-reload).
 
 | Slot | Builtin | Workspace |
 |---|---|---|

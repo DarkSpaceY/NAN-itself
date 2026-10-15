@@ -61,10 +61,10 @@ uv run pytest -q --ignore=tests/builtin   # framework suite only
 These are load-bearing — violating any of them breaks guarantees the test
 suite enforces.
 
-- **Path anchoring.** Every repo-relative path (`data/`, `models/`,
-  `config/`, `builtin/`) must resolve through
+- **Path anchoring.** Every repo-relative path (`data/`, `config/`,
+  `builtin/`) must resolve through
   [`backend/nan_itself/utils/paths.py`](../../backend/nan_itself/utils/paths.py)
-  (`repo_root()` / `data_dir()` / `models_dir()`). Never use
+  (`repo_root()` / `data_dir()`). Never use
   cwd-relative defaults or private `parents[N]` lookups — the process
   must behave identically when started from any directory.
 - **One folder = one unit.** Each source folder in `builtin/` or
@@ -113,7 +113,7 @@ appear in docs or comments.
 | Engine | `StepEngine` (`agent/engine.py`) | Executes one round: builds the snapshot, calls the LLM, renders the turn. | runtime, orchestrator, scheduler |
 | Turn | `Turn` (`modules/model.py`) | The sole record of one LLM round. | round, iteration, message |
 | Verb | `list_tools` / `show_tool` / `invoke_tool`, plus the same triple for skills and channels (`agent/verbs.py`) | A cognitive action the model can take. Tools and skills use singular names, channels plural. | command, action, function |
-| Tool provider | `Provider` / `ProviderRuntime` (`tools/`) | One source file exposing a group of tools. | plugin, connector, tool manager |
+| Tool provider | `Provider` / `ProviderRuntime` (`tools/`) | One source (MCP YAML file or local tool folder) exposing a group of tools. | plugin, connector, tool manager |
 | MCP provider | kind `"mcp"` (`tools/spec.py`) | A provider backed by a stdio MCP server described by a YAML file. | remote tool, external tool |
 | Local provider | kind `"local"` (`tools/spec.py`) | A provider backed by an in-process Python class. | in-process tool, Python tool |
 | ToolSet | `ToolSet` (`tools/local.py`) | Base class for a local provider; holds its `@tool` methods. | LocalToolProvider, Tool, Provider |

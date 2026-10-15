@@ -196,7 +196,7 @@ class ProviderRuntime:
 
         # Builtin and workspace sources live in parallel directory
         # layouts and are scanned with exactly the same hot-reload
-        # logic. Deleting a source file disables its provider.
+        # logic. Deleting a source disables its provider.
         self.builtin_mcps_dir = (project_root / "builtin" / "tools" / "mcps").resolve()
 
         self.builtin_locals_dir = (project_root / "builtin" / "tools" / "local").resolve()
@@ -906,9 +906,9 @@ class ProviderRuntime:
         """
         Detect unexpectedly terminated current MCP workers.
 
-        The worker's source file is marked for reload by removing
+        The worker's source is marked for reload by removing
         its source bookkeeping, so the next scan reconnects it —
-        or removes it cleanly when the file is gone. This policy
+        or removes it cleanly when the source is gone. This policy
         is the same for builtin and workspace sources.
         """
         dead: list[tuple[str, _MCPWorker]] = []
@@ -1164,7 +1164,7 @@ class ProviderRuntime:
 
         # --------------------------------------------------------------
         # Validate ownership before starting candidates:
-        # one provider name belongs to exactly one source file.
+        # one provider name belongs to exactly one source.
         # --------------------------------------------------------------
 
         for spec in specs:

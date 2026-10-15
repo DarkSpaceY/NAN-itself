@@ -951,8 +951,8 @@ class EchoTranscriber:
 
 class WhisperTranscriber:
     """
-    Lazy faster-whisper adapter. model files stay under the repo
-    models/whisper cache; import happens on first use so units
+    Lazy faster-whisper adapter. model files stay under the module's
+    data/whisper cache; import happens on first use so units
     without the package still collect cleanly.
     """
 
@@ -1319,7 +1319,7 @@ class SherpaSpeakerEmbedder:
     """
     sherpa-onnx speaker-embedding adapter (CAM++ / ECAPA-class
     ONNX models). Lazy import + lazy load; nothing here touches
-    torch. Model binary lives under models/speaker/.
+    torch. Model binary lives under data/speaker/.
     """
 
     def __init__(
