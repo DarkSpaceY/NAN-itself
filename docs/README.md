@@ -18,6 +18,7 @@ injection, and the shell as the universal tool surface.
 | [for-service-authors/injection-service.md](for-service-authors/injection-service.md) | Write a prompt-contributor service |
 | [for-contributors/architecture.md](for-contributors/architecture.md) | How the core is built |
 | [for-contributors/principles.md](for-contributors/principles.md) | The design rules behind it |
+| [for-contributors/frontend-protocol.md](for-contributors/frontend-protocol.md) | The event stream contract for the frontend |
 | [for-contributors/develop.md](for-contributors/develop.md) | Test, lint, type-check |
 
 ## Repository layout
