@@ -1,14 +1,14 @@
 [project]
 name = "nan-itself"
 version = "0.1.0"
-description = "A self-contained, local-first agent framework with hot-reloadable tools, skills and perception modules"
+description = "A self-contained, local-first agent core: one loop per agent, handles for multi-agent, external services for injection"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
     { name = "DarkSpaceY", email = "yif.chien.nolimit@gmail.com" }
 ]
-keywords = ["agent", "llm", "mcp", "hot-reload", "local-first", "ai"]
+keywords = ["agent", "llm", "local-first", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -20,54 +20,12 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.122.0",
     "fastapi>=0.141.1",
-    "fastmcp>=2.14.1",
     "loguru>=0.7.3",
-    "mcp<3",
-    "num2words>=0.5.14",
     "openai>=3.2.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.15.0",
-    "python-dotenv>=1.2.3",
     "pyyaml>=6.0.2",
-    "soar-sml>=9.6.5",
     "uvicorn>=0.30.0",
-]
-
-# The dependencies of the builtin plugins -- the modules and tools that
-# ship under builtin/ and are loaded like any other hot-reloadable
-# source. They are a separate feature set, not a prerequisite of the
-# framework: `uv sync` installs the framework alone, and the audio,
-# voice, vision, network and system modules come up loudly failed until
-# you opt in.
-#
-#     uv sync --all-extras     # framework + builtin plugins
-#
-# CI installs the framework only; its tests for the builtin content live
-# in tests/builtin/ and are excluded there.
-[project.optional-dependencies]
-perception = [
-    "easyocr>=1.7.2",
-    "face-recognition>=1.3.0",
-    "face-recognition-models>=0.3.0",
-    "faster-whisper>=1.2.1",
-    "huggingface-hub>=0.30.0",
-    "httpx>=0.28.1",
-    "mss>=10.2.0",
-    "numpy>=1.26.0",
-    "onnxruntime>=1.20.0",
-    "opencv-python-headless>=4.10.0",
-    "pillow>=12.3.0",
-    "psutil>=7.0.0",
-    "pyannote.audio>=3.3.2",
-    "pywhispercpp>=1.5.0",
-    # Pinned below 81: face_recognition_models still uses
-    # pkg_resources (removed from setuptools 81+).
-    "setuptools>=80.9.0,<81",
-    "sherpa-onnx>=1.13.6",
-    "sounddevice>=0.5.6",
-    "soundfile>=0.13.1",
-    "transformers>=4.49.0",
-    "webrtcvad-wheels>=2.0.14",
 ]
 
 [project.urls]
@@ -77,6 +35,7 @@ Issues = "https://github.com/DarkSpaceY/NAN-itself/issues"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1", # gateway-guard tests hit the real HTTP server
     "mypy>=1.18.0",
     "pre-commit>=4.0.0",
     "pytest>=9.1.1",
@@ -86,15 +45,14 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-# Names injected into hot-reloadable builtin modules by the framework loader.
-builtins = ["Module", "Turn", "ToolSet", "tool"]
-# First-party code only; vendored/experimental trees are excluded.
+# First-party code only; vendored/experimental/legacy trees are excluded.
 extend-exclude = [
     "models",
     "paper_search",
     "workspace",
     "data",
     "frontend",
+    "legacy",
 ]
 
 [tool.ruff.lint]
@@ -115,27 +73,26 @@ ignore = [
 "tests/**" = ["B011"]
 
 [project.scripts]
-nan-itself = "nan_itself:main"
+nan = "nan.app:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-root = "backend"
+# The distribution is nan-itself; the importable package is nan/
+# at the repository root.
+module-name = "nan"
+module-root = ""
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 
-# Loose-start mypy: framework code only (builtin/ plugins are hot-reloaded
-# and depend on optional extras), new code should not add new errors.
 [tool.mypy]
 python_version = "3.12"
-files = ["backend/nan_itself"]
-exclude = ["^builtin/", "^tests/", "^models/", "^paper_search/"]
-mypy_path = "backend"
-explicit_package_bases = true
+files = ["nan"]
+exclude = ["^tests/", "^models/", "^paper_search/", "^legacy/"]
 
 # Global looseness for the existing codebase; tighten incrementally.
 check_untyped_defs = true
