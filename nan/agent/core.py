@@ -239,16 +239,6 @@ class Agent:
 
         child.start()
 
-        sink.emit(
-            "record_started",
-            content={
-                "category": "subagent_spawn",
-                "payload": {"agent_id": child.agent_id, "depth": child.depth, "task": task},
-                "agent_id": self.agent_id,
-                "depth": self.depth,
-            },
-        )
-
         return child, None
 
     # ==================================================================
@@ -307,6 +297,8 @@ class Agent:
         """
         self._paused = True
 
+        sink.emit("agent_paused", content={"agent_id": self.agent_id})
+
         task = self._turn_task
 
         if task is not None and not task.done():
@@ -316,6 +308,8 @@ class Agent:
         """Lift the pause; the loop opens a clean turn."""
         self._paused = False
 
+        sink.emit("agent_resumed", content={"agent_id": self.agent_id})
+
         self._resumed.set()
 
     # ==================================================================
@@ -324,6 +318,18 @@ class Agent:
 
     async def loop(self) -> None:
         self._started = True
+
+        sink.emit(
+            "agent_started",
+            content={
+                "agent_id": self.agent_id,
+                "depth": self.depth,
+                "parent_id": (self.parent.agent_id if self.parent else None),
+                "pacing": (
+                    "interval" if self.config.autonomous_interval > 0 else "event-driven"
+                ),
+            },
+        )
 
         cancelled = False
 
@@ -363,8 +369,18 @@ class Agent:
 
                     raise
 
-                except Exception:
+                except Exception as exc:
                     delay, backoff_index = next_backoff(self.config.backoff, backoff_index)
+
+                    sink.emit(
+                        "turn_failed",
+                        content={
+                            "agent_id": self.agent_id,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "backoff_s": delay,
+                            "retry_index": backoff_index - 1,
+                        },
+                    )
 
                     logger.exception("[{}] Turn failed; backing off {}s", self.agent_id, delay)
 
@@ -424,6 +440,11 @@ class Agent:
             # The turn dies whole (pause or agent death): nothing
             # rendered, nothing in history; drained inputs go
             # back for the next (clean) turn.
+            sink.emit(
+                "turn_cancelled",
+                content={"agent_id": self.agent_id, "requeued_count": len(drained)},
+            )
+
             for message in drained:
                 self._deliver(message)
 
@@ -453,16 +474,38 @@ class Agent:
             delta=tuple(delta_events),
         )
 
+        sink.emit(
+            "turn_started",
+            content={
+                "agent_id": self.agent_id,
+                "turn_index": self.cycles + 1,
+                "inbox_count": len(drained),
+            },
+        )
+
         contributions, service_events = await self.injections.collect(skeleton)
+
+        sink.emit(
+            "injections_collected",
+            content={
+                "agent_id": self.agent_id,
+                "services": [
+                    {
+                        "service_id": i.service_id,
+                        "ok": i.ok,
+                        "duration_s": i.duration_s,
+                        "text_len": len(i.text),
+                    }
+                    for i in contributions
+                ],
+            },
+        )
 
         turn = replace(
             skeleton,
             injections=contributions,
             delta=tuple([*delta_events, *service_events]),
         )
-
-        if self.depth == 0:
-            sink.emit("turn_started", content={"agent_id": self.agent_id})
 
         # -- think --------------------------------------------------------
         messages = [
@@ -510,6 +553,19 @@ class Agent:
 
         self._clear_history_over_limit()
 
+        sink.emit(
+            "turn_done",
+            content={
+                "agent_id": self.agent_id,
+                "turn_index": self.cycles + 1,
+                "usage": (turn.llm.usage.model_dump() if turn.llm and turn.llm.usage else None),
+                "latency_s": (turn.llm.latency_s if turn.llm else 0.0),
+                "retries": (turn.llm.retries if turn.llm else 0),
+                "calls": len(turn.calls),
+                "history_chars": sum(len(m.content or "") for m in self._messages),
+            },
+        )
+
         return turn
 
     # ==================================================================
@@ -543,36 +599,26 @@ class Agent:
     # ==================================================================
 
     async def _run_call(self, call: Any) -> str:
-        record_id = ""
-
-        if call.name != "spawn":
-            record_id = sink.emit(
-                "record_started",
-                content={
-                    "category": "verb_call",
-                    "payload": {"verb": call.name, "arguments": call.arguments},
-                    "agent_id": self.agent_id,
-                    "depth": self.depth,
-                },
-            )
-
         started = time.time()
+
+        sink.emit(
+            "verb_started",
+            content={"agent_id": self.agent_id, "verb": call.name, "arguments": call.arguments},
+        )
 
         verb = VERBS.get(call.name)
 
         if verb is None:
             result = f"Unknown action '{call.name}'. Available: {', '.join(VERBS)}."
 
-            if record_id:
-                sink.emit(
-                    "record_failed",
-                    id=record_id,
-                    content={
-                        "error": {"type": "unknown_verb", "message": result},
-                        "agent_id": self.agent_id,
-                        "depth": self.depth,
-                    },
-                )
+            sink.emit(
+                "verb_failed",
+                content={
+                    "agent_id": self.agent_id,
+                    "verb": call.name,
+                    "error": {"type": "unknown_verb", "message": result},
+                },
+            )
 
             return result
 
@@ -580,39 +626,30 @@ class Agent:
             result = await verb.execute(call=call, agent=self)
 
         except Exception as exc:
-            if record_id:
-                sink.emit(
-                    "record_failed",
-                    id=record_id,
-                    content={
-                        "error": {"type": type(exc).__name__, "message": str(exc)},
-                        "agent_id": self.agent_id,
-                        "depth": self.depth,
-                    },
-                )
+            sink.emit(
+                "verb_failed",
+                content={
+                    "agent_id": self.agent_id,
+                    "verb": call.name,
+                    "error": {"type": type(exc).__name__, "message": str(exc)},
+                },
+            )
 
             raise
 
-        if record_id:
-            sink.emit(
-                "record_detail",
-                id=record_id,
-                content={
-                    "entries": [{"kind": "text", "text": result[:2000]}],
-                    "agent_id": self.agent_id,
-                    "depth": self.depth,
-                },
-            )
+        sink.emit(
+            "verb_result",
+            content={"agent_id": self.agent_id, "verb": call.name, "text": result[:2000]},
+        )
 
-            sink.emit(
-                "record_done",
-                id=record_id,
-                content={
-                    "duration_s": time.time() - started,
-                    "agent_id": self.agent_id,
-                    "depth": self.depth,
-                },
-            )
+        sink.emit(
+            "verb_done",
+            content={
+                "agent_id": self.agent_id,
+                "verb": call.name,
+                "duration_s": time.time() - started,
+            },
+        )
 
         return result
 
@@ -667,6 +704,17 @@ class Agent:
                 self.parent.note_delta("subagent", f"-{self.agent_id} died: {reason}")
 
         self.book.unregister(self.agent_id)
+
+        reason = (
+            "finished"
+            if self.report is not None
+            else (self._death_reason or ("cancelled" if cancelled else "exited"))
+        )
+
+        sink.emit(
+            "agent_exited",
+            content={"agent_id": self.agent_id, "reason": reason, "report": self.report},
+        )
 
         logger.info(
             "[{}] stopped after {} cycles ({})",
