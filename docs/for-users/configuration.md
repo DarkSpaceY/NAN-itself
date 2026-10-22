@@ -1,132 +1,86 @@
 # Configuration
 
-Configuration lives in two central files plus per-entity files inside
-each plugin folder, and there are no environment variables to set:
+The single source is `config/nan.yaml`. Nothing else is read: no
+environment variables, no dotenv files. Relative paths in the
+YAML resolve against the config file's grandparent (the repo
+root). An alternative file can be passed as the first CLI
+argument (`uv run nan path/to/nan.yaml`); its grandparent then
+anchors the paths.
 
-- `config/settings.yaml` — core framework parameters only. Modules
-  never appear here.
-- `<plugin folder>/config.yaml` — one file per module or local tool,
-  loaded and validated by the entity itself.
-- `config/sources.yaml` — the source block list (see below).
+## llm
 
-## settings.yaml
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `provider` | `"openai"` | The active entry: `"openai"`, `"anthropic"`, or the key of a profile below |
+| `base_url` | `""` | Endpoint URL; empty = provider default |
+| `api_key` | `""` | Empty = SDK default behavior (env fallback inside the SDK) |
+| `model` | `""` | Model name sent to the endpoint |
+| `timeout` | `120.0` | Per-request timeout (seconds) |
+| `max_retries` | `2` | SDK-level retry count |
+| `providers` | `{}` | Named endpoint profiles (see below) |
 
-Core settings only (LLM, gateway, agent, module/provider machinery,
-events). The file ships with every field written out; values may be
-edited in place, and code defaults back anything you delete.
+A profile overrides the base fields it sets; the profile's own
+`provider` field carries the protocol type. Example -- a local
+27B model behind llama.cpp:
 
-```yaml
-llm:
-  provider: openai          # client protocol (openai-compatible endpoints work)
-  api_key: xxx              # your key (local servers accept any placeholder)
-  model: qwen3.5:4b-mlx     # model identifier
-  base_url: http://127.0.0.1:11434/v1
-  timeout: 600
-  max_retries: 2
+    llm:
+      provider: local27b
+      providers:
+        local27b:
+          provider: openai          # OpenAI-compatible protocol
+          base_url: http://127.0.0.1:8080/v1
+          model: qwen-27b
+          api_key: none
 
-gateway:
-  host: 127.0.0.1           # keep on loopback unless you know what you expose
-  port: 8765
+## agent
 
-agent:
-  max_subagent_depth: 3
-  history_char_limit: 100000
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `autonomous_interval` | `0.0` | `>0`: the root agent self-rotates with this pacing (seconds); `<=0`: event-driven (turns happen when input arrives) |
+| `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history (a reset, not a rewrite) |
+| `shell_timeout` | `30.0` | `shell` verb execution timeout; the model cannot change it |
+| `shell_output_limit` | `20000` | `shell` verb output truncation size (head + tail kept, middle elided) |
+| `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Turn-failure retry ladder (seconds); a failed turn is retried whole after these delays |
+| `max_depth` | `3` | Spawn depth limit; `-1` = unlimited |
+| `max_children` | `5` | Per-agent children limit; `-1` = unlimited |
+| `persona_path` | `nan/persona.md` | The persona file, re-read every turn; must exist at boot |
 
-skills:
-  resource_char_limit: 100000
-  script_timeout: 300.0
+## sandbox
 
-runtime:
-  retry:
-    backoff: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Wrap `shell` commands in the OS-level sandbox |
+| `required` | `false` | `true`: refuse to execute when no sandbox tool exists (instead of running degraded) |
 
-modules:
-  retry_interval: 1.0
-  scan_interval: 1.0
+## injection
 
-providers:
-  scan_interval: 1.0        # hot-reload scan period (seconds)
-  tool_timeout: 300.0       # per tool call, seconds
+The registry the external prompt-contributor services talk to.
 
-events:
-  history_limit: 500
-  subscriber_queue_size: 2000
-  input_dedup_cache_size: 256
-```
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `host` | `127.0.0.1` | Registry listen address |
+| `port` | `8901` | Registry port |
+| `timeout` | `2.0` | Per-service, per-turn collection timeout |
+| `heartbeat_ttl` | `15.0` | A service silent longer than this is evicted from the live set |
 
-## Source block list
+## gateway
 
-`config/sources.yaml` marks sources as if they did not exist: a
-listed source is never loaded, and one that is already loaded is
-unloaded by the next discovery scan.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `host` | `127.0.0.1` | Listen address |
+| `port` | `8765` | HTTP + WebSocket port |
+| `frontend_dir` | `null` | Default: `<repo>/frontend/dist` when it exists |
 
-```yaml
-block:
-  modules: [audio, vision, voice]
-  tools: [calculation, command]
-  skills: [writing-modules]
-```
+## autostart
 
-Matching is by name, never by path:
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Run the autostart script once at boot |
+| `path` | `null` | Default: `nan/autostart.sh` (a core file, outside the agents' reach) |
 
-| Kind | Matched against | Source | Name |
-|---|---|---|---|
-| `modules` | folder name | `builtin/modules/voice/` | `voice` |
-| `tools` | file stem / folder name | `builtin/tools/mcps/calculation.yaml` | `calculation` |
-| `tools` | file stem / folder name | `builtin/tools/local/search/` | `search` |
-| `skills` | skill directory name | `builtin/skills/writing-modules/` | `writing-modules` |
+## Top-level paths
 
-The file is read on every discovery pass, so an edit takes effect
-without a restart. An empty or missing list blocks nothing; a
-malformed file is logged as a warning and treated as empty — it never
-crashes the agent.
-
-This is a discovery-layer filter, not a permission system: a blocked
-source is indistinguishable from a deleted one.
-
-## Module configuration
-
-Each module owns exactly one YAML file — `config.yaml` inside its own
-folder (`builtin/modules/<name>/config.yaml`). The module declares a
-pydantic config model whose defaults are the shipped constants; the
-YAML (when present) overrides them and is validated at construction
-time — a malformed file is a loud startup failure, never a silent
-half default. Modules read their config in `__init__`, so a hot
-reload (instance rebuild) picks up edits automatically.
-
-Shipped files:
-
-| File | Module | Fields |
-|---|---|---|
-| `builtin/modules/audio/config.yaml` | audio | mic `device`, speaker/tagger/emotion model paths, voices registry |
-| `builtin/modules/voice/config.yaml` | voice | STT model/language, SLM weights + repo, CosyVoice checkout/weights/reference wav, `tts_speed`, `fast_path_enabled`, diarization (pyannote repo/token/threshold, speaker registry) |
-| `builtin/modules/vision/config.yaml` | vision | camera `device`, faces/OCR/VLM toggles, registry + weights paths |
-
-Path convention: relative paths resolve against the module folder;
-absolute paths (and `~/...`) pass through unchanged.
-
-## Data and models
-
-Every module keeps its heavyweight payloads and runtime state inside
-its own folder, under `data/` (gitignored) — model weights, registries,
-and the two persistence files (`data/private.json`,
-`data/dataspace.json`) the Facade writes on shutdown. Example: the
-vision person registry lives at
-`builtin/modules/vision/data/faces.json`. The vision VLM weights
-(`SmolVLM2-500M-Video-Instruct`) are downloaded automatically on first
-use; a failed download crashes the module at startup and it retries
-with backoff until the weights are present.
-
-Module folders are fixed derivatives of the repository root
-([`backend/nan_itself/utils/paths.py`](../../backend/nan_itself/utils/paths.py))
-and are therefore independent of the process working directory.
-`HF_ENDPOINT` is honoured by the `huggingface_hub` library itself for
-download mirrors; NAN sets no environment variables of its own.
-
-## Tool-level settings
-
-Local tool providers may carry their own `config.yaml` inside the tool
-folder, e.g. `builtin/tools/local/search/config.yaml` for the built-in
-search tool (SearXNG outgoing proxy/timeouts). The tool injects its
-settings file into every searxng-cli invocation via
-`SEARXNG_CLI_SETTINGS`; you never set that variable by hand.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `workspace` | `workspace` | The agents' writable territory |
+| `builtin_dir` | `builtin` | Read-only resource root (tools/skills as plain files) |

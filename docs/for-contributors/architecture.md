@@ -1,266 +1,109 @@
 # Architecture
 
-This document explains how NAN-itself is put together and why it is
-shaped the way it is, section by section, following the repository
-layout. It mirrors the code as of the current development state;
-interfaces may still change.
+One runtime package, `nan/`. Every module below is a real file
+in it; this document follows the actual layout.
 
-For the design principles that constrain these decisions, see
-[principles.md](principles.md). For exact interfaces and contracts, see
-the reference documents under [`for-plugin-authors/`](../for-plugin-authors/)
-and [`for-users/`](../for-users/).
+    nan/
+    ├── app.py            composition root
+    ├── events.py         process-wide event sink (singleton)
+    ├── gateway.py        web UI: HTTP + WebSocket
+    ├── agent/
+    │   ├── core.py       the Agent loop
+    │   ├── engine.py     the turn engine (one model call)
+    │   ├── handle.py     Handle + Book
+    │   ├── sandbox.py    OS-level execution sandbox
+    │   └── verbs/        spawn / sleep / shell / send / kill / finish
+    ├── turn/
+    │   ├── model.py      the Turn record
+    │   └── render.py     frozen prompt rendering
+    ├── llm/
+    │   ├── provider.py   the only module that talks to model APIs
+    │   └── types.py      protocol vocabulary (DTOs)
+    ├── injection/
+    │   ├── hub.py        registry + per-turn collection
+    │   └── client.py     the concurrent collector
+    └── config/           pydantic-settings, YAML source
 
-## Repository layout
+## One agent, one task
 
-```
-NAN-itself/
-├── backend/nan_itself/   # Framework source (Python package `nan_itself`)
-├── builtin/              # Shipped tools / modules / skills
-├── workspace/            # User-editable tools / modules / skills + persona
-├── config/               # settings.yaml
-├── frontend/             # Web UI (React + assistant-ui; see "frontend/" below)
-├── infraend/             # Planned infra backend (not covered here)
-├── docs/                 # This documentation
-└── tests/                # Contract and integration tests
-```
+An Agent is a single asyncio task running turns in a loop. The
+loop paces itself with `autonomous_interval` (or waits for input
+when it is 0). Messages never interrupt an in-flight turn: they
+queue in the inbox and drain at the next turn boundary.
 
-## backend/nan_itself/
+## The turn
 
-The Python package. Flat modules at its root, one subpackage per
-subsystem. Import discipline: everything anchors to the package location
-(`utils/paths.py`), never to the process working directory.
+    drain inbox -> collect injections -> one model call
+    -> run verbs positionally -> freeze rendered messages
 
-### app.py — composition root
+A turn is the unit of record. `Turn` holds the inbox drained
+into it, the injections collected, the delta lines, and the
+model's reply -- a complete runtime log with no separate trace
+facility. The rendered prompt is frozen on first render and
+never recomputed: history is add-only, so unchanged turns are
+byte-stable and cache-friendly for the model's prompt prefix.
+When the history exceeds `history_char_limit` it is cleared
+whole -- a reset, not a rewrite.
 
-`app.py` is the composition root. It loads `config/settings.yaml`
-(`config.py`), anchors all repo-relative directories through
-[`utils/paths.py`](../../backend/nan_itself/utils/paths.py), and
-constructs the `ProviderRuntime`, the module `Facade`, the
-`SkillRuntime`, the `StepEngine` and the root `Agent`. It then starts the
-tool provider runtime and the module facade before launching the agent
-loop and the gateway (FastAPI/uvicorn) as two long-lived tasks. Shutdown
-reverses that order — modules stop before providers, because modules may
-still reference tool providers.
+## Handles: the multi-agent graph
 
-### agent/ — the turn loop
+A Handle is a cross-agent channel plus the control right over
+one agent:
 
-- **Turn is the sole record of a round** (`model.py`). A `Turn` carries
-  everything as structure: `persona` and `history` (the snapshot the
-  model saw), the observation inputs (`task`, `world`, `ambient` — the
-  Modules' per-turn context, `reports` — harvested child reports), and
-  the round's flow (`reply`, `calls` with `results`, one per call), plus
-  `usage`, `finish_reason` and `model`. No message lives on the Turn and
-  there is no separate persistent history.
-- **Snapshot derivation** (`engine.py`). The next round's snapshot is
-  derived as `last_turn.history + render_turn(last_turn)`; rendering a
-  turn into model messages is the exclusive job of `agent/prompts.py`
-  (`build_messages` / `render_turn`), and the engine is its only caller.
-  When the character budget is exceeded the snapshot is truncated to an
-  empty tuple — the model then sees only the system prompt plus the
-  newest observation and the chain restarts from there.
-- **Core state** (`core.py`). The core holds a single `last_turn`
-  reference, replaced after each successful run and kept on failure, so
-  a failed round can be inspected as-is.
-- **Subagents** (`runtime.py`) run the same engine inside a `while
-  True` loop with no round limit; the loop only exits when the `finish`
-  tool sets the finished state. The `finish` tool is visible only at
-  depth > 0 and a finish report must be non-empty.
-- **Verbs** (`verbs.py`). Every interface face is reached through a
-  `list_*` / `show_*` / `invoke_*` verb triple: tools, skills, and
-  module channels all follow the same mental model — list enumerates,
-  show inspects, invoke acts.
+- bound to exactly one target and one implicit holder (the
+  spawner; the root's handle is held by the composition root)
+- not transferable: the cascade-death graph is exactly the
+  spawn tree
+- through it the holder may `send()` into the target's inbox
+  and `kill()` the target; the target replies upstream through
+  its parent reference (send-only, no handle -- a child cannot
+  kill its parent)
 
-Each round is one LLM round-trip. The model sees a derived snapshot of
-previous rounds plus the newest observation; the engine renders each
-completed round and appends it to the next round's snapshot. There is no
-separate history store.
+The `Book` is the process-wide id -> agent registry used for
+routing, status snapshots and whole-tree shutdown. When an agent
+dies it tears down everything it holds (cascade), then its
+parent's inbox receives a finish report or a death notice.
 
-```mermaid
-flowchart TB
-    subgraph turn["Turn N"]
-        A["snapshot<br/>= Turn N-1 history + rendering"] --> B[LLM round-trip]
-        B --> C["reply / tool calls<br/>+ results"]
-        C --> D["Turn record<br/>history / ambient / reports / reply / calls / results"]
-    end
-    D -->|"history + render_turn(Turn N)"| E["Turn N+1 snapshot"]
-    E --> A2["..."]
+## Verbs
 
-    style turn fill:#f6f8fa,stroke:#d0d7de,color:#24292f
-```
+The six cognitive actions: `spawn`, `sleep`, `shell`, `send`,
+`kill`, `finish` (root has no finish). Tools and skills are not
+verbs -- they are plain files the agent reaches through `shell`
+inside the sandbox.
 
-### tools/ — provider runtime
+## Observations
 
-[`runtime.py`](../../backend/nan_itself/tools/runtime.py)
-(`ProviderRuntime`) reconciles sources across two parallel directory
-layouts — builtin (`builtin/tools/`) and workspace
-(`workspace/tools/`) — with identical hot-reload semantics:
+Each turn the agent sees one structured observation:
 
-- **One file = one MCP provider; one folder = one local provider.**
-  An MCP YAML file declares exactly one stdio server (`name` / `command`
-  / `args` / `env` / `cwd`; a relative `cwd` is repo-anchored, never
-  process-cwd-anchored). A local tool folder's `main.py` contains
-  exactly one `ToolSet` subclass; identity is the folder name.
-- **Reload transaction.** Replacement workers are first started as
-  unregistered candidates; only after a candidate is fully connected is
-  it committed into the live tables and the old generation asked to
-  stop. Old and new generations of the same provider name can therefore
-  coexist during the handoff.
-- **Bounded calls.** Every tool call (local or MCP) is wrapped in a
-  timeout (300 s by default, `providers.tool_timeout` in settings) and
-  surfaces timeouts as error results instead of hanging the agent loop.
-- **Local tools** derive their JSON schema from type annotations via
-  `@tool`-decorated methods; return values are JSON-serialized into the
-  tool result, raised exceptions become error results.
-- A dedicated supervisor task reaps dead MCP workers and reschedules
-  their sources with backoff; a degraded provider never kills the
-  runtime.
+    <delta>      state changes (services online/offline,
+                 subagent spawns, ...), grouped by first
+                 appearance
+    <injection>  contributions from external services, labelled
+                 by service_id
+    <inbox>      parent/user messages and subagent finish notices
 
-Sources (tools, modules, skills) reload live. A replacement is started
-as an unregistered candidate and only committed after it is fully
-connected — the old generation keeps serving until that moment, so a
-broken edit never takes the runtime down.
+The boundary: state changes ride `<delta>`, contentful messages
+ride `<inbox>`.
 
-```mermaid
-sequenceDiagram
-    participant F as Filesystem
-    participant R as Runtime
-    participant Old as Live generation
-    participant New as Candidate
-    F->>R: source changed
-    R->>New: start (unregistered)
-    New-->>R: connected + validated
-    R->>R: commit candidate into live tables
-    R->>Old: stop (graceful)
-    Note over Old,New: both generations coexist during handoff
-```
+## Injection
 
-See [tools.md](../for-plugin-authors/tools.md) for the full contract.
+Services are independent processes registered with the hub
+(see for-service-authors/injection-service.md). Before every
+prompt assembly the hub POSTs the new Turn to every live service
+concurrently; contributions, failures and timeouts all land on
+the turn record.
 
-### modules/ — ambient state and channels
+## Events
 
-Builtin modules (`builtin/modules/`) provide ambient context the
-engine asks for at every turn start. The machinery here
-(`runtime.py` = the Facade) owns:
+`nan.events.sink` is a process-wide singleton (loguru-style):
+agent code only *emits* (`sink.emit`), the gateway subscribes on
+its own; with no subscribers events simply land in a bounded
+history ring for reconnect snapshots. Nothing is wired by
+reference.
 
-- dependency graph, lifecycle supervision, retry and hot reload;
-- registration is validate-then-install: the dependency graph is
-  checked on a copy before the record reaches any live table, so a
-  cycle is rejected with nothing installed and no state to undo
-  (`deps.py`);
-- DataSpace ownership: a module publishes, dependents read detached
-  snapshots (`deps.py`). The same `DataSpace` object is shared across a
-  reload, released when the source is removed, and restored from the
-  persisted snapshot when it comes back;
-- per-turn coupling: `ask()` ambient projection at turn start and
-  `tell()` notification after it (`model.py` defines `Turn` and
-  `Module`);
-- private state persistence via `serialize_state()` (`persistence.py`),
-  written on shutdown and on removal;
-- **channels** (`model.py`): modules that declare a `channels` mapping
-  on the class expose downlink endpoints the model reaches through the
-  `list_channels` / `show_channels` / `invoke_channels` verbs; see
-  [modules.md](../for-plugin-authors/modules.md) for the channel contract.
+## Gateway
 
-Module-side contracts: capture/inference work runs on daemon threads
-with interval gating; the per-turn surface is a pure `ask()`
-projection; provisioning failures (e.g. missing model weights) raise
-out of `start()` — the Facade marks the module DOWN with the error and
-restarts it with backoff, so a module with missing weights comes up
-loudly failed and revives once the weights land (all weights are
-provisioned in `start()`, before any loop runs). One event loop runs
-every coroutine: `tell()` may await long operations, but synchronous
-CPU-heavy or blocking calls go to a thread, `DataSpace` publishes stay
-small JSON facts (publish/snapshot deepcopy the full state on the loop
-every round), and provisioning-length work (weight loading, device
-probing) happens on `start()`'s background threads.
-
-Modules are background daemons: heavy work runs in `start()` loops and
-`tell()`, while `ask()` stays a cheap projection the engine reads every
-turn. Modules that opt in also declare **channels** — downlink endpoints
-the model feeds payloads into; the module consumes them at its own
-tick. Data flows down, state flows up, and neither side blocks the other.
-
-```mermaid
-flowchart LR
-    subgraph agent["Agent (LLM)"]
-        V["invoke_channels<br/>schema check → deep copy"]
-    end
-    V -->|"written / rejected"| S["Module channel<br/>feed() stores the payload"]
-    S --> C2["Module tick loop<br/>consumes at its own pace"]
-    C2 --> Q["DataSpace / ask()<br/>progress flows back up"]
-
-    style agent fill:#f6f8fa,stroke:#d0d7de,color:#24292f
-```
-
-### skills/ — capability packages
-
-A skill is a directory with a `SKILL.md` (YAML frontmatter) plus
-optional `scripts/`, `references/`, `assets/` folders (`model.py`).
-The runtime (`runtime.py`) discovers skills from the same parallel
-builtin/workspace roots at boot, re-scans at every turn start (shared
-hot-reload logic), and applies progressive disclosure: metadata lookups
-never load bodies; invoking a script executes it, other resources
-return as text. See [skills.md](../for-plugin-authors/skills.md) for the skill
-format and runtime surface.
-
-### gateway and events
-
-`gateway.py` serves the HTTP API on `gateway.host:gateway.port`
-(default `127.0.0.1:8765`) and bridges to the web UI in `frontend/`:
-agent activity is streamed as JSON envelopes over the `/ws`
-websocket, the same envelope history the bus keeps is replayed on
-connect.
-`events.py` implements the in-process pub/sub bus with bounded history
-and subscriber queues. The envelope types and their payloads are
-contracted in `frontend/src/protocol.ts` — the frontend is the
-renderer of structured data only, so that file (not the backend) is
-the reference for the wire protocol.
-
-### frontend/
-
-React + assistant-ui single-column conversation UI. Data flows one
-way: WS envelopes → `history/mapper.ts` folds them into
-persisted turns (IndexedDB, frontend-owned; the backend keeps no
-conversation state) → `convert.ts` maps turns to assistant-ui
-messages → `ui/` renders them. A `turn_started` envelope anchors
-each turn: everything after it belongs to that turn, so attribution
-never relies on timing heuristics.
-
-## builtin/ and workspace/
-
-Two parallel provider layouts, scanned with identical semantics —
-`builtin/` ships with the repo, `workspace/` is user territory
-(deleting a source removes its provider; edits hot-reload).
-
-| Slot | Builtin | Workspace |
-|---|---|---|
-| Tools | `builtin/tools/` (`local/` Python, `mcps/` YAML) | `workspace/tools/` (same shape, starts empty) |
-| Modules | `builtin/modules/` (audio, voice, vision, network, system, inbox) | `workspace/modules/` |
-| Skills | `builtin/skills/` | `workspace/skills/` |
-
-`workspace/persona.md` holds the user-editable persona;
-`workspace/desktop/` is reserved for the agent's "virtual desktop"
-(planned).
-
-## config/
-
-Core configuration lives in `config/settings.yaml` (loaded by
-`config.py`); each Module owns `config.yaml` inside
-its own folder and loads and validates it itself, keeping modules
-independent of any shared config machinery; the search tool's
-`config.yaml` (inside its folder) configures the bundled SearxNG
-instance. There are no
-environment variables. See [configuration.md](../for-users/configuration.md).
-
-## tests/
-
-Contract tests mirror the reload/consistency guarantees
-(`test_reload_*.py`, `test_turn_consistency.py`, `test_layering.py`),
-plus integration tests that run the real agent loop against isolated
-module/tool directories.
-
-## Security
-
-The security model and the trust boundaries are documented in
-[SECURITY.md](../../SECURITY.md); that file is the authoritative
-reference for what NAN-itself trusts and what it does not.
+The gateway formats the event stream for the web UI and carries
+user input back to the root agent's inbox. It owns nothing about
+agent semantics. Loopback-only with a Host/Origin entry guard
+(see for-users/security.md).

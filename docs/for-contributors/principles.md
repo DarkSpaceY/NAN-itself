@@ -1,76 +1,68 @@
-# Core Principles
+# Principles
 
-These are the load-bearing principles of NAN-itself. They constrain
-design decisions across the framework; when a change violates one of
-these, the change needs an explicit, argued exception — not a quiet
-workaround.
+The design rules the codebase is written against. When a change
+feels ambiguous, these decide.
 
-## 1. Local-first
+## Shell-first
 
-Everything runs on the user's machine. The only external calls are the
-LLM endpoint(s) the user configures in `settings.yaml`. No cloud
-services, no telemetry, no accounts in the core.
+The model already knows the shell. Tools, skills, data
+processing, service management -- all of it is reachable through
+`shell` as plain files. There is no tool registration, no plugin
+loader, no hot-reload machinery to rebuild: the filesystem is
+the ecosystem. New capabilities are added by writing files into
+`builtin/` (read-only resources) or `workspace/` (agent-writable).
 
-## 2. Cross-platform runtime
+## One loop per agent
 
-No OS-specific or hardware-specific runtime dependencies in the core.
-The portability baseline is CTranslate2 / onnxruntime / torch /
-transformers — the same code must run on macOS, Linux and Windows, on
-any vendor's hardware. Hardware-specific accelerators (MLX, CoreML,
-DirectML) are optional extras layered on top, never requirements, and
-never the only code path. (Precedent: the VLM backend is
-transformers/torch, MLX explicitly excluded.)
+No thread pools of agents, no scheduler. An agent is one asyncio
+task with one inbox. Concurrency comes from spawning subagents;
+coordination comes from handles. This keeps death, pause and
+cascade semantics exact.
 
-## 3. The LLM stays out of the hot path
+## The turn is the record
 
-Deliberation belongs to the agent turn loop. Perceive → decide → act
-loops that need a faster rhythm than LLM round-trips run *inside*
-modules, at module frequency, through channels. Ambient state is
-computed continuously in the background; the model reads projections,
-it is never the inner loop of a control system.
+Everything that happened in a turn -- inbox drained, injections
+collected, deltas observed, the reply -- lives on the Turn. No
+separate trace, no side-channel logging to reconstruct behavior.
+LLM calls are metered on the record (`LLMCall`: model, usage,
+latency, retries).
 
-## 4. Turn snapshot
+## Add-only context
 
-One round of agent execution is captured in a single `Turn` record:
-`persona` + `history` (the snapshot the model saw) + `messages` (what
-this round produced). There is no separate persistent history store —
-the next round's snapshot is derived from the last turn, so anything
-the model saw is reconstructible exactly.
+Rendered turns freeze on first render and never change. History
+grows by appending; when the char limit trips, it clears whole.
+Unchanged prefixes stay byte-stable, which is what makes prompt
+caching work. There is no in-place rewriting of history.
 
-## 5. One folder = one unit; two parallel roots
+## Core files vs agent territory
 
-One file (or directory) is exactly one provider, module, or skill —
-no multi-unit files. Modules and local tools are folders with a
-main.py entry. Builtin (`builtin/`) and user territory
-(`workspace/`) are two parallel roots scanned with identical hot-reload
-semantics. A reload is a transaction: the replacement starts first,
-unregistered; it is committed only after it is fully connected; the old
-generation keeps serving until that moment. Deleting the entry file (or the folder)
-disables its unit.
+Three zones: the nan package (core code, persona, autostart --
+the agent cannot write these), `builtin/` (read-only
+resources), and `workspace/` (the only place an agent writes).
+Persona and autostart are user-owned files; the agent's self
+definition and startup behavior are not under model authority.
 
-## 6. Bounded by design
+## One path for everything important
 
-Every tool call is timeout-bounded. The only inbound listener is the
-gateway, bound to the loopback interface. All repo-relative paths
-resolve through a single path-anchoring module — the process never
-depends on its working directory and writes no state outside the repo
-directories. Workspace sources are code and inherit the user's trust;
-review before adding.
+Death has one path (finish or kill, both through the same
+teardown). Configuration has one source (the YAML). Event flow
+has one singleton (sink). Duplicated paths drift; when two
+mechanisms could do a job, the codebase picks one and deletes
+the other.
 
-## 7. Full implement, let it crash
+## Loud failure
 
-Implement features completely — never ship partial implementations,
-placeholder behavior, or silent simplifications. On failure, crash
-loudly and surface the error: no silent fallbacks, no masking, no
-"unavailable" limbo states that quietly keep running at half capacity.
-Supervisors restart crashed units with backoff, and the error stays
-visible until the cause is fixed. A module with missing weights comes
-up failed and revives the moment the weights land.
+A missing persona fails startup. A failed turn is retried on
+the backoff ladder and every failure is recorded. A sandbox
+missing its tooling warns loudly. Silence hides decay; the
+system is designed so that breakage is visible at the point it
+happens.
 
-## 8. Data flows up, decisions flow down
+## The 27B horizon
 
-Modules publish facts, never conclusions — interpretation belongs to
-the agent. The agent's intent reaches back down through write-only
-module channels. `ask()` is a cheap projection (it runs on the agent's
-critical path every turn); heavy work lives in module loops. Neither
-side blocks the other.
+The core targets locally deployed small models: strict schemas,
+short stable prompts, prompt-cache-friendly rendering, and a
+config surface (`backoff`, `shell_timeout`, `shell_output_limit`,
+history limit) tuned for models that misbehave more than the
+frontier ones. Intent is not bounded by today's 27B -- the
+design should survive better models, not depend on them.
