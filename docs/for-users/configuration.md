@@ -20,7 +20,17 @@ anchors the paths.
 | `providers` | `{}` | Named endpoint profiles (see below) |
 
 A profile overrides the base fields it sets; the profile's own
-`provider` field carries the protocol type. Example -- a local
+`provider` field carries the protocol type.
+
+```mermaid
+flowchart LR
+    Y["llm: base fields"] --> P{"llm.provider"}
+    P -->|"openai / anthropic"| B["base fields used as-is"]
+    P -->|"a key in llm.providers"| M["profile fields override<br/>the base fields"]
+    M --> R["active endpoint settings"]
+```
+
+Example -- a local
 27B model behind llama.cpp:
 
     llm:

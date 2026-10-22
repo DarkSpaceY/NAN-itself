@@ -29,12 +29,31 @@ latency, retries).
 
 ## Add-only context
 
+```mermaid
+flowchart LR
+    P["system prompt<br/>(persona; changes invalidate the prefix)"]
+    P --> T1["turn 1"]
+    T1 --> T2["turn 2"]
+    T2 --> T3["turn 3"]
+    T3 -.->|"append only:<br/>existing bytes unchanged"| SOLID["stable prompt prefix<br/>= cache hit"]
+```
+
 Rendered turns freeze on first render and never change. History
 grows by appending; when the char limit trips, it clears whole.
 Unchanged prefixes stay byte-stable, which is what makes prompt
 caching work. There is no in-place rewriting of history.
 
 ## Core files vs agent territory
+
+```mermaid
+flowchart TB
+    U["user"] -->|"writes"| CORE["nan/<br/>code, persona, autostart, config"]
+    U -->|"writes"| BI["builtin/<br/>resources"]
+    A["agent"] -->|"shell: read-only"| CORE
+    A -->|"shell: read-only"| BI
+    A -->|"shell: write"| WS["workspace/"]
+    CORE -.->|"boots and governs"| A
+```
 
 Three zones: the nan package (core code, persona, autostart --
 the agent cannot write these), `builtin/` (read-only
@@ -57,12 +76,3 @@ the backoff ladder and every failure is recorded. A sandbox
 missing its tooling warns loudly. Silence hides decay; the
 system is designed so that breakage is visible at the point it
 happens.
-
-## The 27B horizon
-
-The core targets locally deployed small models: strict schemas,
-short stable prompts, prompt-cache-friendly rendering, and a
-config surface (`backoff`, `shell_timeout`, `shell_output_limit`,
-history limit) tuned for models that misbehave more than the
-frontier ones. Intent is not bounded by today's 27B -- the
-design should survive better models, not depend on them.

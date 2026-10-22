@@ -7,6 +7,32 @@ hot-reload contract -- just HTTP on loopback.
 
 ## Lifecycle
 
+```mermaid
+sequenceDiagram
+    participant S as Your service
+    participant H as Injection hub
+    participant A as Agent turn
+
+    S->>H: POST /register {service_id, endpoint}
+    H-->>S: {"status": "registered"}
+
+    loop every few seconds (well under heartbeat_ttl)
+        S->>H: POST /heartbeat {service_id}
+        H-->>S: {"status": "ok"}
+    end
+
+    A->>H: collect(turn)
+    par all live services, concurrently
+        H->>S: POST your endpoint {turn: {...}}
+        S-->>H: "text" or {"text": "..."}
+    end
+    H-->>A: Injection(ok=true/false, duration_s)
+
+    opt clean shutdown
+        S->>H: POST /unregister {service_id}
+    end
+```
+
 1. **Register** -- on startup, POST to the hub:
 
        POST http://127.0.0.1:8901/register
@@ -65,7 +91,29 @@ need them to decide what to contribute):
 state across turns (you are stateless to the core; persistence is
 your business, typically a file under your own directory).
 
+```mermaid
+flowchart LR
+    subgraph CORE["core"]
+        T["Turn n<br/>inbox / injections / delta"]
+    end
+    T -->|"POST on every turn"| S["your service"]
+    S -->|"previous reply comes back<br/>in turn.injections"| T
+    S -->|"on turn request"| F["your own state file"]
+    F -->|"reload before answering"| S
+```
+
 ## Failure semantics
+
+```mermaid
+flowchart TD
+    R["turn collects services"] --> OK{"service replies<br/>within timeout?"}
+    OK -->|"yes, non-empty"| C["Injection(ok=true)<br/>text rides the prompt"]
+    OK -->|"yes, empty"| N["dropped from the record"]
+    OK -->|"no / error / timeout"| E["Injection(ok=false)<br/>error text on the record"]
+    E --> NEXT["turn proceeds<br/>no retry, no block"]
+    C --> NEXT
+    N --> NEXT
+```
 
 - The hub allows `injection.timeout` (default 2 s) per service
   per turn. There is no retry.

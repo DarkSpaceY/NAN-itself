@@ -41,6 +41,16 @@ workspace, and hold conversations across turns.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    U["user / browser"] <-->|"gateway :8765"| R["root agent"]
+    R -->|"spawn + send / kill"| A["subagent"]
+    A -.->|"finish report"| R
+    S["injection services"] -->|"prompt contributions"| R
+    R -->|"shell verb"| SBX["OS sandbox<br/>(workspace/tmp writable)"]
+    R -->|"streamed events"| U
+```
+
 - **One agent = one asyncio task.** Turns run continuously,
   paced by configuration; messages queue at turn boundaries.
 - **Handles.** A spawned child is reached through a handle:

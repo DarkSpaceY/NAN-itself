@@ -6,12 +6,45 @@ Like the CLI-agent baseline (Claude Code, Codex), NAN-itself trusts the
 user's own machine. The security model defends against remote
 parties, not against malicious local processes.
 
+```mermaid
+flowchart LR
+    subgraph REMOTE["untrusted"]
+        WEB["web pages /<br/>remote servers"]
+    end
+    subgraph LOCAL["trusted: the user's machine"]
+        BR["your browser"]
+        GW["gateway<br/>127.0.0.1:8765"]
+        CORE["core process"]
+        SVC["injection services"]
+        SBX["sandboxed shell"]
+    end
+    WEB -.->|"DNS rebinding /<br/>cross-site request"| GW
+    BR -->|"Host + Origin<br/>guard"| GW
+    GW --> CORE
+    SVC -->|"register / heartbeat<br/>(loopback, no token)"| CORE
+    CORE --> SBX
+```
+
 ## Network listeners
 
 Both listeners bind loopback only.
 
 **Gateway** (browser-facing). An entry guard runs at the HTTP
 and WebSocket handshakes:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    C->>G: request with Host / Origin
+    alt Host is not a loopback form of this port
+        G-->>C: 403 (DNS rebinding rejected)
+    else Origin present and not this gateway's origin
+        G-->>C: 403
+    else no Origin (native client) or matching Origin
+        G-->>C: request proceeds
+    end
+```
 
 - `Host` must be a loopback form of the gateway's own port
   (`127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`).
@@ -31,6 +64,16 @@ trusted-machine model.
 
 Shell verbs run under an OS-level sandbox (macOS `sandbox-exec`
 with an SBPL profile, Linux bubblewrap):
+
+```mermaid
+flowchart TB
+    AG["agent"] -->|"shell verb"| SBX["OS sandbox"]
+    SBX -->|"write"| W["workspace/ + temp dirs"]
+    SBX -->|"read-only"| C["nan/ package<br/>persona, config, code"]
+    SBX -->|"read-only"| B["builtin/ resources"]
+    OUT["autostart + services"] -->|"user authority,<br/>outside the sandbox"| OS["the machine"]
+    SBX -.->|"cannot reach"| OUT
+```
 
 - writes confined to the workspace and temp directories
 - the nan package (persona, config) and builtin resources are

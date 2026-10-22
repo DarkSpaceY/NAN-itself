@@ -6,6 +6,10 @@ injection, and the shell as the universal tool surface.
 
 ## Reading order
 
+> Diagrams use [Mermaid](https://mermaid.js.org/); GitHub renders
+> them inline. VS Code needs the Markdown Preview Mermaid Support
+> extension.
+
 | Path | Audience |
 |------|----------|
 | [for-users/get-started.md](for-users/get-started.md) | Run the core for the first time |

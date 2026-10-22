@@ -40,6 +40,23 @@ What starts:
 - the injection registry on `127.0.0.1:8901`
 - the autostart script (`nan/autostart.sh`) if enabled and present
 
+```mermaid
+flowchart LR
+    subgraph PROC["core process"]
+        ROOT["root agent<br/>(turn loop)"]
+        GW["gateway<br/>:8765"]
+        HUB["injection registry<br/>:8901"]
+        AUTO["autostart script"]
+    end
+    BROWSER["browser"] <-->|"HTTP + WebSocket"| GW
+    GW -->|"user input"| ROOT
+    ROOT -->|"events (sink)"| GW
+    SVC["services"] -->|"register / heartbeat"| HUB
+    HUB -->|"turn contributions"| ROOT
+    ROOT -->|"shell"| SBX["sandboxed commands"]
+    AUTO -.->|"launched once at boot"| SVC
+```
+
 Open the gateway URL and talk to the agent. Input goes to the
 root agent's inbox; its replies and subagent output stream into
 the UI.

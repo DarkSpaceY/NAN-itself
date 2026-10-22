@@ -33,8 +33,14 @@ queue in the inbox and drain at the next turn boundary.
 
 ## The turn
 
-    drain inbox -> collect injections -> one model call
-    -> run verbs positionally -> freeze rendered messages
+```mermaid
+flowchart LR
+    A["drain inbox"] --> B["collect injections<br/>(all live services, concurrent)"]
+    B --> C["one model call"]
+    C --> D["run verbs positionally"]
+    D --> E["freeze rendered messages"]
+    E -->|"next turn"| A
+```
 
 A turn is the unit of record. `Turn` holds the inbox drained
 into it, the injections collected, the delta lines, and the
@@ -45,7 +51,26 @@ byte-stable and cache-friendly for the model's prompt prefix.
 When the history exceeds `history_char_limit` it is cleared
 whole -- a reset, not a rewrite.
 
+```mermaid
+flowchart LR
+    T1["turn 1<br/>(frozen)"] --> T2["turn 2<br/>(frozen)"] --> T3["turn 3<br/>(frozen)"]
+    T3 -->|"history_char_limit exceeded"| R["history cleared whole<br/>(new base, not a rewrite)"]
+    R --> T4["turn 4<br/>(frozen)"]
+```
+
 ## Handles: the multi-agent graph
+
+```mermaid
+flowchart TD
+    R["root"] -->|"Handle a1<br/>send / kill"| A["a1"]
+    A -->|"Handle a1.1<br/>send / kill"| C["a1.1"]
+    C -.->|"self.parent<br/>send up / finish"| A
+    A -.->|"self.parent<br/>send up / finish"| R
+```
+
+Solid edges are handles (downward, full authority); dotted
+edges are the parent reference a child uses to talk upstream
+(no handle, so a child cannot kill its parent).
 
 A Handle is a cross-agent channel plus the control right over
 one agent:
@@ -56,13 +81,21 @@ one agent:
   spawn tree
 - through it the holder may `send()` into the target's inbox
   and `kill()` the target; the target replies upstream through
-  its parent reference (send-only, no handle -- a child cannot
-  kill its parent)
+  its parent reference
 
 The `Book` is the process-wide id -> agent registry used for
 routing, status snapshots and whole-tree shutdown. When an agent
 dies it tears down everything it holds (cascade), then its
 parent's inbox receives a finish report or a death notice.
+
+```mermaid
+flowchart TD
+    D["a1 dies"] --> D1["a1.1 killed (held handle)"]
+    D --> D2["a1.2 killed (held handle)"]
+    D1 --> D3["a1.1.1 killed"]
+    D -.->|"death notice / finish report"| P["parent inbox"]
+```
+
 
 ## Verbs
 
@@ -82,10 +115,42 @@ Each turn the agent sees one structured observation:
                  by service_id
     <inbox>      parent/user messages and subagent finish notices
 
+```mermaid
+flowchart TB
+    O["observation<br/>(one per turn)"]
+    O --> D["delta<br/>state changes"]
+    O --> I["injection<br/>service contributions"]
+    O --> X["inbox<br/>contentful messages"]
+    D --> D1["service online / offline"]
+    D --> D2["subagent spawned"]
+    I --> I1["per service_id: contributed text<br/>failures marked ok=false"]
+    X --> X1["parent / user message"]
+    X --> X2["subagent finish or death notice"]
+```
+
 The boundary: state changes ride `<delta>`, contentful messages
 ride `<inbox>`.
 
 ## Injection
+
+```mermaid
+sequenceDiagram
+    participant S as Service process
+    participant H as Injection hub
+    participant A as Agent turn
+
+    S->>H: POST /register {service_id, endpoint}
+    loop heartbeat interval
+        S->>H: POST /heartbeat {service_id}
+    end
+    A->>H: collect(turn)
+    par concurrent, per live service
+        H->>S: POST endpoint {turn: {...}}
+        S-->>H: text or {"text": "..."}
+    end
+    H-->>A: Injection(ok, duration_s)
+    note over A: contributions and failures<br/>both land on the turn record
+```
 
 Services are independent processes registered with the hub
 (see for-service-authors/injection-service.md). Before every
@@ -94,6 +159,13 @@ concurrently; contributions, failures and timeouts all land on
 the turn record.
 
 ## Events
+
+```mermaid
+flowchart LR
+    AG["agent code"] -->|"sink.emit(...)"| S["sink<br/>(process-wide singleton)"]
+    S -->|"fan-out"| GW["gateway subscribers"]
+    S -->|"no subscribers"| HR["bounded history ring<br/>(reconnect snapshots)"]
+```
 
 `nan.events.sink` is a process-wide singleton (loguru-style):
 agent code only *emits* (`sink.emit`), the gateway subscribes on
