@@ -100,6 +100,7 @@ flowchart LR
     S -->|"previous reply comes back<br/>in turn.injections"| T
     S -->|"on turn request"| F["your own state file"]
     F -->|"reload before answering"| S
+    style CORE fill:transparent,stroke:#2563eb,stroke-width:2px
 ```
 
 ## Failure semantics

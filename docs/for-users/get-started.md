@@ -55,6 +55,7 @@ flowchart LR
     HUB -->|"turn contributions"| ROOT
     ROOT -->|"shell"| SBX["sandboxed commands"]
     AUTO -.->|"launched once at boot"| SVC
+    style PROC fill:transparent,stroke:#2563eb,stroke-width:2px
 ```
 
 Open the gateway URL and talk to the agent. Input goes to the

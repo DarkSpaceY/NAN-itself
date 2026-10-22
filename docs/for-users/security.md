@@ -23,6 +23,8 @@ flowchart LR
     GW --> CORE
     SVC -->|"register / heartbeat<br/>(loopback, no token)"| CORE
     CORE --> SBX
+    style REMOTE fill:transparent,stroke:#e11d48,stroke-width:2px
+    style LOCAL fill:transparent,stroke:#16a34a,stroke-width:2px
 ```
 
 ## Network listeners
