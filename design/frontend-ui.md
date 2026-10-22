@@ -2,8 +2,7 @@
 
 Design for the frontend rewrite. Direction chosen from four
 wireframes: **A (conversation + inspector) as the shell, C
-(event ledger) as its second view**. Reference wireframes:
-`/tmp/nan-ui-companion` (scratch, not part of the repo).
+(event ledger) as its second view**.
 
 ## Goals
 
