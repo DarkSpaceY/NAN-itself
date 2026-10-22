@@ -9,7 +9,7 @@ affected paths. You can expect an initial response within a week.
 
 ## Trust model
 
-NAN runs locally, on the user's own machine. Like the CLI-agent
+NAN-itself runs locally, on the user's own machine. Like the CLI-agent
 baseline (Claude Code, Codex), it trusts the machine: the security
 model defends against remote parties, not against malicious local
 processes.
@@ -50,7 +50,7 @@ trust is the boundary, consistent with the trust model above.
   persona file is core config the agent cannot rewrite.
 - **LLM endpoint.** The configured endpoint receives the
   assembled conversation, including tool/skill output the agent
-  observed. Point NAN at a local model
+  observed. Point NAN-itself at a local model
   (`llm.providers`) when that matters.
 
 ## Known residual risks

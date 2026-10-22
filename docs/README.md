@@ -1,6 +1,6 @@
-# NAN documentation
+# NAN-itself documentation
 
-NAN is a local-first agent core: one asyncio task per agent, handles
+NAN-itself is a local-first agent core: one asyncio task per agent, handles
 for multi-agent coordination, external processes for prompt
 injection, and the shell as the universal tool surface.
 

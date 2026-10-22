@@ -2,7 +2,7 @@
 
 ## Trusted machine
 
-Like the CLI-agent baseline (Claude Code, Codex), NAN trusts the
+Like the CLI-agent baseline (Claude Code, Codex), NAN-itself trusts the
 user's own machine. The security model defends against remote
 parties, not against malicious local processes.
 
@@ -56,7 +56,7 @@ outside the sandbox.
 The configured LLM endpoint receives the assembled conversation:
 task text, persona, injection contributions, tool/skill output
 the agent observed. Choose endpoints accordingly (see
-`llm.providers` for pointing NAN at a local model).
+`llm.providers` for pointing NAN-itself at a local model).
 
 ## Known residual risks
 
