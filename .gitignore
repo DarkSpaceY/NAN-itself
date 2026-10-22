@@ -13,6 +13,7 @@ wheels/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+*.tsbuildinfo
 
 # Environment / secrets
 .env

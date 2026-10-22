@@ -1,0 +1,49 @@
+# NAN core configuration (nan/ package).
+# Loaded by `python -m nan.app`; environment variables are never read.
+# Relative paths resolve against this file's grandparent (repo root).
+
+llm:
+  provider: openai          # active provider: "openai" | "anthropic", or a key in `providers`
+  base_url: ""              # empty = provider default endpoint
+  api_key: ""
+  model: ""
+  timeout: 120.0
+  max_retries: 2
+  providers: {}             # optional named endpoint profiles, e.g.:
+  #  local27b:
+  #    provider: openai
+  #    base_url: http://127.0.0.1:8080/v1
+  #    model: qwen-27b
+  #    api_key: none
+
+agent:
+  autonomous_interval: 0.0  # >0: self-rotating loop (seconds); <=0: event-driven
+  history_char_limit: 100000
+  shell_timeout: 30.0       # user setting; the model cannot change it
+  shell_output_limit: 20000 # shell verb output truncation (head+tail)
+  backoff: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]  # turn-failure backoff ladder (s)
+  max_depth: 3              # -1: unlimited
+  max_children: 5           # -1: unlimited, per agent
+  # persona_path: custom.md # default: nan/persona.md (re-read every turn)
+
+sandbox:
+  enabled: true             # wrap shell-verb commands
+  required: false           # true: refuse to execute when no sandbox tool exists
+
+injection:
+  host: 127.0.0.1
+  port: 8901
+  timeout: 2.0              # per-service request timeout
+  heartbeat_ttl: 15.0
+
+gateway:
+  host: 127.0.0.1
+  port: 8765
+  frontend_dir: null        # default: <repo>/frontend/dist when it exists
+
+workspace: workspace        # the agents' territory (writable)
+builtin_dir: builtin        # read-only builtin tree
+
+autostart:
+  enabled: true
+  path: null                # default: nan/autostart.sh (user-owned, agent-writes forbidden)
