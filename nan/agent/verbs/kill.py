@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb
+from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -33,15 +33,18 @@ class KillVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         handle_id = call.arguments.get("handle_id")
 
         handle = agent.child_handle(handle_id)
 
         if handle is None:
             held = ", ".join(h.agent_id for h in agent.child_handles()) or "(none)"
-            return f"Unknown handle '{handle_id}'. Held children: {held}"
+            return VerbOutcome(f"Unknown handle '{handle_id}'. Held children: {held}")
 
         handle.kill()
 
-        return f"Kill requested for {handle.agent_id}."
+        return VerbOutcome(
+            f"Kill requested for {handle.agent_id}.",
+            {"target_id": handle.agent_id},
+        )

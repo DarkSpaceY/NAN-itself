@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb
+from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -34,15 +34,18 @@ class SpawnVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         task = call.arguments.get("task")
 
         if not isinstance(task, str) or not task.strip():
-            return "spawn requires a non-empty 'task'."
+            return VerbOutcome("spawn requires a non-empty 'task'.")
 
         child, error = agent.spawn_child(task)
 
         if error:
-            return error
+            return VerbOutcome(error)
 
-        return f"Subagent spawned.\nid: {child.agent_id}\ndepth: {child.depth}"
+        return VerbOutcome(
+            f"Subagent spawned.\nid: {child.agent_id}\ndepth: {child.depth}",
+            {"child_id": child.agent_id, "depth": child.depth},
+        )

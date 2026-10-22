@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb
+from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -41,24 +41,24 @@ class SendVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         direction = call.arguments.get("direction")
 
         text = call.arguments.get("text")
 
         if direction not in ("up", "down"):
-            return "'direction' must be 'up' or 'down'."
+            return VerbOutcome("'direction' must be 'up' or 'down'.")
 
         if not isinstance(text, str) or not text.strip():
-            return "send requires a non-empty 'text'."
+            return VerbOutcome("send requires a non-empty 'text'.")
 
         if direction == "up":
             if agent.parent is None:
-                return "No parent: the root cannot send up."
+                return VerbOutcome("No parent: the root cannot send up.")
 
             await agent.parent.receive_up(text, agent.agent_id)
 
-            return "Sent up."
+            return VerbOutcome("Sent up.", {"direction": "up"})
 
         handle_id = call.arguments.get("handle_id")
 
@@ -66,8 +66,11 @@ class SendVerb(Verb):
 
         if handle is None:
             held = ", ".join(h.agent_id for h in agent.child_handles()) or "(none)"
-            return f"Unknown handle '{handle_id}'. Held children: {held}"
+            return VerbOutcome(f"Unknown handle '{handle_id}'. Held children: {held}")
 
         await handle.send(text)
 
-        return f"Sent down to {handle.agent_id}."
+        return VerbOutcome(
+            f"Sent down to {handle.agent_id}.",
+            {"direction": "down", "to": handle.agent_id},
+        )

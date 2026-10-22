@@ -34,38 +34,22 @@ Payload schemas are the contract.
 ## Hello snapshot
 
 On connect the gateway sends `hello` with the current `seq` and
-gateway-level state:
+gateway-level state; events after it are live. The history ring
+is available to the gateway but the frontend contract starts
+from `hello` -- missed events between reconnects are detected
+via `seq` gaps, not replayed.
 
-```json
-{
-  "t": "hello",
-  "seq": 4127,
-  "content": { "boot": "4f2a91c3e0d1", "model": "qwen3-27b", "paused": false }
-}
-```
-
-Events after it are live. The history ring is available to the
-gateway but the frontend contract starts from `hello` -- missed
-events between reconnects are detected via `seq` gaps, not
-replayed.
-
-## Input and control
+## Input
 
 The frontend sends:
 
 ```json
 { "t": "input", "mid": "<client-generated id>", "text": "..." }
-{ "t": "pause" }
-{ "t": "resume" }
-{ "t": "ping" }
 ```
 
-`mid` is the client receipt id; the gateway drops duplicates so
-a reconnect retry cannot deliver the same input twice. Delivery
-is otherwise fire-and-forget: the visible effect is the
-`user_input` event. Pause/resume are requests -- confirmation
-arrives as `agent_paused` / `agent_resumed`, so the UI keeps a
-pending state until then. `ping` is answered with `pong`.
+`mid` is echoed on nothing -- delivery is fire-and-forget; the
+visible effect is the `user_input` event. Pause/resume ride the
+HTTP endpoints, not this socket.
 
 ## Payload schemas
 
@@ -76,9 +60,10 @@ Conventions:
   `user_input` is the exception -- it is root input from the
   user, not something an agent emitted
 - optional fields are omitted, not null, unless stated
-- text fields are already truncated at the emission point
-  (verb results at 2000 chars); `output_delta.text` is one
-  untruncated stream chunk
+- `verb_result.text` is exactly the text the model received;
+  the only truncation is `shell_output_limit`, applied by the
+  shell verb itself (head + tail kept); `output_delta.text` is
+  one untruncated stream chunk
 
 ### Lifecycle
 
@@ -118,12 +103,28 @@ exactly started -> delta* -> done | cancelled.
 |---|---|
 | `verb_started` | `{agent_id, verb, arguments}` |
 | `verb_failed` | `{agent_id, verb, error: {type, message}}` |
-| `verb_result` | `{agent_id, verb, text}` |
+| `verb_result` | `{agent_id, verb, text, detail?}` |
 | `verb_done` | `{agent_id, verb, duration_s}` |
 
-A call is started -> (result, done) | failed. Spawn emits
-`verb_started` (verb=spawn) and the child's own `agent_started`;
-it does not emit result/done.
+A call is started -> (result, done) | failed. `arguments` is the
+raw model-supplied object; `detail` carries structured domain
+facts and is omitted when a verb has none (validation
+failures, for instance, are a plain-text result the model
+reads).
+
+| verb | `arguments` | `detail` on success | renders as |
+|---|---|---|---|
+| `shell` | `{command}` | `{exit_code, timed_out}` | terminal block |
+| `spawn` | `{task}` | `{child_id, depth}` | child-agent card linked to `child_id` |
+| `send` | `{direction, handle_id?, text}` | `{direction, to?}` -- `to` only for `down` | message bubble, up/down |
+| `kill` | `{handle_id}` | `{target_id}` | destructive action marker |
+| `sleep` | `{seconds}` | `{seconds}` | timer |
+| `finish` | `{report}` | -- (the report travels in `agent_exited`) | report card |
+
+Verbs are verbs, not event types: dispatch on `verb`, and fall
+back to raw JSON for an unknown name. Spawn also triggers the
+child's own `agent_started`; the spawn call itself still emits
+`verb_result` / `verb_done` like any other.
 
 ## Timeline reconstruction
 

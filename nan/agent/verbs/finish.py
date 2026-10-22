@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb
+from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -34,15 +34,16 @@ class FinishVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         if agent.depth == 0:
-            return "finish is only available to subagents."
+            return VerbOutcome("finish is only available to subagents.")
 
         report = call.arguments.get("report")
 
         if not isinstance(report, str) or not report.strip():
-            return "finish requires a non-empty 'report'."
+            return VerbOutcome("finish requires a non-empty 'report'.")
 
         agent.finish(report)
 
-        return "Report submitted upstream; task finished."
+        # The report itself travels in agent_exited.
+        return VerbOutcome("Report submitted upstream; task finished.")

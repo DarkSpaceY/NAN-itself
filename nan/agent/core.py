@@ -147,10 +147,6 @@ class Agent:
     # Identity / handles
     # ==================================================================
 
-    @property
-    def paused(self) -> bool:
-        return self._paused
-
     def start(self) -> None:
         """Register and start the loop task."""
         self.book.register(self)
@@ -627,7 +623,7 @@ class Agent:
             return result
 
         try:
-            result = await verb.execute(call=call, agent=self)
+            outcome = await verb.execute(call=call, agent=self)
 
         except Exception as exc:
             sink.emit(
@@ -641,10 +637,12 @@ class Agent:
 
             raise
 
-        sink.emit(
-            "verb_result",
-            content={"agent_id": self.agent_id, "verb": call.name, "text": result[:2000]},
-        )
+        content = {"agent_id": self.agent_id, "verb": call.name, "text": outcome.text}
+
+        if outcome.detail:
+            content["detail"] = outcome.detail
+
+        sink.emit("verb_result", content=content)
 
         sink.emit(
             "verb_done",
@@ -655,7 +653,7 @@ class Agent:
             },
         )
 
-        return result
+        return outcome.text
 
     # ==================================================================
     # Teardown (the single death path)

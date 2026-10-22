@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb, truncate_output
+from nan.agent.verbs import Verb, VerbOutcome, truncate_output
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -35,11 +35,11 @@ class ShellVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         command = call.arguments.get("command")
 
         if not isinstance(command, str) or not command.strip():
-            return "shell requires a non-empty 'command'."
+            return VerbOutcome("shell requires a non-empty 'command'.")
 
         # The timeout comes from the user's configuration.
 
@@ -67,7 +67,10 @@ class ShellVerb(Verb):
 
                 await proc.wait()
 
-                return f"Timed out after {timeout:g}s (command killed)."
+                return VerbOutcome(
+                    f"Timed out after {timeout:g}s (command killed).",
+                    {"timed_out": True},
+                )
 
             except asyncio.CancelledError:
                 # Pause/death cancelling the turn must not leave
@@ -77,8 +80,10 @@ class ShellVerb(Verb):
                 raise
 
         except Exception as exc:
-            return f"{type(exc).__name__}: {exc}"
+            return VerbOutcome(f"{type(exc).__name__}: {exc}")
 
         output = stdout.decode("utf-8", errors="replace")
 
-        return truncate_output(output, proc.returncode, agent.config.shell_output_limit)
+        text = truncate_output(output, proc.returncode, agent.config.shell_output_limit)
+
+        return VerbOutcome(text, {"exit_code": proc.returncode, "timed_out": False})

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb
+from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
@@ -27,15 +27,18 @@ class SleepVerb(Verb):
             },
         )
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         seconds = call.arguments.get("seconds")
 
         if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
-            return "'seconds' must be a number."
+            return VerbOutcome("'seconds' must be a number.")
 
         if seconds < 0:
-            return "'seconds' must be >= 0."
+            return VerbOutcome("'seconds' must be >= 0.")
 
         await asyncio.sleep(float(seconds))
 
-        return f"Waited {float(seconds):g} seconds."
+        return VerbOutcome(
+            f"Waited {float(seconds):g} seconds.",
+            {"seconds": float(seconds)},
+        )

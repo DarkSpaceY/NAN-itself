@@ -14,6 +14,7 @@ shell.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
@@ -23,6 +24,18 @@ if TYPE_CHECKING:
 # Shell output truncation: keep head+tail around this size
 # (the default; the effective value is agent.config.shell_output_limit).
 SHELL_OUTPUT_LIMIT = 20_000
+
+
+@dataclass(frozen=True)
+class VerbOutcome:
+    """
+    What a verb returns: the text the model receives, plus
+    structured domain facts for observers (child id, exit code,
+    ...) so no one has to parse the prose.
+    """
+
+    text: str
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 class Verb:
@@ -37,7 +50,7 @@ class Verb:
     def definition(self) -> ToolDefinition:
         raise NotImplementedError
 
-    async def execute(self, *, call: Any, agent: Agent) -> str:
+    async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
         raise NotImplementedError
 
 
