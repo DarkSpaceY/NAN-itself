@@ -1,169 +1,161 @@
-# UI redesign: Conversation + Ledger
+# Frontend design: single surface + record window
 
-Design for the frontend rewrite. Direction chosen from four
-wireframes: **A (conversation + inspector) as the shell, C
-(event ledger) as its second view**.
+Status: design, not yet implemented.
 
-## Goals
+Decisions locked:
 
-- stay readable as a conversation for the root agent
-- expose every event as a filterable row for monitoring and
-  debugging (the ledger view)
-- make the agent tree navigable without leaving the main view
-- keep working when the agent runs indefinitely
+| topic | decision |
+|---|---|
+| main surface | one conversation surface; no dual-page |
+| turns record | owned by a **separate record service**, rendered in its own window |
+| theme | system light/dark |
+| accent | one teal accent, interaction/active only |
+| icons | inline SVG only; no emoji, no text glyphs |
+| density | conversation comfortable, record compact |
+| surfaces | flat, hairline borders, no shadows, no nested cards |
 
-Non-goals: artifact canvas / diff review, kanban or agent-card
-mission control, editing history, multi-user sessions.
+Consequence: the earlier right-hand inspector is dropped. Turn
+metrics, injections and call detail belong to the record
+window; the main surface keeps only what the conversation
+needs.
 
 ## Shell
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ status strip   model · boot · paused · injection health       │
-├───────────┬──────────────────────────────────┬───────────────┤
-│ left rail │ center: selected agent            │ inspector     │
-│ sessions  │ [ Conversation | Ledger ]         │ Turn/Agent/   │
-│ agent tree│                                   │ Services      │
-├───────────┴──────────────────────────────────┴───────────────┤
-│ composer                                        pause button │
-└──────────────────────────────────────────────────────────────┘
+│ status strip   model · boot · paused · service health        │
+├──────────┬───────────────────────────────────────────────────┤
+│ left rail│ conversation (selected agent)                     │
+│ sessions │                                                   │
+│ agent    │                                                   │
+│ tree     │                                                   │
+│          ├───────────────────────────────────────────────────┤
+│          │ composer                              pause        │
+└──────────┴───────────────────────────────────────────────────┘
 ```
 
-The left rail lists past sessions and the live agent tree
-(indented by depth, status dot, child count). The center always
-shows exactly one agent. The inspector describes the selected
-turn or agent; it never duplicates the center.
+- left rail: past sessions, then the live agent tree; SVG
+  connectors, status by shape+color, depth by indentation
+- status strip: model, boot id, pause state, service health as
+  a dot matrix (one square per service)
+- center: the conversation of exactly one agent
+- composer: never disabled; the agent may be mid-turn by design
 
-## Views of the center
+## Main surface: conversation
 
-### Conversation
-
-The selected agent's turns as a chat thread.
-
-- turn separator: `#13 · 12:41:07 · 3.1s · 812 / 388 tok`,
-  clickable (selects the turn in the inspector)
-- inbox messages of the turn: user input on the right, parent
-  messages and subagent finish/death notices on the left with a
-  source label
-- assistant output: markdown, streamed; a caret while the
-  stream is open
-- verbs: collapsed inline cards (`shell · rg -n ... · 0.4s`);
-  click expands arguments and the result, click again collapses
-- spawn: a card with the child id and task; clicking it selects
-  the child (the thread switches, a breadcrumb returns)
-- failures: `turn_failed` / `turn_cancelled` render as inline
-  error blocks with backoff and retry index
-- when idle: one muted line `idle · 2 queued` -- never a fake
+- turn separator: index, wall time, duration bar, token bar;
+  clickable to focus, but it opens nothing here
+- inbox messages of a turn: user on the right; parent messages
+  and subagent reports on the left with a source label
+- assistant output: markdown, streamed, caret while open
+- verbs: one-line cards (`shell · rg -n ... · 0.4s`), click to
+  expand arguments and result
+- spawn: a card with child id and task; clicking switches the
+  center to the child; a breadcrumb returns
+- failures: inline blocks for `turn_failed` / `turn_cancelled`
+- idle: one muted line `idle · 2 queued`; never a fake
   "thinking" state
+- a record button in the status strip opens the record window
 
-### Ledger
+Nothing on this surface duplicates record data: no token
+tables, no injection lists, no call trees.
 
-Every event of the selected agent (or all agents) as rows,
-grouped under turn headers, ordered by `seq`.
+## Record window (separate service)
 
-- row: time gutter, actor, event kind, one-line summary,
-  right-aligned duration/cost; expand for the full payload
-- filters: all / verbs / injections / errors / lifecycle
-- "follow tail" toggle pins to the newest event
-- rows for other agents are indented by depth
+The record service is an independent local process. It
+subscribes to the gateway event stream, stores turns, and
+serves its own page; the main UI only links to it.
 
-The ledger is a direct projection of the event stream: no
-derived semantics beyond grouping by turn and agent.
+Responsibilities:
 
-## What each event becomes
+- own the authoritative turn history across reconnects
+- render the trace: turn list with role-tagged rows (system /
+  user / context / assistant / tool), duration and call
+  timelines, injection results, usage, retries
+- search and filter within a session
+- expose a deep link `?agent=<id>&turn=<n>` so the main UI can
+  open a specific turn
 
-| event | conversation | ledger row |
-|---|---|---|
-| `user_input` | user bubble | input |
-| `agent_started` | muted header line | lifecycle |
-| `agent_paused`/`resumed` | status strip + system line | lifecycle |
-| `agent_exited` | terminal line with reason | lifecycle |
-| `turn_started` | turn separator | turn header |
-| `injections_collected` | collapsed chip on the separator (`2 services · 1 timeout`) | injection group |
-| `output_*` | streamed markdown | output row |
-| `verb_*` | inline tool card | action row |
-| `turn_done` | separator gets duration/tokens | turn footer |
-| `turn_failed` | error block | error row |
-| `turn_cancelled` | system line | lifecycle |
+The main UI does not embed record and does not persist events
+itself; its store is memory-only and rebuilds from `hello` +
+live events, marking `seq` gaps.
 
-## Attribution rule
+Transport is still open: the record service can either
+subscribe to the gateway's `/ws` (same protocol, read-only) or
+the core can push events to it. Recommendation: subscribe to
+`/ws`, since it needs no new core-side surface and reuses one
+contract.
 
-`output_*` and `verb_*` carry no turn index. The frontend
-attributes them to the agent's **open turn** (the interval
-between that agent's `turn_started` and its `turn_done` /
-`turn_failed` / `turn_cancelled`). Each agent has at most one
-open turn, so the attribution is unambiguous. This is a
-frontend rule; the protocol stays flat.
-
-## State
-
-One normalized store fed by the event stream, plus UI
-selection.
+## Style tokens
 
 ```
-agents:   Map<agent_id, {depth, parent_id, pacing, status, children}>
-turns:    Map<agent_id, Map<turn_index, TurnView>>
-streams:  Map<stream_id, {agent_id, text, open}>
-verbs:    per agent+turn, ordered by seq
-services: per agent+turn (last injections_collected)
-ui:       {selectedAgent, selectedTurn, view, filters, followTail, pausedPending}
+accent        teal, one hue; only for interactive/active
+status        color + shape: filled=running, ring=idle, cross=exited
+surface       flat; 1px hairline #border; no shadow; radius 4 (input 6)
+type          UI sans; mono for telemetry, ids, code
+              body 13/1.55; long-form 15/1.7; tabular-nums everywhere
+density       conversation: 8-12px gaps; record: 4-6px rows
+motion        caret blink + one pulse on the active agent; nothing else
+icons         inline SVG, 14/16px, 1.5 stroke, currentColor
 ```
 
-`TurnView` accumulates: inbox count, usage, latency, retries,
-calls, history_chars, status (open/done/failed/cancelled),
-output text, verb cards, injection summary.
+Required SVG set: pause/run, send, chevron, check, cross, clock,
+streaming indicator, branch, terminal, injection-in.
 
-## Controls
+## Visualization over text
 
-- **input**: optimistic bubble keyed by `mid`; reconciled when
-  `user_input` with that `mid` arrives. Send is never disabled
-  (the agent may be mid-turn by design).
-- **pause**: three states -- running / pending / paused.
-  Clicking sends `{"t":"pause"}`; `agent_paused` confirms,
-  `agent_resumed` clears. Clicking while pending withdraws.
-- **selection**: clicking an agent in the tree or a spawn card
-  switches the center; the inspector follows the selection.
-- **reconnect**: browser `seq` gap renders a "missed N events"
-  marker; a changed `boot` in `hello` starts a fresh session.
+- agent tree: real SVG connector lines, not box-drawing
+  characters
+- turn duration and usage: inline micro-bars, not bare numbers
+- service health: dot matrix, not a text list
+- turn timeline in record: a horizontal stacked bar (input /
+  model / tools) per turn, as in the reference products
+- status: shape-encoded, so color is never the only signal
 
-## Persistence
+## Event attribution
 
-Append the raw envelope log to IndexedDB per boot session and
-replay it on load to rebuild the store. This replaces the old
-rounds mapper/database (one source instead of two). A session
-cap (number of events or bytes) trims the oldest.
+`output_*` and `verb_*` carry no turn index. Both the main
+surface and the record service attribute them to the agent's
+**open turn** (between that agent's `turn_started` and
+`turn_done` / `turn_failed` / `turn_cancelled`). One open turn
+per agent makes this unambiguous.
+
+## Controls and reconnect
+
+- input: optimistic bubble keyed by `mid`, reconciled on the
+  echoed `user_input`
+- pause: running / pending / paused; send `{"t":"pause"}` and
+  let `agent_paused` confirm; a second click while pending
+  withdraws
+- reconnect: `seq` gap renders a "missed N events" marker; a
+  changed `boot` starts a fresh session
+- selection: tree or spawn card switches the center agent;
+  selection is local, never sent to the core
 
 ## Tech
 
 Keep React 19, Vite, Tailwind 4, zustand, react-markdown,
-katex, shadcn-style primitives.
+katex. Drop `@assistant-ui/*`: it is message-centric, this UI
+is turn-centric.
 
-Drop `@assistant-ui/*`: its runtime is message-centric, while
-this UI is turn-centric with two synchronized views; keeping it
-would force the turn model through a message model.
-
-Delete from the current `src/`: `history/mapper`, `persistence/
-db`, `convert.ts`, `ui/RecordTool.tsx`, `ui/pause.tsx`,
-`ui/App.tsx`, and rewrite `protocol.ts`, `store.ts`, `ws.ts`.
+Delete: `history/mapper`, `persistence/db`, `convert.ts`,
+`ui/RecordTool.tsx`, `ui/pause.tsx`, `ui/App.tsx`; rewrite
+`protocol.ts`, `store.ts`, `ws.ts`.
 
 ## Testing
 
-- reducer tests: fixture event logs -> expected store
-  (streaming merge, verb attribution, pause confirmation,
-  reconnect gap, session replay)
-- component tests: conversation renders a turn; ledger renders
-  filters and expansion
-- no browser automation required for the first pass
+- reducer: fixture event logs -> expected store (stream
+  merging, verb attribution, pause confirmation, gap marker)
+- components: conversation renders a turn; tree renders depth
+  and status shapes; composer reconciles a mid
+- no browser automation for the first pass
 
 ## Open questions
 
-1. The protocol does not carry the **rendered observation**
-   (delta/injection/inbox text as the model saw it). Should the
-   inspector show raw event data only, or do we add a field to
-   `turn_done` (e.g. `observation_chars`) or a separate
-   `turn_observation` event?
-2. Persist the raw event log (as above), or keep memory-only
-   since the backend already has a bounded history ring?
-3. When a subagent is active, should the center auto-follow it,
-   or stay on root until the user clicks? (Recommendation:
-   stay on root, but show a "a1 is speaking" badge on the tree.)
+1. Record transport: subscribe to `/ws` (recommended) or push
+   from the core?
+2. Does the record window need write access (e.g. annotate a
+   turn), or is it read-only?
+3. Should the main surface keep any on-demand detail popover
+   (one verb's full output), or is expanding the inline card
+   enough?
