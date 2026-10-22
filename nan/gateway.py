@@ -378,17 +378,16 @@ class Gateway:
 
         return True
 
-    def _latest_status(self) -> dict:
-        """The most recent status event in history; idle when none."""
+    def _latest_paused(self) -> bool:
+        """Pause state from the newest pause/resume event in history."""
         for event in reversed(sink.history()):
-            if event.get("t") == "status":
-                content = event.get("content") or {}
+            if event.get("t") == "agent_paused":
+                return True
 
-                return {
-                    "state": content.get("state", "idle"),
-                }
+            if event.get("t") == "agent_resumed":
+                return False
 
-        return {"state": "idle"}
+        return False
 
     async def _send(self, websocket: WebSocket, payload: dict) -> None:
         """Send a message; failures are logged and re-raised."""
@@ -411,11 +410,10 @@ class Gateway:
             except Exception as e:
                 logger.error(f"State provider error: {e}")
 
-        # The status snapshot is gateway business: when the
-        # app-level state carries none, take the latest from the
-        # event history.
-        if "status" not in state:
-            state["status"] = self._latest_status()
+        # The pause snapshot is gateway business: when the app-level
+        # state carries none, derive it from event history.
+        if "paused" not in state:
+            state["paused"] = self._latest_paused()
 
         return {
             "t": "hello",

@@ -129,7 +129,11 @@ async def run_core(config_path: str | None = None) -> None:
         port=cfg.gateway.port,
         on_input=ingest,
         on_pause=on_pause,
-        state_provider=lambda: {"boot": BOOT_ID, "model": llm_cfg.model},
+        state_provider=lambda: {
+            "boot": BOOT_ID,
+            "model": llm_cfg.model,
+            "paused": root.paused,
+        },
         frontend_dir=frontend_dir if (frontend_dir and frontend_dir.exists()) else None,
     )
 

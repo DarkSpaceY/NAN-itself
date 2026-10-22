@@ -34,22 +34,38 @@ Payload schemas are the contract.
 ## Hello snapshot
 
 On connect the gateway sends `hello` with the current `seq` and
-gateway-level state; events after it are live. The history ring
-is available to the gateway but the frontend contract starts
-from `hello` -- missed events between reconnects are detected
-via `seq` gaps, not replayed.
+gateway-level state:
 
-## Input
+```json
+{
+  "t": "hello",
+  "seq": 4127,
+  "content": { "boot": "4f2a91c3e0d1", "model": "qwen3-27b", "paused": false }
+}
+```
+
+Events after it are live. The history ring is available to the
+gateway but the frontend contract starts from `hello` -- missed
+events between reconnects are detected via `seq` gaps, not
+replayed.
+
+## Input and control
 
 The frontend sends:
 
 ```json
 { "t": "input", "mid": "<client-generated id>", "text": "..." }
+{ "t": "pause" }
+{ "t": "resume" }
+{ "t": "ping" }
 ```
 
-`mid` is echoed on nothing -- delivery is fire-and-forget; the
-visible effect is the `user_input` event. Pause/resume ride the
-HTTP endpoints, not this socket.
+`mid` is the client receipt id; the gateway drops duplicates so
+a reconnect retry cannot deliver the same input twice. Delivery
+is otherwise fire-and-forget: the visible effect is the
+`user_input` event. Pause/resume are requests -- confirmation
+arrives as `agent_paused` / `agent_resumed`, so the UI keeps a
+pending state until then. `ping` is answered with `pong`.
 
 ## Payload schemas
 

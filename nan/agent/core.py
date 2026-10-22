@@ -147,6 +147,10 @@ class Agent:
     # Identity / handles
     # ==================================================================
 
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
     def start(self) -> None:
         """Register and start the loop task."""
         self.book.register(self)
