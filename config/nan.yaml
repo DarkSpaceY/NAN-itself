@@ -13,7 +13,7 @@ llm:
   #  local27b:
   #    provider: openai
   #    base_url: http://127.0.0.1:8080/v1
-  #    model: qwen-27b
+  #    model: qwen3.8-27b
   #    api_key: none
 
 agent:
