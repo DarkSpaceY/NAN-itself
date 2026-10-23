@@ -8,21 +8,6 @@ repos:
     hooks:
       - id: ruff-check
         args: [--fix]
-        files: ^(backend|builtin|tests)/
+        files: ^(nan|builtin|tests)/
       - id: ruff-format
-        files: ^(backend|builtin|tests)/
-
-  # ---- Frontend (React/TS in frontend/) ----
-  - repo: local
-    hooks:
-      - id: frontend-eslint
-        name: frontend eslint
-        entry: npm run lint:fix --prefix frontend
-        language: system
-        pass_filenames: false
-        files: ^frontend/src/
-      - id: frontend-prettier
-        name: frontend prettier
-        entry: npx --prefix frontend prettier --write
-        language: system
-        files: ^frontend/src/.*\.(ts|tsx|css|json)$
+        files: ^(nan|builtin|tests)/
