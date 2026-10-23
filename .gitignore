@@ -35,3 +35,7 @@ infraend/
 # research
 paper_search/
 .memos/
+
+# local-only trees
+design/
+legacy/
