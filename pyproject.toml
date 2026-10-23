@@ -26,6 +26,7 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "pyyaml>=6.0.2",
     "uvicorn>=0.30.0",
+    "websockets>=13", # uvicorn needs a ws implementation to serve /ws at all
 ]
 
 [project.urls]
