@@ -3,7 +3,9 @@ Event sink: lossy, fire-and-forget runtime activity feed.
 
 The UI gateway subscribes; agent code only *emits* and never
 blocks. Every emitted event carries a monotonic seq and a wall
-timestamp. A bounded history ring supports reconnect snapshots.
+timestamp. A bounded history ring supports reconnect snapshots;
+streaming deltas are coalesced into one entry per stream there,
+so the ring holds turns rather than tokens.
 
 The sink is the process-wide singleton (loguru-style):
 producers call `sink.emit(...)`, consumers call
@@ -25,7 +27,10 @@ import uuid
 from collections import deque
 from typing import Any
 
-HISTORY_LIMIT = 500
+# Reconnect snapshot depth. Deltas of one stream are coalesced in
+# history (see `_merge_stream_delta`), so an entry is roughly one
+# turn's worth of output rather than one token.
+HISTORY_LIMIT = 4000
 
 SUB_QUEUE_SIZE = 2000
 
@@ -77,6 +82,33 @@ class Sink:
 
     # -- emission ---------------------------------------------------------
 
+    @staticmethod
+    def _merge_stream_delta(
+        tail: dict[str, Any] | None, event: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """
+        Coalesce a streaming delta into the previous history entry.
+
+        Deltas arrive per token, so keeping them verbatim makes the
+        history ring hold a few turns at most. Returns the merged
+        entry to store in place of `tail`, or None when there is
+        nothing to merge.
+        """
+        if tail is None or event["t"] != "output_delta":
+            return None
+
+        if tail.get("t") != "output_delta" or tail.get("id") != event["id"]:
+            return None
+
+        merged = dict(tail)
+
+        merged["content"] = {
+            **tail["content"],
+            "text": (tail["content"].get("text") or "") + (event["content"].get("text") or ""),
+        }
+
+        return merged
+
     def emit(
         self,
         t: str,
@@ -116,7 +148,15 @@ class Sink:
         if self._boot_id is not None:
             event["boot_id"] = self._boot_id
 
-        self._history.append(event)
+        # History keeps one entry per stream, not one per token. The
+        # merged entry is a copy: subscriber queues still hold the
+        # original, so live forwarding is unaffected.
+        merged = self._merge_stream_delta(self._history[-1] if self._history else None, event)
+
+        if merged is None:
+            self._history.append(event)
+        else:
+            self._history[-1] = merged
 
         for q in self._subs:
             if q.full():
