@@ -103,10 +103,6 @@ export interface OutputDelta extends AgentIdentity {
   text: string;
 }
 
-export interface StatusContent extends AgentIdentity {
-  state: "working" | "idle" | "paused";
-}
-
 export interface UserInput {
   text: string;
   mid?: string;

@@ -9,7 +9,7 @@
 
     uv run pytest tests/ -q
 
-The suite (26 tests) covers the agent loop (pause/resume, death
+The suite (30 tests) covers the agent loop (pause/resume, death
 cascade, persona re-read, depth/children limits), injection
 hub/client, sandbox behavior, gateway entry guard and config
 loading. Shared fakes (scripted LLM, slow LLM) live in
