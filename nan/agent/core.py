@@ -190,9 +190,7 @@ class Agent:
             # delivered rather than dropped, labelled and logged.
             kind = "unknown"
 
-            logger.warning(
-                "[{}] message from unverified source '{}'", self.agent_id, source
-            )
+            logger.warning("[{}] message from unverified source '{}'", self.agent_id, source)
 
         self._deliver(InboxMessage(kind=kind, source=source, text=text))
 
@@ -325,9 +323,7 @@ class Agent:
                 "agent_id": self.agent_id,
                 "depth": self.depth,
                 "parent_id": (self.parent.agent_id if self.parent else None),
-                "pacing": (
-                    "interval" if self.config.autonomous_interval > 0 else "event-driven"
-                ),
+                "pacing": ("interval" if self.config.autonomous_interval > 0 else "event-driven"),
             },
         )
 
@@ -678,11 +674,7 @@ class Agent:
             handle.kill()
 
         await asyncio.gather(
-            *(
-                t
-                for h in children
-                if (t := getattr(h._target, "_task", None)) is not None
-            ),
+            *(t for h in children if (t := getattr(h._target, "_task", None)) is not None),
             return_exceptions=True,
         )
 
@@ -764,9 +756,7 @@ def _self_cancel_pending() -> int:
     return task.cancelling() if task is not None else 0
 
 
-def _with_response(
-    turn: Turn, response: LLMResponse, *, latency_s: float, retries: int
-) -> Turn:
+def _with_response(turn: Turn, response: LLMResponse, *, latency_s: float, retries: int) -> Turn:
     return replace(
         turn,
         reply=response.content or "",

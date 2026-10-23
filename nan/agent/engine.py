@@ -43,9 +43,7 @@ class TurnEngine:
     def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
 
-    async def generate(
-        self, *, agent_id: str, depth: int, request: LLMRequest
-    ) -> LLMResponse:
+    async def generate(self, *, agent_id: str, depth: int, request: LLMRequest) -> LLMResponse:
         # Emission without subscribers simply lands in the
         # history ring.
         text_parts: list[str] = []
@@ -53,9 +51,7 @@ class TurnEngine:
         usage = Usage()
         finish_reason: FinishReason = "unknown"
 
-        stream_id = sink.emit(
-            "output_started", content={"agent_id": agent_id, "depth": depth}
-        )
+        stream_id = sink.emit("output_started", content={"agent_id": agent_id, "depth": depth})
 
         async for event in self.llm.generate(request):
             if event.kind == "text" and event.text:

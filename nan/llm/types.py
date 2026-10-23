@@ -135,5 +135,3 @@ class LLMStreamEvent(BaseModel):
     usage: Usage | None = None
 
     finish_reason: FinishReason | None = None
-
-

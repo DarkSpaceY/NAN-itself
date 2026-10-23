@@ -78,8 +78,7 @@ def _observation_message(turn: Turn) -> Message:
 
     if grouped:
         delta_inner = [
-            f"<{section}>{'\n'.join(lines)}</{section}>"
-            for section, lines in grouped.items()
+            f"<{section}>{'\n'.join(lines)}</{section}>" for section, lines in grouped.items()
         ]
 
         parts.append("<delta>\n" + "\n".join(delta_inner) + "\n</delta>")

@@ -55,7 +55,9 @@ def resolve_llm(settings: Settings) -> LLMSettings:
         return base
 
     overrides = {
-        field: getattr(profile, field) for field in _LLM_OVERRIDE_FIELDS if getattr(profile, field) is not None
+        field: getattr(profile, field)
+        for field in _LLM_OVERRIDE_FIELDS
+        if getattr(profile, field) is not None
     }
 
     return LLMSettings(**{**base.model_dump(exclude={"providers"}), **overrides})

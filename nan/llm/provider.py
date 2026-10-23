@@ -390,9 +390,7 @@ class LLMProvider:
                         if text:
                             yield LLMStreamEvent(kind="text", text=text)
 
-                    case RawContentBlockDeltaEvent(
-                        delta=InputJSONDelta(partial_json=partial_json)
-                    ):
+                    case RawContentBlockDeltaEvent(delta=InputJSONDelta(partial_json=partial_json)):
                         current_tool_json += partial_json
 
                     case RawContentBlockStopEvent():

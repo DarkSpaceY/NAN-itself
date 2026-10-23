@@ -21,8 +21,8 @@ class ShellVerb(Verb):
                 "cwd is the workspace root; keep all file activity "
                 "under it). Commands have a fixed timeout; for "
                 "genuinely long tasks do NOT block: launch in "
-                "background, e.g. \"nohup python job.py > job.log "
-                "2>&1 &\" then poll job.log with later shell calls. "
+                'background, e.g. "nohup python job.py > job.log '
+                '2>&1 &" then poll job.log with later shell calls. '
                 "Output is truncated (head+tail kept)."
             ),
             input_schema={

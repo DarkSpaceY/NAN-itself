@@ -161,9 +161,7 @@ class Turn:
             "llm": (
                 {
                     "model": self.llm.model,
-                    "usage": (
-                        self.llm.usage.model_dump() if self.llm.usage is not None else None
-                    ),
+                    "usage": (self.llm.usage.model_dump() if self.llm.usage is not None else None),
                     "finish_reason": self.llm.finish_reason,
                     "latency_s": self.llm.latency_s,
                     "retries": self.llm.retries,

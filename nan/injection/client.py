@@ -34,9 +34,7 @@ class InjectionClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def collect(
-        self, turn: Turn, services: Sequence[ServiceEntry]
-    ) -> tuple[Injection, ...]:
+    async def collect(self, turn: Turn, services: Sequence[ServiceEntry]) -> tuple[Injection, ...]:
         """
         Concurrently ask every given service for this turn's
         prompt text. Empty contributions are dropped; errors stay

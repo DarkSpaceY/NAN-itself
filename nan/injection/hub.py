@@ -159,9 +159,7 @@ class InjectionHub:
 
         return [e for e in self._services.values() if now - e.last_seen <= self.heartbeat_ttl]
 
-    async def collect(
-        self, turn: Turn
-    ) -> tuple[tuple[Injection, ...], list[DeltaEvent]]:
+    async def collect(self, turn: Turn) -> tuple[tuple[Injection, ...], list[DeltaEvent]]:
         """
         Ask every live service for this turn's prompt text, all
         concurrently. Every outcome lands on the record:

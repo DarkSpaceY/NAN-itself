@@ -131,8 +131,7 @@ class Sandbox:
                 self._warned = True
 
                 logger.warning(
-                    "No sandbox tool found (sandbox-exec/bwrap); "
-                    "shell commands run unsandboxed"
+                    "No sandbox tool found (sandbox-exec/bwrap); shell commands run unsandboxed"
                 )
 
             return command
