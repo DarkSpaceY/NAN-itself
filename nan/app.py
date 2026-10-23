@@ -149,9 +149,7 @@ async def run_core(config_path: str | None = None) -> None:
 
         root.start()
 
-        gateway_task = asyncio.create_task(
-            gateway.serve(open_browser=False), name="gateway"
-        )
+        gateway_task = asyncio.create_task(gateway.serve(open_browser=False), name="gateway")
 
         stop = asyncio.Event()
 
@@ -159,8 +157,7 @@ async def run_core(config_path: str | None = None) -> None:
             loop.add_signal_handler(sig, lambda: _shutdown(root, stop))
 
         logger.info(
-            "nan running: gateway http://{}:{}, injection registry :{}, "
-            "workspace {}, sandbox {}",
+            "nan running: gateway http://{}:{}, injection registry :{}, workspace {}, sandbox {}",
             cfg.gateway.host,
             cfg.gateway.port,
             cfg.injection.port,

@@ -310,6 +310,11 @@ class Agent:
 
         self._resumed.set()
 
+    @property
+    def paused(self) -> bool:
+        """Current pause flag, for the gateway's hello snapshot."""
+        return self._paused
+
     # ==================================================================
     # The loop
     # ==================================================================
