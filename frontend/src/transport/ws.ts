@@ -8,7 +8,6 @@
 import {
   isEnvelope,
   isHello,
-  obj,
   str,
   type ClientMessage,
   type Envelope,
@@ -176,7 +175,10 @@ export class WsTransport implements Transport {
             typeof msg.content?.model === "string"
               ? msg.content.model
               : undefined,
-          status: obj(msg.content?.status) as { state?: string } | undefined,
+          paused:
+            typeof msg.content?.paused === "boolean"
+              ? msg.content.paused
+              : undefined,
         },
       });
       // 后端重启过：历史不可拼接，重建树与时间线

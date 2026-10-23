@@ -24,7 +24,7 @@ export interface Envelope {
 export interface Hello {
   t: "hello";
   seq: number;
-  content: { boot?: string; model?: string; status?: { state?: string } };
+  content: { boot?: string; model?: string; paused?: boolean };
 }
 
 export interface Pong {
@@ -154,7 +154,6 @@ export const EVENT_TYPES = new Set([
   "output_delta",
   "output_done",
   "output_cancelled",
-  "status",
   "user_input",
 ]);
 

@@ -211,7 +211,7 @@ export class MockTransport implements Transport {
     this.hub.global.setConnection("open");
     this.hub.global.applyHello({
       seq: 0,
-      content: { boot: BOOT, model: "mock-model", status: { state: "idle" } },
+      content: { boot: BOOT, model: "mock-model", paused: false },
     });
 
     for (const spec of DEMO_SURFACES) onSurface(spec);

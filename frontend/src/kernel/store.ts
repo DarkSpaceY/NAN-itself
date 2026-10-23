@@ -63,13 +63,6 @@ export function reduceGlobal(state: GlobalState, env: Envelope): GlobalState {
       if (isRoot(state, env)) next.paused = false;
       return next;
 
-    case "status": {
-      const s = str(env.content.state);
-      if (s === "paused") next.paused = true;
-      else if (s === "working" || s === "idle") next.paused = false;
-      return next;
-    }
-
     default:
       return next;
   }
@@ -117,17 +110,11 @@ export class GlobalStore {
    */
   applyHello(hello: {
     seq: number;
-    content?: { boot?: string; model?: string; status?: { state?: string } };
+    content?: { boot?: string; model?: string; paused?: boolean };
   }): void {
     const bootId = hello.content?.boot ?? null;
     const bootChanged = bootId !== this.state.bootId;
-    const state = hello.content?.status?.state;
-    const paused =
-      state === "paused"
-        ? true
-        : state === "working" || state === "idle"
-          ? false
-          : this.state.paused;
+    const paused = hello.content?.paused ?? this.state.paused;
 
     // lastSeq 不取 hello.seq：重放事件的 seq 可能低于它，游标只能
     // 跟着事件自身走。

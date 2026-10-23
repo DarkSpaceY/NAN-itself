@@ -39,6 +39,16 @@ is available to the gateway but the frontend contract starts
 from `hello` -- missed events between reconnects are detected
 via `seq` gaps, not replayed.
 
+```json
+{ "t": "hello", "seq": 1,
+  "content": { "boot": "<id>", "model": "<name>", "paused": false } }
+```
+
+`boot` changes when the core restarts: the frontend drops history
+and starts over. `paused` is a snapshot derived from the newest
+`agent_paused`/`agent_resumed` in history, so a reconnect while
+paused still shows the right button.
+
 ## Input
 
 The frontend sends:
@@ -48,8 +58,17 @@ The frontend sends:
 ```
 
 `mid` is echoed on nothing -- delivery is fire-and-forget; the
-visible effect is the `user_input` event. Pause/resume ride the
-HTTP endpoints, not this socket.
+visible effect is the `user_input` event.
+
+Pause and resume are socket messages too, not HTTP endpoints:
+
+```json
+{ "t": "pause" }
+{ "t": "resume" }
+```
+
+They take effect asynchronously; the confirmation is the
+`agent_paused` / `agent_resumed` event on the same socket.
 
 ## Payload schemas
 
