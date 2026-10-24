@@ -103,7 +103,9 @@ def test_default_yaml_is_the_committed_template() -> None:
 
     assert cfg.workspace == REPO_ROOT / "workspace"
     assert cfg.builtin_dir == REPO_ROOT / "builtin"
+    assert cfg.gateway.host == "127.0.0.1"
     assert cfg.gateway.port == 8765
+    assert cfg.injection.host == "127.0.0.1"
     assert cfg.injection.port == 8901
     assert cfg.sandbox.enabled is True
     assert cfg.sandbox.required is False

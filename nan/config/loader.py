@@ -3,7 +3,7 @@ Loading + path resolution for nan Settings.
 
 Relative paths in the YAML resolve against the directory that
 contains the config (its parent, conventionally the repo root).
-Defaults anchor to the nan package for persona/autostart.
+Defaults anchor to the nan package for persona, workspace for autostart.
 """
 
 from __future__ import annotations
