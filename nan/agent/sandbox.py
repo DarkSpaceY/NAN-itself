@@ -6,7 +6,9 @@ Seatbelt profile is generated once at core startup: write access
 only to the workspace and temp directories, the nan package and
 the builtin tree explicitly read-only, reads and network open.
 Linux uses the bubblewrap equivalent. Services and the
-autostart script run with user authority, outside the sandbox.
+autostart script run with user authority, outside the sandbox;
+the autostart script lives in the workspace but is user-owned
+and must never be written by an agent.
 
 If no sandbox tool exists on the host, ``sandbox.required``
 decides: true -- refuse to execute (raise); false -- degrade to

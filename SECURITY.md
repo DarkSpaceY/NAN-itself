@@ -43,7 +43,9 @@ trust is the boundary, consistent with the trust model above.
   degraded (sandbox tooling missing, loud warning) / required
   (`sandbox.required: true` -- missing tooling refuses to
   execute). Services and the autostart script run with user
-  authority, outside the sandbox.
+  authority, outside the sandbox. The autostart script lives in
+  the workspace but is user-owned: the agent must never write
+  it.
 - **Agent authority limits.** `shell_timeout` and
   `shell_output_limit` come from user configuration; tools and
   skills are plain files reached through the sandboxed shell; the

@@ -27,8 +27,7 @@ injection, and the shell as the universal tool surface.
     builtin/      read-only resources the agent reaches through shell
     config/       nan.yaml -- the single configuration source
     frontend/     the gateway's web UI (built to frontend/dist)
-    workspace/    the agents' writable territory
-    legacy/       pre-rewrite modules/skills/tools, awaiting
-                  re-migration as independent services
+    workspace/    the agents' writable territory (services live in
+                  workspace/services/, one uv project each)
     tests/        pytest suite
     docs/         this documentation

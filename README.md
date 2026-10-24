@@ -76,15 +76,19 @@ flowchart LR
 | [Injection services](docs/for-service-authors/injection-service.md) | Write a prompt-contributor service |
 | [Architecture](docs/for-contributors/architecture.md) | How the core is built |
 | [Principles](docs/for-contributors/principles.md) | The design rules |
+| [Frontend protocol](docs/for-contributors/frontend-protocol.md) | The event stream contract |
+| [Developing](docs/for-contributors/develop.md) | Test, lint, type-check |
 
 ## Repository layout
 
     nan/          the core package (the only runtime code)
     builtin/      read-only resources the agent reaches through shell
     config/       nan.yaml -- the single configuration source
-    frontend/     the gateway's web UI
-    workspace/    the agents' writable territory
-    legacy/       pre-rewrite resources, awaiting re-migration as services
+    frontend/     the gateway's web UI (built to frontend/dist)
+    workspace/    the agents' writable territory (services live in
+                  workspace/services/, one uv project each)
+    tests/        pytest suite
+    docs/         this documentation
 
 ## License
 

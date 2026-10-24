@@ -47,19 +47,20 @@ caching work. There is no in-place rewriting of history.
 
 ```mermaid
 flowchart TB
-    U["user"] -->|"writes"| CORE["nan/<br/>code, persona, autostart, config"]
+    U["user"] -->|"writes"| CORE["nan/<br/>code, persona, config"]
     U -->|"writes"| BI["builtin/<br/>resources"]
+    U -->|"writes"| AU["workspace/autostart.sh<br/>(user-owned)"]
     A["agent"] -->|"shell: read-only"| CORE
     A -->|"shell: read-only"| BI
-    A -->|"shell: write"| WS["workspace/"]
+    A -->|"shell: write"| WS["workspace/<br/>(except autostart.sh)"]
     CORE -.->|"boots and governs"| A
 ```
 
-Three zones: the nan package (core code, persona, autostart --
-the agent cannot write these), `builtin/` (read-only
-resources), and `workspace/` (the only place an agent writes).
-Persona and autostart are user-owned files; the agent's self
-definition and startup behavior are not under model authority.
+Three zones: the nan package (core code, persona -- the agent
+cannot write these), `builtin/` (read-only resources), and
+`workspace/` (the agent's writable territory). One exception
+inside the workspace: `autostart.sh` is user-owned -- it boots
+the machine-level components, so the agent must never write it.
 
 ## One path for everything important
 

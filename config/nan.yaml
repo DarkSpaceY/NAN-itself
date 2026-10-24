@@ -46,4 +46,4 @@ builtin_dir: builtin        # read-only builtin tree
 
 autostart:
   enabled: true
-  path: null                # default: nan/autostart.sh (user-owned, agent-writes forbidden)
+  path: null                # default: workspace/autostart.sh (user-owned, agent-writes forbidden)

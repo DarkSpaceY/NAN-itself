@@ -86,7 +86,7 @@ The registry the external prompt-contributor services talk to.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `enabled` | `true` | Run the autostart script once at boot |
-| `path` | `null` | Default: `nan/autostart.sh` (a core file, outside the agents' reach) |
+| `path` | `null` | Default: `workspace/autostart.sh` (user-owned; the one workspace file the agent must not edit) |
 
 ## Top-level paths
 

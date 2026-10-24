@@ -86,7 +86,7 @@ class GatewaySettings(BaseModel):
 
 class AutostartSettings(BaseModel):
     enabled: bool = True
-    path: Path | None = None  # default: nan/autostart.sh
+    path: Path | None = None  # default: workspace/autostart.sh
 
 
 class Settings(BaseSettings):

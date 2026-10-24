@@ -86,7 +86,8 @@ flowchart TB
   execute)
 
 Services and the autostart script run with user authority,
-outside the sandbox.
+outside the sandbox. The autostart script lives in the
+workspace but is user-owned: the agent must never write it.
 
 ## Agent authority limits
 

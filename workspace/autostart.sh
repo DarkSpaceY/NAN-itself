@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 # Autostart: default components launched by the core at boot.
-# This script lives OUTSIDE the workspace and is NOT for agents
-# to edit: it runs with the user's authority, so changing it is
-# a privilege escalation vector. It is USER-OWNED -- the agent
-# must never write it (an agent-writable autostart is a
-# privilege escalation vector).
 #
 # Each line should launch a service in the background, e.g.:
 #   nohup python "$NAN_WORKSPACE/services/echo_service.py" \
@@ -12,7 +7,6 @@
 
 set -u
 
-: "${NAN_CORE_HOME:?NAN_CORE_HOME must be set by the core}"
 : "${NAN_WORKSPACE:?NAN_WORKSPACE must be set by the core}"
 
 echo "[autostart] boot at $(date)" >> "$NAN_WORKSPACE/autostart.log"

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-from . import PACKAGE_DIR, REPO_ROOT, LLMSettings, Settings
+from . import REPO_ROOT, LLMSettings, Settings
 
 _LLM_OVERRIDE_FIELDS = ("provider", "base_url", "api_key", "model", "timeout", "max_retries")
 
@@ -66,7 +66,8 @@ def resolve_llm(settings: Settings) -> LLMSettings:
 def _resolve_paths(settings: Settings, *, base: Path) -> Settings:
     """
     Anchor every configurable path: relative -> against `base`;
-    persona/autostart default into the nan package.
+    persona defaults into the nan package, autostart into the
+    workspace.
     """
     settings.workspace = _anchor(settings.workspace, base)
 
@@ -75,7 +76,7 @@ def _resolve_paths(settings: Settings, *, base: Path) -> Settings:
     settings.agent.persona_path = _anchor(settings.agent.persona_path, base)
 
     if settings.autostart.path is None:
-        settings.autostart.path = PACKAGE_DIR / "autostart.sh"
+        settings.autostart.path = settings.workspace / "autostart.sh"
     else:
         settings.autostart.path = _anchor(settings.autostart.path, base)
 

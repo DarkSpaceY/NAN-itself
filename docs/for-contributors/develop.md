@@ -15,6 +15,17 @@ hub/client, sandbox behavior, gateway entry guard and config
 loading. Shared fakes (scripted LLM, slow LLM) live in
 `tests/nan_fakes.py`.
 
+## Service tests
+
+Services under `workspace/services/` are independent uv projects;
+the core test suite never touches them. Each carries its own
+`tests/`, run from its own directory:
+
+    cd workspace/services/<name> && uv run --frozen pytest
+
+CI runs every service suite with `--frozen` (a stale `uv.lock`
+fails the build instead of silently resolving).
+
 ## Lint and format
 
     uv run ruff check nan/ tests/

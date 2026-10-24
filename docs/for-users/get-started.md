@@ -38,7 +38,7 @@ What starts:
 - the gateway web UI on `http://127.0.0.1:8765` (serving
   `frontend/dist` when built)
 - the injection registry on `127.0.0.1:8901`
-- the autostart script (`nan/autostart.sh`) if enabled and present
+- the autostart script (`workspace/autostart.sh`) if enabled and present
 
 ```mermaid
 flowchart LR

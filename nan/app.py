@@ -224,7 +224,7 @@ def _run_autostart(cfg: Settings) -> None:
 
     env = {
         **os.environ,
-        "NAN_CORE_HOME": str(autostart_path.parent),
+        "NAN_CORE_HOME": str(PACKAGE_DIR),
         "NAN_WORKSPACE": str(cfg.workspace),
         "NAN_INJECTION_PORT": str(cfg.injection.port),
         "NAN_CORE_PID": str(os.getpid()),

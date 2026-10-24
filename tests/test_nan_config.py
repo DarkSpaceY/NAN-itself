@@ -61,9 +61,9 @@ def test_load_explicit_yaml(tmp_path: Path) -> None:
     assert cfg.builtin_dir == (tmp_path / "builtin").resolve()
     assert cfg.gateway.frontend_dir == (tmp_path / "frontend" / "dist").resolve()
 
-    # persona/autostart default into the nan package
+    # persona defaults into the nan package, autostart into the workspace
     assert cfg.agent.persona_path == PACKAGE_DIR / "persona.md"
-    assert cfg.autostart.path == PACKAGE_DIR / "autostart.sh"
+    assert cfg.autostart.path == cfg.workspace / "autostart.sh"
     assert cfg.autostart.enabled is False
 
     assert cfg.agent.autonomous_interval == 5.0
