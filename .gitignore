@@ -21,12 +21,10 @@ wheels/
 
 # Runtime data
 data/
-
-# Workspace: user-editable overrides. Seed files (persona.md,
-# modules/workspace.py) ARE tracked as shipped defaults; anything
-# else the user drops in here stays local.
-workspace/*
-!workspace/persona.md
+workspace/.DS_Store
+workspace/*.log
+workspace/*.pid
+workspace/services/**/*.log
 
 # Model weights (large binaries, managed outside git)
 models/

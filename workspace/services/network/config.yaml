@@ -1,0 +1,32 @@
+# Network service configuration. Loaded from this file's directory.
+# Every probe failure degrades to null; the service never dies
+# from a missing network.
+
+hub_url: "http://127.0.0.1:8901"   # injection hub (register / heartbeat)
+service_id: "network"
+host: "127.0.0.1"
+port: 9002
+
+online_every: 15.0                 # seconds between reachability probes
+probe_timeout: 3.0                 # per-probe-request timeout
+probe_urls:                        # first must be a 204 endpoint (non-204 = captive)
+  - "http://captive.apple.com"
+  - "https://www.baidu.com"
+  - "https://api.ipify.org"
+dns_host: www.apple.com            # resolved on every online sweep (dns fail events)
+arp_watch: false                   # emit "new lan device" on unseen arp entries
+arp_every: 60.0                    # seconds between arp sweeps
+offline_after: 2                   # consecutive failures before "offline"
+ip_every: 600.0                    # seconds between public-ip checks
+ip_urls:
+  - "https://api.ipify.org"
+  - "https://ip.3322.net"
+  - "https://ifconfig.me/ip"
+conns_every: 15.0                  # seconds between connection sweeps
+spike_ratio: 8.0                   # down-rate multiple over baseline = spike
+spike_floor_bps: 1000000.0         # spike must also exceed this (B/s)
+outbound_max: 512                  # seen-outbound ring size
+outbound_ttl: 3600.0               # seconds an outbound key stays seen
+
+events_max: 8                      # event ring size
+events_render_limit: 3             # events shown per injection

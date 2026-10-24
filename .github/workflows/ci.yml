@@ -51,6 +51,12 @@ jobs:
       - name: Tests
         run: uv run --no-sync pytest -q
 
+      # Each service is its own uv project with its own tests.
+      - name: Service tests
+        run: |
+          (cd workspace/services/system && uv run --frozen pytest -q)
+          (cd workspace/services/network && uv run --frozen pytest -q)
+
   # The distribution has to build: pyproject is the source of truth for
   # the wheel layout, and the console script ships with it.
   package:
