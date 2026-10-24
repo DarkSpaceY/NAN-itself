@@ -1,12 +1,14 @@
-// 纯缩放：所有面板渲染同一份固定宽度设计，父层 transform 缩放。
+// Pure scaling: every pane renders the same fixed-width design; the
+// parent scales it with a transform.
 //
-// 面板里永远是 1024px 宽的上下文，媒体查询永远命中同一个分支 ——
-// 布局错落在结构上不可能发生。桥不传 scale、不传密度、不传断点。
+// Inside a pane the context is always 1024px wide and media queries
+// always hit the same branch -- broken layout is structurally
+// impossible. The bridge passes no scale, no density, no breakpoints.
 
-/** 面板内部设计宽度。面板作者只能假设这一个宽度。 */
+/** Design width inside a pane. Pane authors may assume only this width. */
 export const DESIGN_W = 1024;
 
-/** 主区在超高窗口下的缩放上限，超过则加黑边而不是继续放大。 */
+/** Scale cap for the main area on very tall windows; beyond it, letterbox instead of enlarging further. */
 export const MAX_SCALE = 1.5;
 
 export interface ScaledFrame {
@@ -17,15 +19,16 @@ export interface ScaledFrame {
 }
 
 /**
- * 把 DESIGN_W 宽的设计塞进 paneW × paneH 的视口。
- * 宽度不足时整体等比缩小；缩放超上限时停止放大（letterbox）。
+ * Fit the DESIGN_W-wide design into a paneW x paneH viewport.
+ * Scale down proportionally when width runs short; stop enlarging past
+ * the cap (letterbox).
  */
 export function fitFrame(paneW: number, paneH: number): ScaledFrame {
   const raw = paneW / DESIGN_W;
   const scale = Math.min(raw, MAX_SCALE);
   return {
     width: DESIGN_W,
-    // 先按 1:1 撑高内容，再由 transform 压缩到视口高度
+    // Size the content at 1:1 height first, then compress to the viewport height via transform
     height: scale > 0 ? paneH / scale : paneH,
     scale,
     transformOrigin: "top left",

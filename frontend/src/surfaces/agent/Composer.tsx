@@ -1,6 +1,8 @@
-// 输入框：协议没有寻址输入，发出的永远进 root。
+// Input box: the protocol has no addressed input; everything sent goes
+// to the root.
 //
-// 钻到子 agent 时只在旁边标注目标，输入路径不变。
+// Drilling into a subagent only annotates the target beside the box;
+// the input path does not change.
 
 import { useState } from "react";
 
@@ -10,9 +12,9 @@ import type { Transport } from "../../transport/ws";
 interface ComposerProps {
   transport: Transport;
   paused: boolean;
-  /** 非 root 焦点时的提示文本，例如 "root · viewing a3"。 */
+  /** Hint text when focus is not root, e.g. "root · viewing a3". */
   targetLabel: string | null;
-  /** 本轮还在跑时发出的消息：排队等轮边界，不进时间线。 */
+  /** Messages sent while the round is still running: queued until the round boundary, not in the timeline. */
   queued: readonly InputPart[];
 }
 

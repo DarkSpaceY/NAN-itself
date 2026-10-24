@@ -1,7 +1,9 @@
-// 内容区的那一个窗口：原生 chrome + 缩放视口。
+// The single window in the content area: native chrome + scaled
+// viewport.
 //
-// chrome 不缩放（面包屑在窄窗口下仍可读）；内部永远是 DESIGN_W 宽的
-// 上下文，由父层 transform 缩到可用尺寸。
+// The chrome does not scale (breadcrumbs stay readable on narrow
+// windows); inside, the context is always DESIGN_W wide, scaled down
+// to the available size by the parent's transform.
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 

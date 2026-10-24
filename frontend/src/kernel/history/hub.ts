@@ -1,8 +1,10 @@
-// 事件路由：一条流 → 每个 agent 一条时间线。
+// Event routing: one stream -> one timeline per agent.
 //
-// hub 是唯一入口。它按 agent_id 把事件分给对应的 Mapper，同时维护
-// agent 树与全局状态。root 的身份要等 agent_started 才知道，之前
-// 到达的事件先压在一个有界缓冲里，root 一出现就按 seq 顺序补灌。
+// The hub is the single entry. It dispatches events by agent_id to the
+// matching Mapper and maintains the agent tree and global state. The
+// root's identity is only learned at agent_started; events arriving
+// before that are held in a bounded buffer and back-filled in seq
+// order once the root appears.
 
 import { agentIdOf, isLive, type Envelope } from "../protocol";
 import { emptyTree, pathTo, reduceTree, type AgentNode, type AgentTree } from "../agents";
@@ -10,10 +12,10 @@ import type { GlobalStore } from "../store";
 import { Mapper } from "./mapper";
 import type { InputPart } from "./parts";
 
-/** 未定归属的事件缓冲上限：超过就丢最旧的，桌面是实时视图不是日志。 */
+/** Cap for events with unassigned ownership: drop the oldest beyond it; the desktop is a live view, not a log. */
 const PENDING_LIMIT = 64;
 
-/** 已退出 agent 的时间线最多留这么多份，正在看的那个不淘汰。 */
+/** Keep at most this many timelines for exited agents; the one being viewed is never evicted. */
 const TIMELINE_KEEP = 16;
 
 type Listener = () => void;
@@ -23,9 +25,9 @@ export class Hub {
   private tree: AgentTree = emptyTree();
   private mappers = new Map<string, Mapper>();
   private pending: Envelope[] = [];
-  /** 已退出 agent 的退出顺序，用于淘汰时间线。 */
+  /** Exit order of exited agents, used to evict timelines. */
   private exited: string[] = [];
-  /** 当前面板正在看谁：它即使已退出也不淘汰。 */
+  /** Who the panel is currently viewing: never evicted even after exit. */
   private pinned: string | null = null;
   private lastSeq = 0;
   private version = 0;
@@ -35,7 +37,7 @@ export class Hub {
     this.global = global;
   }
 
-  // -- 订阅 ----------------------------------------------------------
+  // -- subscription ---------------------------------------------------
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -60,7 +62,7 @@ export class Hub {
     return mapper;
   }
 
-  // -- 读取 ----------------------------------------------------------
+  // -- read ------------------------------------------------------------
 
   get rootId(): string | null {
     return this.tree.rootId;
@@ -79,13 +81,13 @@ export class Hub {
     return this.mapperFor(agentId).getRounds();
   }
 
-  /** 发出但还没进时间线的消息（agent 本轮仍在跑）。 */
+  /** Messages emitted but not yet in the timeline (agent's round still running). */
   queued(agentId: string | null): readonly InputPart[] {
     if (!agentId) return [];
     return this.mappers.get(agentId)?.getQueued() ?? [];
   }
 
-  /** 面包屑路径：root → ... → agentId。 */
+  /** Breadcrumb path: root -> ... -> agentId. */
   path(agentId: string | null): AgentNode[] {
     if (!agentId) return [];
     return pathTo(this.tree, agentId);
@@ -95,25 +97,27 @@ export class Hub {
     return agentId ? this.tree.nodes.get(agentId) : undefined;
   }
 
-  // -- 写入 ----------------------------------------------------------
+  // -- write -----------------------------------------------------------
 
-  /** 唯一入口。非 live 事件、重复 seq 直接丢弃。 */
+  /** The single entry. Non-live events and duplicate seq are dropped outright. */
   ingest(env: Envelope): void {
     if (!isLive(env)) return;
     if (env.seq <= this.lastSeq) return;
     this.lastSeq = env.seq;
 
-    // 树先走：root 身份（agent_started）必须先被 store 知道，
-    // 否则 root 的 agent_paused 会被当成子 agent 的信号丢掉。
+    // Tree first: the root identity (agent_started) must reach the store
+    // before anything else, otherwise the root's agent_paused is mistaken
+    // for a subagent's signal and dropped.
     reduceTree(this.tree, env);
     this.global.setRoot(this.tree.rootId);
     this.global.apply(env);
 
     const agentId = agentIdOf(env);
 
-    // root 未知：事件先压住（保持 seq 顺序）。root 一现身 —— 可能是
-    // agent_started，也可能是任何带 depth 0 的事件（重放从半截开始
-    // 时 agent_started 已被环形缓冲挤掉）—— 再按序补灌。
+    // Root unknown: hold events (keeping seq order). Once the root shows
+    // up -- either as agent_started or as any event carrying depth 0
+    // (when replay starts mid-way, agent_started was already evicted
+    // from the ring buffer) -- back-fill in order.
     if (this.tree.rootId === null) {
       if (agentId || env.t === "user_input") {
         this.pending.push(env);
@@ -132,7 +136,8 @@ export class Hub {
       this.mapperFor(agentId).feed(env);
     }
 
-    // 退出只回收时间线，节点留着：面包屑和 open 按钮永远指得到人。
+    // Exit only reclaims the timeline; the node stays: breadcrumbs and
+    // the open button always find their target.
     if (env.t === "agent_exited") {
       const who = agentIdOf(env);
       if (who) this.exited.push(who);
@@ -142,7 +147,7 @@ export class Hub {
     this.bump();
   }
 
-  /** 把面板正在看的 agent 钉住，避免它的历史被淘汰掉。 */
+  /** Pin the agent the panel is viewing so its history is not evicted. */
   pin(agentId: string | null): void {
     this.pinned = agentId;
   }
@@ -156,7 +161,7 @@ export class Hub {
     }
   }
 
-  /** 补灌攒下的 user_input：它们没有 agent_id，只能进 root。 */
+  /** Back-fill the held user_input events: they carry no agent_id and can only go to the root. */
   private flush(rootId: string): void {
     if (this.pending.length === 0) return;
     const queued = this.pending;
@@ -164,7 +169,7 @@ export class Hub {
     for (const env of queued) this.mapperFor(rootId).feed(env);
   }
 
-  /** hello 换了 boot：历史全部作废，树与时间线重建。 */
+  /** hello brought a different boot: all history is voided; tree and timelines are rebuilt. */
   reset(): void {
     this.tree = emptyTree();
     this.mappers.clear();

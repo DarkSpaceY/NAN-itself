@@ -1,26 +1,28 @@
-// 事件契约：核心进程 → 桌面，唯一真相。
+// Event contract: core process -> desktop, the single source of truth.
 //
-// 信封由 sink 统一盖章（t / id / seq / ts / boot_id），业务字段全部
-// 在 content 里，按 t 分派。身份字段是 agent_id / parent_id / depth，
-// 由发射点写进 content —— 见 nan/agent/core.py 与 engine.py。
+// The envelope is stamped uniformly by the sink (t / id / seq / ts /
+// boot_id); every business field lives in content, dispatched by t.
+// Identity fields are agent_id / parent_id / depth, written into
+// content at the emission point -- see nan/agent/core.py and engine.py.
 //
-// 前端是这条流的渲染器：不推断、不补发、不缓存轮次。重连拿到
-// hello 之后由网关重放环形缓冲，seq 只用于去重。
+// The frontend is a renderer for this stream: it never infers,
+// replays or caches turns. On reconnect the gateway replays the ring
+// buffer after hello; seq is only for deduplication.
 
 export interface Envelope {
   t: string;
-  /** 关联 id：output_* 家族同 id 配对；其余事件也带，可忽略。 */
+  /** Correlation id: output_* events pair by id; others carry it too, ignorable. */
   id?: string;
-  /** 进程内单调序号，跨重连用于去重与缺口检测。 */
+  /** In-process monotonic sequence, used across reconnects for dedup and gap detection. */
   seq: number;
-  /** unix 秒。 */
+  /** unix seconds. */
   ts: number;
-  /** 只在 sink 带 boot id 时出现。 */
+  /** Present only when the sink carries a boot id. */
   boot_id?: string;
   content: Record<string, unknown>;
 }
 
-/** 服务端下行：事件、握手、心跳应答。 */
+/** Server downstream: events, handshake, heartbeat replies. */
 export interface Hello {
   t: "hello";
   seq: number;
@@ -31,7 +33,7 @@ export interface Pong {
   t: "pong";
 }
 
-/** 前端上行。 */
+/** Frontend upstream. */
 export type ClientMessage =
   | { t: "input"; text: string; mid?: string }
   | { t: "pause" }
@@ -39,7 +41,7 @@ export type ClientMessage =
   | { t: "ping" };
 
 // ------------------------------------------------------------------
-// content 载荷
+// content payloads
 // ------------------------------------------------------------------
 
 export interface AgentIdentity {
@@ -76,13 +78,13 @@ export interface TurnFailed extends AgentIdentity {
   retry_index: number;
 }
 
-/** 一个 verb 的调用：名字 + 结构化参数。 */
+/** One verb invocation: name + structured arguments. */
 export interface VerbStarted extends AgentIdentity {
   verb: string;
   arguments: Record<string, unknown>;
 }
 
-/** verb 返回给模型的原文；detail 是给界面看的结构化摘要。 */
+/** The verbatim text the verb returned to the model; detail is a structured summary for the UI. */
 export interface VerbResult extends AgentIdentity {
   verb: string;
   text: string;
@@ -114,8 +116,10 @@ export interface AgentExited extends AgentIdentity {
 }
 
 /**
- * 窗口注册（`surface_added`）。后端尚未实现：`nan/injection/hub.py`
- * 注册的是上下文服务，不是窗口。桌面临时从 mock 流读取同一形状。
+ * Surface registration (`surface_added`). Not yet implemented
+ * server-side: `nan/injection/hub.py` registers context services,
+ * not windows. The desktop reads the same shape from the mock
+ * stream for now.
  */
 export interface SurfaceSpec {
   service_id: string;
@@ -125,12 +129,14 @@ export interface SurfaceSpec {
 }
 
 // ------------------------------------------------------------------
-// 已知类型表
+// Known type table
 // ------------------------------------------------------------------
 
 /**
- * 桌面消费的事件类型。`surface.*` 是窗口注册预留命名空间，暂不消费；
- * 其他未知类型直接忽略（后加事件不能让旧桌面崩）。
+ * Event types the desktop consumes. `surface.*` is a reserved
+ * namespace for window registration, not consumed yet; any other
+ * unknown type is ignored outright (later-added events must not
+ * crash an older desktop).
  */
 export const EVENT_TYPES = new Set([
   "agent_started",
@@ -174,13 +180,13 @@ export function isHello(msg: unknown): msg is Hello {
   );
 }
 
-/** 桌面是否消费该事件。 */
+/** Whether the desktop consumes this event. */
 export function isLive(env: Envelope): boolean {
   return EVENT_TYPES.has(env.t);
 }
 
 // ------------------------------------------------------------------
-// content 读取：字段缺失一律当 null，不抛
+// content readers: missing fields are null, never thrown
 // ------------------------------------------------------------------
 
 export function str(v: unknown): string | null {
@@ -193,7 +199,7 @@ export function obj(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** 事件的 agent 归属；没有就是 null（网关回声、模块生命周期）。 */
+/** The agent this event belongs to; null when there is none (gateway echo, module lifecycle). */
 export function agentIdOf(env: Envelope): string | null {
   return str(env.content.agent_id);
 }

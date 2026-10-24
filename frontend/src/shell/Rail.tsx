@@ -1,7 +1,8 @@
-// rail：唯一的活动窗口切换器，每个窗口一个 chip。
+// rail: the only active-window switcher, one chip per window.
 //
-// 48px 放不下标题，所以图标是必需的；没有 icon 的服务退化为首字母。
-// chip 顺序固定（注册序），不会因为切换而重排。
+// 48px cannot fit a title, so an icon is required; services without an
+// icon degrade to their initial. Chip order is fixed (registration
+// order) and never re-sorted by switching.
 
 import type { WindowRef } from "../kernel/queue";
 import { WindowIcon } from "../surfaces/registry";

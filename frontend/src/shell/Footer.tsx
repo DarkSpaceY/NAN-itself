@@ -1,7 +1,8 @@
-// footer：composer 加一行全局状态。
+// footer: the composer plus one line of global status.
 //
-// composer 只在主区是 agent 面板时出现；状态行永远在，且不滚动。
-// 这里不放任何派生指标 —— 数值都来自事件流或 hello。
+// The composer appears only while the main area is the agent pane; the
+// status line is always present and never scrolls. No derived metrics
+// here -- every number comes from the event stream or hello.
 
 import type { Connection } from "../kernel/store";
 import type { InputPart } from "../kernel/history/parts";

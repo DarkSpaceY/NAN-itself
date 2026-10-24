@@ -1,16 +1,16 @@
-// 开发用事件流：与网关同一信封形状，不连后端。
+// Dev-only event stream: same envelope shape as the gateway, no backend.
 //
-// 不是"顺利的一轮"演示，而是照着 nan/agent 的真实分支把每条路径
-// 走一遍：
+// Not a "smooth round" demo: it walks every real branch of nan/agent:
 //
-//   1. 纯文本轮            output_done 收尾
-//   2. 只有工具调用的轮    output_started → output_cancelled（没有文本）
-//   3. 轮级失败            turn_failed → 同一 turn_index 退避重来
-//   4. 两层 spawn          root → a3 → a7，带 unknown verb 的 verb_failed
-//   5. pause 打断          agent_paused → turn_cancelled → resume 后重开
+//   1. plain text turn        closed by output_done
+//   2. tool-call-only turn    output_started -> output_cancelled (no text)
+//   3. round-level failure    turn_failed -> same turn_index retried after backoff
+//   4. two-layer spawn        root -> a3 -> a7, with verb_failed for an unknown verb
+//   5. pause interruption     agent_paused -> turn_cancelled -> reopened after resume
 //
-// 另外回放 injections_collected（一个成功、一个失败的服务）和带
-// report 的 agent_exited。上行消息也按真实语义回放。
+// Also replays injections_collected (one service ok, one failed) and
+// agent_exited with report. Upstream messages are replayed with real
+// semantics too.
 
 import type { ClientMessage, Envelope, SurfaceSpec } from "../kernel/protocol";
 import type { Hub } from "../kernel/history/hub";
@@ -21,14 +21,14 @@ const ROOT = "r0";
 const CHILD = "a3";
 const GRANDCHILD = "a7";
 
-/** 事件之间的节奏；流式增量单独用 STREAM_MS 控制。 */
+/** Pacing between events; streaming deltas use STREAM_MS separately. */
 const PACE_MS = 220;
 const STREAM_MS = 40;
-/** 每个 output_delta 的字符数：模拟 token 粒度，能看清光标跟随。 */
+/** Characters per output_delta: simulates token granularity so the caret following is visible. */
 const CHUNK = 2;
 
 type Emit = (t: string, content: Record<string, unknown>, id?: string) => void;
-/** 返回下一步之前的等待毫秒数；省略表示默认 PACE_MS。 */
+/** Returns the wait in ms before the next step; omit for the default PACE_MS. */
 type Step = (emit: Emit) => number | void;
 
 const ROOT_BASE = { agent_id: ROOT, depth: 0 };
@@ -54,7 +54,7 @@ const DEMO_SURFACES: SurfaceSpec[] = [
     title: "logs",
     icon: "M3 5h18v14H3zm6.2 4.4l-2 2 2 2 1.2-1.2-1-1 1-1zm3.2 4.1h5v1.5h-5z",
   },
-  // 没有 icon：应退化为首字母 P
+  // no icon: should degrade to the initial P
   {
     service_id: "plan",
     url: "https://example.com/",
@@ -73,7 +73,7 @@ function userInput(steps: Step[], text: string): void {
   steps.push((e) => e("user_input", { text }));
 }
 
-/** 按码点切块，避免把 emoji / 代理对劈开。 */
+/** Slice by code point so emoji / surrogate pairs are never split. */
 function pieces(text: string, size = CHUNK): string[] {
   const chars = Array.from(text);
   const out: string[] = [];
@@ -82,7 +82,7 @@ function pieces(text: string, size = CHUNK): string[] {
   return out;
 }
 
-/** 在同一条已开的流上追加文本，不重开流。 */
+/** Append text onto the same open stream without reopening it. */
 function delta(
   steps: Step[],
   base: Record<string, unknown>,
@@ -97,7 +97,7 @@ function delta(
   }
 }
 
-/** 开一条流，把整段文本拆成小增量逐条发；收尾事件由调用方补。 */
+/** Open a stream and emit the whole text as small deltas; the caller supplies the closing event. */
 function stream(
   steps: Step[],
   base: Record<string, unknown>,
@@ -115,7 +115,7 @@ interface TurnOpts {
   index: number;
   text: string;
   inbox?: number;
-  /** 有 tool call：后端发 output_cancelled，文本本身照样进 history。 */
+  /** Has a tool call: the backend sends output_cancelled; the text still goes into history. */
   cancelled?: boolean;
   retries?: number;
   calls?: number;
@@ -123,7 +123,7 @@ interface TurnOpts {
   history?: number;
 }
 
-/** 一轮：turn_started → 流式输出 → turn_done。 */
+/** One round: turn_started -> streamed output -> turn_done. */
 function textTurn(
   steps: Step[],
   base: Record<string, unknown>,
@@ -159,7 +159,7 @@ interface VerbOpts {
   duration?: number;
 }
 
-/** 一个 verb 调用：started → (result → done) | failed。 */
+/** One verb call: started -> (result -> done) | failed. */
 function verb(
   steps: Step[],
   base: Record<string, unknown>,
@@ -198,7 +198,7 @@ export class MockTransport implements Transport {
   private seq = 0;
   private timer: number | null = null;
   private queue: Step[] = [];
-  /** root 已开到的 turn_index；重试与 pause 重开会复用同一个。 */
+  /** Highest turn_index the root has opened; retries and pause reopens reuse it. */
   private rootTurns = 0;
   private started = false;
 
@@ -232,7 +232,7 @@ export class MockTransport implements Transport {
       case "input": {
         if (!msg.text.trim()) return;
         this.emit("user_input", { text: msg.text });
-        // 与后端一致：回执先到，agent 下一轮才 turn_started
+        // Same as the backend: the echo arrives first; turn_started comes with the agent's next round
         const steps: Step[] = [];
         textTurn(steps, ROOT_BASE, {
           index: this.rootTurns + 1,
@@ -254,9 +254,9 @@ export class MockTransport implements Transport {
     }
   }
 
-  // -- 驱动机 --------------------------------------------------------
+  // -- driver ---------------------------------------------------------
 
-  /** 按上一步给出的延迟推进；队列空了就停，等新的上行消息再唤醒。 */
+  /** Advance by the delay the previous step returned; stop when the queue empties, wake on a new upstream message. */
   private run(wait = 0): void {
     this.timer = window.setTimeout(() => {
       this.timer = null;
@@ -287,7 +287,7 @@ export class MockTransport implements Transport {
     this.hub.ingest(env);
   }
 
-  // -- 剧本 ----------------------------------------------------------
+  // -- script ---------------------------------------------------------
 
   private bootScript(): Step[] {
     const steps: Step[] = [
@@ -299,7 +299,7 @@ export class MockTransport implements Transport {
         }),
     ];
 
-    // 1. 纯文本轮。
+    // 1. Plain text turn.
     userInput(steps, "看一遍仓库，给我一个结论");
     textTurn(steps, ROOT_BASE, {
       index: 1,
@@ -307,12 +307,12 @@ export class MockTransport implements Transport {
       latency: 1.2,
     });
 
-    // 2. 工具轮：一个字的文本都没有，后端照样发 started/cancelled。
+    // 2. Tool turn: not a single character of text, the backend still sends started/cancelled.
     userInput(steps, "verbs 目录里都有什么？");
     const toolOut = outId();
     steps.push(
       (e) => e("turn_started", { ...ROOT_BASE, turn_index: 2, inbox_count: 1 }),
-      // 注入服务每个都报账，失败的也照报
+      // Every injected service reports, failures included
       (e) =>
         e("injections_collected", {
           ...ROOT_BASE,
@@ -343,7 +343,7 @@ export class MockTransport implements Transport {
       }),
     );
 
-    // 3. 轮级失败：整轮作废、退避后同一个 turn_index 从头再来。
+    // 3. Round-level failure: the whole round is voided; after backoff the same turn_index starts over.
     userInput(steps, "跑一下测试");
     const failedOut = outId();
     steps.push((e) =>
@@ -366,7 +366,7 @@ export class MockTransport implements Transport {
       history: 2200,
     });
 
-    // 4. 两层 spawn：root → a3 → a7；unknown verb 只失败一次，不中断整轮。
+    // 4. Two-layer spawn: root -> a3 -> a7; the unknown verb fails once only, the round continues.
     userInput(steps, "让子 agent 把 verbs 逐个读一遍");
     const spawnOut = outId();
     steps.push((e) =>
@@ -403,7 +403,7 @@ export class MockTransport implements Transport {
       }),
     );
 
-    // a3：先自己数一遍，再 spawn 一层。
+    // a3: counts by itself first, then spawns one more layer.
     const childOut = outId();
     steps.push(
       (e) =>
@@ -444,7 +444,7 @@ export class MockTransport implements Transport {
       }),
     );
 
-    // a7 跑一轮后带报告退出。后端一定先发 agent_started，树才连得上。
+    // a7 runs one round then exits with a report. The backend always sends agent_started first, or the tree cannot link.
     steps.push((e) =>
       e("agent_started", {
         ...GRANDCHILD_BASE,
@@ -465,7 +465,7 @@ export class MockTransport implements Transport {
       }),
     );
 
-    // 报告进 a3 的 inbox，于是 a3 开第二轮；读完也带报告退出。
+    // The report lands in a3's inbox, so a3 opens a second round; it exits with a report too.
     textTurn(steps, CHILD_BASE, {
       index: 2,
       text: "下一层回报：verbs 一共九个，没有隐藏分支。",
@@ -479,8 +479,9 @@ export class MockTransport implements Transport {
       }),
     );
 
-    // 5. 插话：本轮流式到一半用户又发一条。回执立刻到，但 inbox 要到
-    //    下一个轮边界才被 drain —— 期间气泡带 queued 标记。
+    // 5. Interjection: the user sends another message mid-stream. The
+    //    echo arrives at once, but the inbox drains only at the next
+    //    round boundary -- the bubble carries a queued marker meanwhile.
     const reportOut = outId();
     steps.push((e) =>
       e("turn_started", { ...ROOT_BASE, turn_index: 5, inbox_count: 1 }),
@@ -505,7 +506,7 @@ export class MockTransport implements Transport {
       latency: 0.9,
     });
 
-    // 6. pause 打断：已流出的半句随整轮作废，resume 后同一 turn_index 重开。
+    // 6. pause interruption: the half-streamed sentence is voided with the round; the same turn_index reopens after resume.
     userInput(steps, "继续分析");
     const cancelledOut = outId();
     steps.push((e) =>

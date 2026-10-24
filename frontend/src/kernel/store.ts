@@ -1,9 +1,10 @@
-// 连接与全局状态的唯一来源。
+// The single source of connection and global state.
 //
-// 只管三件事：套接字连接态、boot 身份、以及从事件流推出的全局
-// 状态（暂停）。对话内容不在这里 —— 见 history/hub.ts。
+// Only three concerns: socket connection state, boot identity, and the
+// global state (pause) derived from the event stream. Conversation
+// content is not here -- see history/hub.ts.
 //
-// 纯 reducer + 订阅，无 React、无 DOM，可直接单测。
+// Pure reducer + subscription, no React, no DOM, directly unit-testable.
 
 import { isLive, type Envelope, str } from "./protocol";
 
@@ -11,15 +12,15 @@ export type Connection = "connecting" | "open" | "closed";
 
 export interface GlobalState {
   connection: Connection;
-  /** 后端 boot；变化意味着 seq 不再可比，历史必须重建。 */
+  /** Backend boot; a change means seq is no longer comparable and history must be rebuilt. */
   bootId: string | null;
-  /** 已应用的最大 seq，重放去重用。 */
+  /** Highest applied seq, for replay deduplication. */
   lastSeq: number;
-  /** root 的 agent_id。后端的 id 是随机串，只能从 agent 树里学。 */
+  /** The root's agent_id. Backend ids are random strings; learn it only from the agent tree. */
   rootId: string | null;
-  /** root 的暂停态；null 表示尚未收到任何信号。 */
+  /** The root's paused state; null means no signal received yet. */
   paused: boolean | null;
-  /** 模型名，来自 hello 的 content.model；未知为 null。 */
+  /** Model name, from hello's content.model; null when unknown. */
   model: string | null;
 }
 
@@ -35,11 +36,11 @@ export function initialGlobal(): GlobalState {
 }
 
 /**
- * 应用一个事件。返回同一引用表示无变化（重复 seq、未知类型），
- * 订阅者不会被唤醒。
+ * Apply one event. Returning the same reference means no change
+ * (duplicate seq, unknown type); subscribers are not woken.
  */
 
-/** 事件说的是不是 root：优先认 agent_id，其次认 depth 0。 */
+/** Whether the event speaks for the root: agent_id first, depth 0 as fallback. */
 function isRoot(state: GlobalState, env: Envelope): boolean {
   const agentId = str(env.content.agent_id);
   if (state.rootId !== null) return agentId === state.rootId;
@@ -54,8 +55,9 @@ export function reduceGlobal(state: GlobalState, env: Envelope): GlobalState {
 
   switch (env.t) {
     case "agent_paused":
-      // 暂停是协作式的：只有 root 停下来才算整机暂停。
-      // root 的 agent_id 是随机串，认身份不能靠字符串。
+      // Pausing is cooperative: only the root stopping counts as a
+      // machine-wide pause. The root's agent_id is a random string;
+      // identity cannot be matched by string.
       if (isRoot(state, env)) next.paused = true;
       return next;
 
@@ -98,15 +100,16 @@ export class GlobalStore {
     this.commit({ ...this.state, connection });
   }
 
-  /** hub 从 agent 树里学到 root 身份后回填；未变则不动。 */
+  /** Back-filled by the hub once it learns the root identity from the agent tree; no-op if unchanged. */
   setRoot(rootId: string | null): void {
     if (this.state.rootId === rootId) return;
     this.commit({ ...this.state, rootId });
   }
 
   /**
-   * hello 握手。boot 变了说明后端重启过：seq 归零、历史作废，
-   * 但连接态与最近一次暂停信号保留到新事件覆盖。
+   * hello handshake. A changed boot means the backend restarted: seq
+   * resets to zero and history is voided, while the connection state
+   * and the latest pause signal persist until new events overwrite them.
    */
   applyHello(hello: {
     seq: number;
@@ -116,8 +119,8 @@ export class GlobalStore {
     const bootChanged = bootId !== this.state.bootId;
     const paused = hello.content?.paused ?? this.state.paused;
 
-    // lastSeq 不取 hello.seq：重放事件的 seq 可能低于它，游标只能
-    // 跟着事件自身走。
+    // Do not take hello.seq as lastSeq: replayed events may carry lower
+    // seqs; the cursor can only follow the events themselves.
     this.commit({
       connection: this.state.connection,
       bootId,

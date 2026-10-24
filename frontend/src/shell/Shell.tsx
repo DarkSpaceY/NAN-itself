@@ -1,7 +1,8 @@
-// 桌面外壳：布局与窗口切换。
+// Desktop shell: layout and window switching.
 //
-// 一个内容位 + 一条 rail（kernel/queue）。这里只保存窗口集合、当前
-// 活动窗口、以及 agent 面板内部的面包屑焦点。surfaces 不感知队列。
+// One content slot + one rail (kernel/queue). This only holds the
+// window set, the currently active window, and the breadcrumb focus
+// inside the agent pane. Surfaces know nothing of the queue.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
@@ -41,7 +42,7 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
   const [focusAgentId, setFocusAgentId] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(loadTheme);
 
-  // -- 订阅 ----------------------------------------------------------
+  // -- subscription ---------------------------------------------------
 
   const subscribeHub = useCallback((fn: () => void) => hub.subscribe(fn), [hub]);
   const hubVersion = useCallback(() => hub.getVersion(), [hub]);
@@ -56,7 +57,7 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
     saveTheme(theme);
   }, [theme]);
 
-  // -- 服务注册 ------------------------------------------------------
+  // -- service registration -------------------------------------------
 
   const addSurface = useCallback((spec: SurfaceSpec) => {
     const win = serviceWindow(spec);
@@ -74,12 +75,12 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
     return () => transport.stop();
   }, [transport, addSurface]);
 
-  // -- 派生 ----------------------------------------------------------
+  // -- derived --------------------------------------------------------
 
   const rootId = hub.rootId;
   const activeAgent = focusAgentId && hub.node(focusAgentId) ? focusAgentId : rootId;
 
-  // 正在看的 agent 不参与时间线淘汰
+  // The agent being viewed is excluded from timeline eviction
   useEffect(() => {
     hub.pin(activeAgent);
   }, [hub, activeAgent]);

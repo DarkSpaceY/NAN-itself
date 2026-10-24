@@ -1,8 +1,10 @@
-// 面板桥：一次性 MessagePort 握手。
+// Panel bridge: a one-time MessagePort handshake.
 //
-// 面板在 sandbox 里没有同源权限，所以只有两条通道：iframe 加载后
-// 的 postMessage（携带 boot / service_id / theme），以及面板准备好的
-// 那条 MessagePort。面板 → 桌面只有 attention。
+// Panels in the sandbox have no same-origin privileges, so there are
+// only two channels: the postMessage sent after the iframe loads
+// (carrying boot / service_id / theme), and the MessagePort the
+// panel sets up once ready. Panel -> desktop traffic is attention
+// only.
 
 import type { SurfaceSpec } from "../../kernel/protocol";
 import { themeTokens, type Theme } from "../../shell/theme";

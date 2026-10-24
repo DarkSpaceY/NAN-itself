@@ -1,9 +1,12 @@
-// WebSocket 客户端：唯一的上行通道。
+// WebSocket client: the only upstream channel.
 //
-// 连接建立后网关先发 hello，再重放环形历史；之后是实时事件。桌面
-// 只做三件事：hello 换 boot 时重建历史、事件交给 hub、断线重连。
+// After connecting, the gateway sends hello first, then replays the
+// ring-buffered history; live events follow. The desktop does three
+// things: rebuild history when hello carries a new boot, hand events
+// to the hub, reconnect on disconnect.
 //
-// 套接字生命周期与 UI 无关：这里没有 React、没有状态存储。
+// The socket lifecycle is independent of the UI: no React here, no
+// state store.
 
 import {
   isEnvelope,
@@ -17,20 +20,20 @@ import type { Hub } from "../kernel/history/hub";
 
 export type SurfaceHandler = (spec: SurfaceSpec) => void;
 
-/** 桌面消费的传输接口；mock 提供同一形状。 */
+/** The transport interface the desktop consumes; the mock provides the same shape. */
 export interface Transport {
-  /** 状态行左侧的传输标签（ws / mock）。 */
+  /** The transport label on the left of the status line (ws / mock). */
   readonly label: string;
   start(onSurface: SurfaceHandler): void;
   stop(): void;
   send(msg: ClientMessage): void;
 }
 
-/** 心跳间隔：服务端只回 pong，不主动发；断线由 onclose 发现。 */
+/** Heartbeat interval: the server only replies with pong and never initiates; disconnects are discovered by onclose. */
 const PING_MS = 20_000;
 const MAX_BACKOFF_MS = 8_000;
 
-/** 同源 /ws；可用 ?ws=ws://host:port/ws 覆盖（dev 或反代）。 */
+/** Same-origin /ws; overridable with ?ws=ws://host:port/ws (dev or reverse proxy). */
 export function defaultWsUrl(): string {
   const override = new URLSearchParams(location.search).get("ws");
   if (override) return override;
@@ -84,7 +87,7 @@ export class WsTransport implements Transport {
     }
   }
 
-  // -- 连接 ----------------------------------------------------------
+  // -- connection ----------------------------------------------------
 
   private open(): void {
     if (this.stopped) return;
@@ -116,7 +119,7 @@ export class WsTransport implements Transport {
       this.scheduleRetry();
     };
 
-    // onclose 一定会跟着触发，这里只负责触发它。
+    // onclose is guaranteed to fire afterwards; this just triggers it.
     socket.onerror = () => socket.close();
   }
 
@@ -153,7 +156,7 @@ export class WsTransport implements Transport {
     }
   }
 
-  // -- 解析 ----------------------------------------------------------
+  // -- parsing --------------------------------------------------------
 
   private handle(raw: string): void {
     let msg: unknown;
@@ -181,14 +184,14 @@ export class WsTransport implements Transport {
               : undefined,
         },
       });
-      // 后端重启过：历史不可拼接，重建树与时间线
+      // The backend restarted: history cannot be stitched, rebuild tree and timeline
       if (nextBoot && nextBoot !== previousBoot) this.hub.reset();
       return;
     }
 
     if (!isEnvelope(msg)) return;
 
-    // 窗口注册不是历史，不进 hub
+    // Surface registration is not history; it does not enter the hub
     if (msg.t === "surface_added") {
       const spec = parseSurface(msg.content as Record<string, unknown>);
       if (spec) this.onSurface(spec);

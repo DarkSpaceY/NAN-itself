@@ -1,8 +1,10 @@
-// 单个 agent 的事件 → 时间线。一个 agent 一个 Mapper。
+// Events of a single agent -> timeline. One Mapper per agent.
 //
-// 路由（哪个事件属于谁）在 hub.ts；这里只负责把一个 agent 的事件
-// 折叠成轮与 part。所有方法都是同步的、可重放的：同一串事件灌
-// 两次得到同一结果（重连重放的前提）。
+// Routing (which event belongs to whom) lives in hub.ts; this file is
+// only responsible for folding one agent's events into rounds and
+// parts. All methods are synchronous and replayable: feeding the same
+// event sequence twice yields the same result (the precondition for
+// reconnect replay).
 
 import { errorOf, obj, str, textOf, verbOf, type Envelope } from "../protocol";
 import type { InputPart, Part, Round, TextPart, VerbPart } from "./parts";
@@ -16,23 +18,23 @@ export class Mapper {
   private seq = 0;
   private listeners = new Set<Listener>();
 
-  /** output_* 家族按事件 id 配对：id → 所在 part。 */
+  /** output_* family pairs by event id: id -> the part it belongs to. */
   private streams = new Map<string, TextPart>();
 
-  /** verb 调用：verb 名 → 最近一个未收尾的 part。 */
+  /** verb calls: verb name -> the most recent part not yet closed. */
   private running = new Map<string, VerbPart>();
 
-  /** 从被覆盖的尝试里接过来的用户消息，挂到下一轮开头。 */
+  /** User messages taken over from overwritten attempts, prepended to the next round. */
   private carry: Part[] = [];
 
-  /** 本轮还没结束就发出的消息：不进时间线，等下一个轮边界。 */
+  /** Messages sent before the current round ends: kept out of the timeline until the next round boundary. */
   private queued: InputPart[] = [];
 
   constructor(agentId: string) {
     this.agentId = agentId;
   }
 
-  /** 该 agent 是否已产出可渲染内容。 */
+  /** Whether this agent has produced any renderable content. */
   get isQuiet(): boolean {
     return this.rounds.length === 0;
   }
@@ -41,7 +43,7 @@ export class Mapper {
     return this.rounds;
   }
 
-  /** 已发出、但本轮还没结束所以进不了时间线的消息。 */
+  /** Messages emitted but not yet in the timeline because the current round is still running. */
   getQueued(): readonly InputPart[] {
     return this.queued;
   }
@@ -78,7 +80,7 @@ export class Mapper {
     return round;
   }
 
-  /** 当前轮；没有就按需新建 —— 事件先于 turn_started 到达时不丢内容。 */
+  /** Current round; created on demand -- no content lost when events arrive before turn_started. */
   private current(env: Envelope): Round {
     if (this.open && !this.open.closed) return this.open;
     return this.startRound(env);
@@ -97,9 +99,10 @@ export class Mapper {
     round.outcome = outcome ?? null;
     round.detail = detail ?? null;
 
-    // 轮在流中途结束时，后端不会再发 output_done / verb_done：
-    // 光标必须熄掉。轮级失败把跑着的 verb 标红；pause 打断则不
-    // 加任何额外标记，行保持原状。
+    // When a round ends mid-stream, the backend will not send
+    // output_done / verb_done: the caret must go out. A round-level
+    // failure marks running verbs red; a pause interruption adds no
+    // extra marker and leaves the lines as they are.
     for (const part of round.parts) {
       if (part.kind === "text" && part.streaming) part.streaming = false;
       if (killVerbs && part.kind === "verb" && part.state === "running")
@@ -114,9 +117,11 @@ export class Mapper {
   }
 
   /**
-   * 重试的语义是覆盖：新的一轮开始前，把同一 turn_index 的失败 /
-   * 被打断尝试整轮拿掉，再把其中的用户消息转交给新轮。
-   * 所以在退避等待期间错误行还看得见，重试一开口就被覆盖掉。
+   * Retry semantics are overwrite: before a new round starts, the whole
+   * failed / interrupted attempt with the same turn_index is removed,
+   * and its user messages are handed over to the new round. The error
+   * line therefore stays visible during backoff and is overwritten as
+   * soon as the retry speaks.
    */
   private rollback(index: number): void {
     const dead = this.rounds.filter(
@@ -135,8 +140,9 @@ export class Mapper {
   }
 
   /**
-   * 轮边界取走排队的消息：与后端一致 —— inbox 在下一轮开始时才 drain。
-   * 在这之前它们不出现在时间线上，只挂在 composer 上方。
+   * The round boundary takes the queued messages: same as the backend --
+   * the inbox drains only when the next round starts. Until then they
+   * stay off the timeline, hanging above the composer.
    */
   private drainQueued(): InputPart[] {
     const taken = this.queued.splice(0);
@@ -150,7 +156,7 @@ export class Mapper {
     return carried;
   }
 
-  /** 重放历史时把已存在的轮塞进来，避免重复渲染。 */
+  /** Seed existing rounds when replaying history, avoiding duplicate rendering. */
   seed(rounds: Round[]): void {
     this.rounds = [...rounds];
     this.seq = rounds.reduce((max, r) => Math.max(max, r.appliedSeq), 0);
@@ -158,8 +164,9 @@ export class Mapper {
   }
 
   /**
-   * 应用一个事件。调用方保证事件属于本 agent；seq 去重在 hub 层做，
-   * 这里只保证幂等（同 seq 重复应用不产生新内容）。
+   * Apply one event. The caller guarantees the event belongs to this
+   * agent; seq deduplication happens at the hub layer, this only
+   * guarantees idempotence (re-applying the same seq adds nothing).
    */
   feed(env: Envelope): void {
     if (env.seq > this.seq) this.seq = env.seq;
@@ -170,7 +177,7 @@ export class Mapper {
           typeof env.content.turn_index === "number"
             ? env.content.turn_index
             : undefined;
-        // 新的轮开口之前：先覆盖掉上一次尝试，再取走排队等待的消息
+        // Before the new round opens: overwrite the previous attempt, then take the queued messages
         if (index !== undefined) this.rollback(index);
         const drained = this.drainQueued();
         const round = this.current(env);
@@ -181,8 +188,10 @@ export class Mapper {
       }
 
       case "user_input": {
-        // 后端收到即发回执，当前轮可能还在跑。此时消息不能进流：先排队，
-        // 等下一个轮边界才落到时间线开头。
+        // The backend echoes on receipt while the current round may still
+        // be running. The message must not enter the stream: queue it
+        // first, and it lands at the head of the timeline at the next
+        // round boundary.
         const part: InputPart = {
           kind: "input",
           id: env.id ?? `in-${env.seq}`,
@@ -219,8 +228,9 @@ export class Mapper {
         if (part) {
           part.text += textOf(env);
         } else {
-          // 重放从流中间开始：output_started 被环形缓冲挤掉了。
-          // 仍然按事件 id 归并，否则每个增量都会变成独立的一段。
+          // Replay starts mid-stream: output_started was evicted from the
+          // ring buffer. Still merge by event id, otherwise every delta
+          // becomes its own segment.
           const orphan: TextPart = {
             kind: "text",
             id: env.id ?? `out-${env.seq}`,
@@ -236,8 +246,9 @@ export class Mapper {
 
       case "output_done":
       case "output_cancelled": {
-        // output_cancelled 只是说明这段流被工具调用接续，文本本身
-        // 照样进 history，所以这里与 done 同处理，不标记异常。
+        // output_cancelled only means the stream was continued by a tool
+        // call; the text still goes into history. Handle it the same as
+        // done, without an error marker.
         const part = env.id ? this.streams.get(env.id) : undefined;
         if (part) {
           part.streaming = false;
@@ -304,12 +315,12 @@ export class Mapper {
       }
 
       case "turn_failed":
-        // 退避期间错误行可见；重试一开始就被下一轮的 turn_started 覆盖掉
+        // The error line stays visible during backoff; the next round's turn_started overwrites it as soon as the retry begins
         this.closeOpen(env, "failed", str(env.content.error), true);
         break;
 
       case "turn_cancelled": {
-        // pause 打断：这一轮整体作废，内容不进 history
+        // pause interruption: the whole round is voided, its content does not enter history
         const requeued = env.content.requeued_count;
         this.closeOpen(
           env,
@@ -332,8 +343,9 @@ export class Mapper {
   }
 
   /**
-   * 空闲时发出、还没有轮来接的回执：同一轮里出现输出就说明已被消费。
-   * queued 的插话不走这里，它由轮边界统一取走。
+   * Echoes sent while idle, not yet picked up by a round: any output in
+   * the same round means they were consumed. queued interjections do
+   * not come through here; the round boundary takes them.
    */
   private settleInputs(): void {
     for (const round of this.rounds) {
@@ -347,7 +359,7 @@ export class Mapper {
     }
   }
 
-  /** 定位某 part 所在轮，供 rail 跳转与滚动锚定。 */
+  /** Locate the round holding a part, for rail jumps and scroll anchoring. */
   locate(partId: string): { round: number; index: number } | null {
     for (const round of this.rounds) {
       const index = round.parts.findIndex((p) => p.id === partId);

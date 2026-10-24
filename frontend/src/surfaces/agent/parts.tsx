@@ -1,6 +1,8 @@
-// part 渲染：文本走 markdown，verb 折叠成一行活动，输入回执单独成块。
+// Part rendering: text goes through markdown, verbs collapse into a
+// one-line activity, input echoes get their own block.
 //
-// 只认 part 形状，不认事件；事件到 part 的折叠在 mapper 里完成。
+// Recognizes part shapes only, not events; the event-to-part folding
+// happens in the mapper.
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";

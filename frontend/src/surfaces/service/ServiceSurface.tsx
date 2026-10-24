@@ -1,7 +1,8 @@
-// 服务窗口：iframe + sandbox，没有任何同源权限。
+// Service window: iframe + sandbox, no same-origin privileges at all.
 //
-// sandbox 只给脚本与表单；不要 allow-same-origin，不要弹窗，不要
-// 顶层导航。权限策略逐项拒绝，媒体能力由面板自己申请也没用。
+// The sandbox grants scripts and forms only: no allow-same-origin, no
+// popups, no top-level navigation. The permissions policy denies every
+// capability; media access requested by the pane itself is futile.
 
 import { useEffect, useRef } from "react";
 

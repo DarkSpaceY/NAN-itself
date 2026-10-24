@@ -1,14 +1,16 @@
-// 窗口目录：一个内建 agent 面板 + 每个注册的服务窗口。
+// Window catalog: one built-in agent pane + one window per registered
+// service.
 //
-// 注册只产生 WindowRef；队列顺序由 kernel/queue 管，二者不混。
-// 服务未声明 icon 时退化为 service_id 首字母，绝不出现空白 chip。
+// Registration only produces WindowRef; queue order is managed by
+// kernel/queue, the two never mix. A service without a declared icon
+// degrades to the service_id initial; a blank chip never appears.
 
 import type { SurfaceSpec } from "../kernel/protocol";
 import type { WindowRef } from "../kernel/queue";
 
 export const AGENT_ID = "agent";
 
-/** 四角星：root 与子 agent 共用一个 glyph。 */
+/** Four-pointed star: root and subagents share one glyph. */
 export const AGENT_ICON =
   "M12 2.5l2.35 7.15L21.5 12l-7.15 2.35L12 21.5l-2.35-7.15L2.5 12l7.15-2.35z";
 
@@ -27,7 +29,7 @@ export function serviceWindow(spec: SurfaceSpec): WindowRef {
   };
 }
 
-/** 无 icon 时的单字标记。 */
+/** Single-letter mark used when there is no icon. */
 export function monogram(win: WindowRef): string {
   const source = win.serviceId ?? win.title;
   return source.slice(0, 1).toUpperCase();

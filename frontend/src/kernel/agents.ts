@@ -1,8 +1,10 @@
-// Agent 树：agent_id → 身份与状态。
+// Agent tree: agent_id -> identity and status.
 //
-// 桌面从事件流里拼出这棵树，用于面包屑导航和状态点。后端的身份
-// 字段是 agent_id / parent_id / depth（见 core.py 的 agent_started）。
-// 事件可能乱序到达，所以父节点缺失时先占位，等 agent_started 补齐。
+// The desktop assembles this tree from the event stream for breadcrumb
+// navigation and status dots. The backend's identity fields are
+// agent_id / parent_id / depth (see agent_started in core.py). Events
+// may arrive out of order, so a missing parent gets a placeholder until
+// agent_started fills it in.
 
 import { str, type Envelope } from "./protocol";
 
@@ -12,24 +14,24 @@ export interface AgentNode {
   agent_id: string;
   parent_id: string | null;
   depth: number;
-  /** 从 agent_started 的 pacing 读出；缺省按事件驱动。 */
+  /** Read from agent_started's pacing; defaults to event-driven. */
   pacing: "interval" | "event-driven";
   status: AgentStatus;
-  /** 最近一次 agent_exited 的原因。 */
+  /** Reason of the most recent agent_exited. */
   exitReason: string | null;
-  /** 退出时的 seq，用于淘汰最老的已退出节点。 */
+  /** seq at exit, used to evict the oldest exited nodes. */
   exitedSeq: number | null;
-  /** 该 agent 的轮次数（turn_started 计数）。 */
+  /** The agent's turn count (turn_started counter). */
   turns: number;
   startedSeq: number;
 }
 
-/** 已退出的 subagent 节点最多留这么多个。节点很小，时间线才是大头。 */
+/** Keep at most this many exited subagent nodes. Nodes are tiny; timelines are the bulk. */
 const EXITED_KEEP = 512;
 
 export interface AgentTree {
   nodes: Map<string, AgentNode>;
-  /** root 的 agent_id；第一次 agent_started depth 0 时确定。 */
+  /** The root's agent_id; determined by the first agent_started at depth 0. */
   rootId: string | null;
 }
 
@@ -56,16 +58,18 @@ function ensure(tree: AgentTree, agentId: string, seq: number): AgentNode {
 }
 
 /**
- * 应用一个事件，原地更新树。返回是否有变化。
- * 桌面只把 agent_started 当作节点诞生点；其他事件遇到未知 agent
- * 会补一个占位节点，避免事件丢失。
+ * Apply one event, updating the tree in place. Returns whether anything
+ * changed. The desktop treats only agent_started as the birth of a
+ * node; other events create a placeholder node for unknown agents so
+ * no event is lost.
  */
 export function reduceTree(tree: AgentTree, env: Envelope): boolean {
   const agentId = str(env.content.agent_id);
   if (!agentId) return false;
 
-  // agent_started 可能已经被环形缓冲挤掉（重放从半截开始）。
-  // 带 depth 的事件就是备用身份源：depth 0 只可能是 root。
+  // agent_started may already have been evicted from the ring buffer
+  // (replay starts mid-way). Any event carrying depth is a fallback
+  // identity source: depth 0 can only be the root.
   if (tree.rootId === null && env.content.depth === 0) {
     const node = ensure(tree, agentId, env.seq);
     node.depth = 0;
@@ -124,7 +128,7 @@ export function reduceTree(tree: AgentTree, env: Envelope): boolean {
   }
 }
 
-/** 只保留最近的若干个已退出节点，root 永不淘汰。 */
+/** Keep only the most recent exited nodes; the root is never evicted. */
 function pruneExited(tree: AgentTree): void {
   const exited = [...tree.nodes.values()]
     .filter((node) => node.status === "exited" && node.agent_id !== tree.rootId)
@@ -138,7 +142,7 @@ function pruneExited(tree: AgentTree): void {
   }
 }
 
-/** 从 root 到该 agent 的路径（含两端）；未知 agent 返回空数组。 */
+/** Path from root to the agent (both ends included); returns an empty array for unknown agents. */
 export function pathTo(tree: AgentTree, agentId: string): AgentNode[] {
   const chain: AgentNode[] = [];
   let cursor: string | null = agentId;
@@ -152,7 +156,7 @@ export function pathTo(tree: AgentTree, agentId: string): AgentNode[] {
     cursor = node.parent_id;
   }
 
-  // 只把能追到 root 的链当作有效路径
+  // Only chains traceable back to the root count as valid paths
   if (chain.length === 0) return [];
   if (tree.rootId !== null && chain[0]?.agent_id !== tree.rootId) return [];
   return chain;

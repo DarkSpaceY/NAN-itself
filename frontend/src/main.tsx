@@ -1,6 +1,8 @@
-// 入口：一个标签页 = 一份事件流的视图，各标签页的队列互不影响。
+// Entry: one tab = one view of the event stream; each tab's queue is
+// independent.
 //
-// ?mock 走本地剧本流；默认连同源 /ws（dev 下由 vite 代理到网关）。
+// ?mock runs the local scripted stream; by default the same-origin
+// /ws is used (in dev, vite proxies it to the gateway).
 
 import { createRoot } from "react-dom/client";
 

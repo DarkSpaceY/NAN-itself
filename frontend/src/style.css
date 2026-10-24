@@ -1,7 +1,8 @@
-/* 视觉：flat、单色、一个强调色。层级靠面与细线，不靠阴影。
+/* Visuals: flat, monochrome, one accent color. Hierarchy comes from
+ * surfaces and hairlines, not shadows.
  *
- * 缩放只发生在 .frame 上（父层 transform），这里的任何尺寸都是设计
- * 像素：1024 宽上下文里的真实数值。
+ * Scaling happens only on .frame (parent transform); every size here is
+ * a design pixel: a real value inside the 1024-wide context.
  */
 
 :root {
@@ -21,8 +22,9 @@
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
 }
 
-/* 暗色按感知亮度（L*）等距铺层：3 / 9 / 18 / 27。
-   低亮度区人眼分辨差，sRGB 上必须比亮色拉得更开。 */
+/* Dark theme layers spaced evenly by perceptual lightness (L*): 3 / 9 / 18 / 27.
+   The eye discriminates poorly at low luminance, so the sRGB steps must
+   be wider than in the light theme. */
 [data-theme="dark"] {
   --canvas: #0e0e0e;
   --surface: #1a1a1a;
@@ -79,7 +81,7 @@ button {
   color: var(--ink);
 }
 
-/* -- 交互反馈 -------------------------------------------------------- */
+/* -- interaction feedback -------------------------------------------- */
 
 :where(button, summary):focus-visible {
   outline: 2px solid var(--live);
@@ -104,7 +106,7 @@ button {
   opacity: 0.7;
 }
 
-/* -- 布局 ------------------------------------------------------------ */
+/* -- layout ----------------------------------------------------------- */
 
 .app {
   height: 100%;
@@ -187,7 +189,7 @@ button {
   object-fit: contain;
 }
 
-/* -- 窗口 ------------------------------------------------------------ */
+/* -- window ------------------------------------------------------------ */
 
 .pane {
   flex: 1;
@@ -248,7 +250,7 @@ button {
   opacity: 1;
 }
 
-/* 退出是生命周期结束，不是错误：空心环，红色只留给真正的失败 */
+/* Exit is end of lifecycle, not an error: hollow ring; red is reserved for real failures */
 .dot[data-status="exited"] {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--muted);
@@ -336,7 +338,7 @@ button {
   opacity: 0.7;
 }
 
-/* -- agent 时间线 ---------------------------------------------------- */
+/* -- agent timeline ---------------------------------------------------- */
 
 .agent-surface {
   height: 100%;
@@ -372,7 +374,8 @@ button {
 }
 
 /*
- * 没有轮边界：时间线是一条连续流，所有块之间只有同一档间距。
+ * No round boundary: the timeline is one continuous flow, and every
+ * block is separated by the same single gap.
  */
 .round {
   max-width: 760px;
@@ -437,7 +440,7 @@ button {
   color: var(--live);
 }
 
-/* 长串（URL、哈希、无空格文本）必须能断行，否则会溢出容器 */
+/* Long runs (URLs, hashes, unbroken text) must be breakable, otherwise they overflow the container */
 .text-part,
 .input-text {
   overflow-wrap: anywhere;
@@ -487,7 +490,7 @@ button {
   padding: 4px 8px;
 }
 
-/* 用户消息：宽度贴合内容、右对齐的色块；无边框、无标签 */
+/* User message: a right-aligned block that hugs its content; no border, no label */
 
 .input-part {
   width: fit-content;
@@ -498,7 +501,7 @@ button {
   border-radius: 10px;
 }
 
-/* composer 上方的发送队列：本轮还在跑时发出的消息停在这里，轮结束才入流 */
+/* Send queue above the composer: messages sent while the round is still running wait here and join the stream when the round ends */
 .composer-queue {
   display: flex;
   flex-direction: column;
@@ -534,7 +537,7 @@ button {
   white-space: pre-wrap;
 }
 
-/* verb 行与折叠轮同一套行式折叠：无边框、整行热区、caret 指示 */
+/* Verb lines use the same line-style folding as collapsed rounds: no border, full-row hit area, caret indicator */
 
 .verb-part {
   margin: 0 0 12px;
@@ -627,7 +630,7 @@ button {
   color: var(--muted);
 }
 
-/* 块尾间距交给 verb-part 自己，避免 8 + 12 叠成 20 */
+/* Trailing block spacing is left to verb-part itself, so 8 + 12 does not stack into 20 */
 .verb-body:last-child {
   margin-bottom: 0;
 }
@@ -641,7 +644,7 @@ button {
   opacity: 0.8;
 }
 
-/* 下钻就是一条文字链接，和行式折叠同一套语言 */
+/* Drill-down is a plain text link, sharing the language of the line-style folding */
 
 .drill {
   display: block;
@@ -791,7 +794,7 @@ button {
   text-transform: lowercase;
 }
 
-/* -- 代码高亮（最小集） ---------------------------------------------- */
+/* -- code highlighting (minimal set) --------------------------------- */
 
 .hljs-comment,
 .hljs-quote {
@@ -822,7 +825,7 @@ button {
   font-weight: 600;
 }
 
-/* -- 窄视口 ---------------------------------------------------------- */
+/* -- narrow viewport ------------------------------------------------- */
 
 @media (max-width: 720px) {
   .stream {

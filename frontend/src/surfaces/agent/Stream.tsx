@@ -1,7 +1,8 @@
-// 一个 agent 的可见时间线。
+// The visible timeline of one agent.
 //
-// 跟随输出尾部：用户向上滚动就停止跟随，回到底部附近自动恢复。
-// version 来自 hub，事件每落地一次就递增。
+// Follows the output tail: scrolling up stops following; coming back
+// near the bottom resumes it. version comes from the hub and
+// increments once per applied event.
 
 import { useLayoutEffect, useRef } from "react";
 
@@ -47,7 +48,7 @@ export function Stream({ rounds, version, onDrill, emptyHint }: StreamProps) {
             <PartView key={part.id} part={part} onDrill={onDrill} />
           ))}
 
-          {/* 整轮失败：红色错误行跟在半截输出后面，重试成功后整轮被回退 */}
+          {/* Whole round failed: a red error line follows the partial output; once the retry succeeds the round is rolled back */}
           {round.outcome === "failed" && round.detail && (
             <div className="round-error">
               <span className="mark">×</span> {round.detail}
