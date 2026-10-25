@@ -1,8 +1,8 @@
 // Theme: two equivalent first-class themes, resolved once and written
 // to the root node.
 //
-// Panels get the theme name and tokens through the bridge; the
-// desktop itself only reads and writes data-theme.
+// Panels are plain loopback pages: they style themselves, the desktop
+// only reads and writes data-theme.
 
 export type Theme = "light" | "dark";
 

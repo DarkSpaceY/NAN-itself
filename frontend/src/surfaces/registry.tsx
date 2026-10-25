@@ -10,6 +10,11 @@ import type { WindowRef } from "../kernel/queue";
 
 export const AGENT_ID = "agent";
 
+/** One service, one window id; registration and removal share it. */
+export function serviceWindowId(serviceId: string): string {
+  return `svc:${serviceId}`;
+}
+
 /** Four-pointed star: root and subagents share one glyph. */
 export const AGENT_ICON =
   "M12 2.5l2.35 7.15L21.5 12l-7.15 2.35L12 21.5l-2.35-7.15L2.5 12l7.15-2.35z";
@@ -20,7 +25,7 @@ export function builtinWindow(): WindowRef {
 
 export function serviceWindow(spec: SurfaceSpec): WindowRef {
   return {
-    id: `svc:${spec.service_id}`,
+    id: serviceWindowId(spec.service_id),
     kind: "service",
     title: spec.title,
     icon: spec.icon,

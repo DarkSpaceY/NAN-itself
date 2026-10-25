@@ -20,11 +20,14 @@ import type { Hub } from "../kernel/history/hub";
 
 export type SurfaceHandler = (spec: SurfaceSpec) => void;
 
+/** A service withdrew its panel: the window disappears. */
+export type SurfaceRemovedHandler = (serviceId: string) => void;
+
 /** The transport interface the desktop consumes; the mock provides the same shape. */
 export interface Transport {
   /** The transport label on the left of the status line (ws / mock). */
   readonly label: string;
-  start(onSurface: SurfaceHandler): void;
+  start(onSurface: SurfaceHandler, onSurfaceRemoved: SurfaceRemovedHandler): void;
   stop(): void;
   send(msg: ClientMessage): void;
 }
@@ -61,14 +64,16 @@ export class WsTransport implements Transport {
   private attempt = 0;
   private stopped = false;
   private onSurface: SurfaceHandler = () => {};
+  private onSurfaceRemoved: SurfaceRemovedHandler = () => {};
 
   constructor(
     private readonly hub: Hub,
     private readonly url: string = defaultWsUrl(),
   ) {}
 
-  start(onSurface: SurfaceHandler): void {
+  start(onSurface: SurfaceHandler, onSurfaceRemoved: SurfaceRemovedHandler): void {
     this.onSurface = onSurface;
+    this.onSurfaceRemoved = onSurfaceRemoved;
     this.stopped = false;
     this.open();
   }
@@ -195,6 +200,12 @@ export class WsTransport implements Transport {
     if (msg.t === "surface_added") {
       const spec = parseSurface(msg.content as Record<string, unknown>);
       if (spec) this.onSurface(spec);
+      return;
+    }
+
+    if (msg.t === "surface_removed") {
+      const serviceId = str((msg.content as Record<string, unknown>).service_id);
+      if (serviceId) this.onSurfaceRemoved(serviceId);
       return;
     }
 

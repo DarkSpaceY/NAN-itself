@@ -14,7 +14,7 @@
 
 import type { ClientMessage, Envelope, SurfaceSpec } from "../kernel/protocol";
 import type { Hub } from "../kernel/history/hub";
-import type { SurfaceHandler, Transport } from "./ws";
+import type { SurfaceHandler, SurfaceRemovedHandler, Transport } from "./ws";
 
 const BOOT = "mock-0001";
 const ROOT = "r0";
@@ -204,7 +204,7 @@ export class MockTransport implements Transport {
 
   constructor(private readonly hub: Hub) {}
 
-  start(onSurface: SurfaceHandler): void {
+  start(onSurface: SurfaceHandler, _onSurfaceRemoved: SurfaceRemovedHandler): void {
     if (this.started) return;
     this.started = true;
 

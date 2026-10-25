@@ -13,12 +13,18 @@ import {
   emptyQueue,
   focus as focusWindow,
   register as registerWindow,
+  unregister as unregisterWindow,
   type QueueState,
   type WindowRef,
 } from "../kernel/queue";
 import type { SurfaceSpec } from "../kernel/protocol";
 import { AgentSurface } from "../surfaces/agent/AgentSurface";
-import { AGENT_ID, builtinWindow, serviceWindow } from "../surfaces/registry";
+import {
+  AGENT_ID,
+  builtinWindow,
+  serviceWindow,
+  serviceWindowId,
+} from "../surfaces/registry";
 import { ServiceSurface } from "../surfaces/service/ServiceSurface";
 import type { Transport } from "../transport/ws";
 import { Footer } from "./Footer";
@@ -70,10 +76,21 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
     setQueue((previous) => registerWindow(previous, win.id));
   }, []);
 
+  const removeSurface = useCallback((serviceId: string) => {
+    const id = serviceWindowId(serviceId);
+    setWindows((previous) => {
+      if (!previous.has(id)) return previous;
+      const next = new Map(previous);
+      next.delete(id);
+      return next;
+    });
+    setQueue((previous) => unregisterWindow(previous, id));
+  }, []);
+
   useEffect(() => {
-    transport.start(addSurface);
+    transport.start(addSurface, removeSurface);
     return () => transport.stop();
-  }, [transport, addSurface]);
+  }, [transport, addSurface, removeSurface]);
 
   // -- derived --------------------------------------------------------
 
@@ -113,7 +130,7 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
         onDrill={(agentId) => setFocusAgentId(agentId)}
       />
     ) : (
-      <ServiceSurface win={win} theme={theme} bootId={global.bootId} />
+      <ServiceSurface win={win} />
     );
 
   return (

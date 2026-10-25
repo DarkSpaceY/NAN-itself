@@ -3,12 +3,12 @@
 // The sandbox grants scripts and forms only: no allow-same-origin, no
 // popups, no top-level navigation. The permissions policy denies every
 // capability; media access requested by the pane itself is futile.
-
-import { useEffect, useRef } from "react";
+//
+// No desktop bridge: the panel is a plain loopback page that talks to
+// its own backend directly (fetch / SSE / WebSocket), and the backend
+// allows that origin. The desktop only hands it a url.
 
 import type { WindowRef } from "../../kernel/queue";
-import type { Theme } from "../../shell/theme";
-import { attachBridge } from "./bridge";
 
 const SANDBOX = "allow-scripts allow-forms";
 const ALLOW =
@@ -16,38 +16,14 @@ const ALLOW =
 
 interface ServiceSurfaceProps {
   win: WindowRef;
-  theme: Theme;
-  bootId: string | null;
 }
 
-export function ServiceSurface({ win, theme, bootId }: ServiceSurfaceProps) {
-  const frame = useRef<HTMLIFrameElement>(null);
-
-  useEffect(() => {
-    const el = frame.current;
-    if (!el || !win.url) return;
-
-    const bridge = attachBridge(
-      el,
-      {
-        service_id: win.serviceId ?? win.id,
-        url: win.url,
-        title: win.title,
-        icon: win.icon,
-      },
-      theme,
-      bootId,
-    );
-
-    return () => bridge.destroy();
-  }, [win.id, win.url, win.title, win.icon, win.serviceId, theme, bootId]);
-
+export function ServiceSurface({ win }: ServiceSurfaceProps) {
   if (!win.url) return <div className="service-surface empty">no url</div>;
 
   return (
     <div className="service-surface">
       <iframe
-        ref={frame}
         src={win.url}
         title={win.title}
         sandbox={SANDBOX}

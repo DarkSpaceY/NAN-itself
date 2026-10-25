@@ -116,10 +116,12 @@ export interface AgentExited extends AgentIdentity {
 }
 
 /**
- * Surface registration (`surface_added`). Not yet implemented
- * server-side: `nan/injection/hub.py` registers context services,
- * not windows. The desktop reads the same shape from the mock
- * stream for now.
+ * Surface registration: a service posts to the gateway, which
+ * broadcasts `surface_added` with this spec to every desktop and
+ * `surface_removed` ({service_id}) when the service withdraws.
+ * Both are handled by the transport, never by the hub: they are
+ * live state, not history, and the gateway replays the table on
+ * each new connection.
  */
 export interface SurfaceSpec {
   service_id: string;
@@ -133,10 +135,10 @@ export interface SurfaceSpec {
 // ------------------------------------------------------------------
 
 /**
- * Event types the desktop consumes. `surface.*` is a reserved
- * namespace for window registration, not consumed yet; any other
- * unknown type is ignored outright (later-added events must not
- * crash an older desktop).
+ * Event types the desktop consumes. `surface_added` and
+ * `surface_removed` are not listed: the transport handles them
+ * before the hub. Any unknown type is ignored outright
+ * (later-added events must not crash an older desktop).
  */
 export const EVENT_TYPES = new Set([
   "agent_started",
