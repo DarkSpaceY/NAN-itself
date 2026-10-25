@@ -1,8 +1,5 @@
 """
 Provider-neutral streaming LLM adapter (the model boundary).
-
-The ONLY module in the codebase that talks to model APIs; the
-only domain allowed to call it is nan.agent.engine.
 """
 
 from __future__ import annotations
@@ -28,12 +25,13 @@ from anthropic.types.raw_message_delta_event import Delta as MessageDeltaDelta
 from loguru import logger
 from openai import AsyncOpenAI
 
+from nan.config import settings
+
 from .types import (
     FinishReason,
     LLMRequest,
     LLMStreamEvent,
     Message,
-    ProviderName,
     ToolCall,
     Usage,
 )
@@ -50,19 +48,21 @@ class LLMProvider:
         - normalize tool calls
         - normalize usage
         - expose one streaming protocol to Agent Runtime
-
-    Agent Runtime should not know which provider is being used.
     """
 
-    def __init__(
-        self,
-        provider: ProviderName,
-        api_key: str,
-        model: str,
-        base_url: str,
-        timeout: float,
-        max_retries: int,
-    ) -> None:
+    def __init__(self) -> None:
+        """Build the provider described by the process-wide settings."""
+        cfg = settings.llm
+
+        provider = cfg.provider
+
+        # empty config values = SDK defaults (env fallback / default endpoint)
+        api_key = cfg.api_key or None
+        model = cfg.model
+        base_url = cfg.base_url or None
+        timeout = cfg.timeout
+        max_retries = cfg.max_retries
+
         self.provider = provider
         self.model = model
         self.timeout = timeout
@@ -189,9 +189,6 @@ class LLMProvider:
         if tools:
             kwargs["tools"] = tools
 
-        if request.response_format is not None:
-            kwargs["response_format"] = request.response_format
-
         if self._openai is None:
             raise RuntimeError("OpenAI client not initialized")
 
@@ -284,8 +281,6 @@ class LLMProvider:
             text = message.content or ""
 
             if not text:
-                # Empty inputs carry no information; local chat
-                # templates handle them poorly.
                 return None
 
             return {
@@ -299,12 +294,8 @@ class LLMProvider:
 
             result: dict[str, Any] = {
                 "role": "assistant",
+                "content": message.content,
             }
-
-            if message.content is not None:
-                result["content"] = message.content
-            else:
-                result["content"] = None
 
             if message.tool_calls:
                 result["tool_calls"] = [
@@ -465,8 +456,6 @@ class LLMProvider:
                 text = message.content or ""
 
                 if not text:
-                    # An empty input (e.g. a late-report-only
-                    # cycle) contributes nothing visible.
                     continue
 
                 result.append(
@@ -487,8 +476,7 @@ class LLMProvider:
                 blocks: list[dict[str, Any]] = []
 
                 if not message.content and not message.tool_calls:
-                    # Empty assistant placeholder (corrective-retry
-                    # marker): carries no information.
+                    # Empty assistant placeholder (corrective-retry marker).
                     continue
 
                 if message.content:

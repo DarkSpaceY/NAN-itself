@@ -6,8 +6,7 @@ Semantics:
 
     - a Handle is bound to one target agent and one implicit
       holder (the agent that spawned the target; the root's
-      handle is held by the composition root), so the
-      cascade-death graph is the spawn tree
+      handle is held by the composition root)
     - through a handle the holder may send() text into the
       target's inbox and kill() the target; the target replies
       upstream through its parent reference
@@ -21,17 +20,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    import asyncio
+
     from nan.agent.core import Agent
 
 
 class InboxTarget(Protocol):
     """
     What a Handle needs from its target: an inbox to deliver
-    into and a death to request. Agent satisfies this; tests may
-    substitute fakes.
+    into, a death to request, and the loop task to await.
     """
 
     agent_id: str
+
+    @property
+    def task(self) -> asyncio.Task[None] | None: ...
 
     async def receive_up(self, text: str, source: str) -> None: ...
 
@@ -54,6 +57,11 @@ class Handle:
         """The short id of the agent this handle points at."""
         return self._target.agent_id
 
+    @property
+    def task(self) -> asyncio.Task[None] | None:
+        """The target's loop task (None before it starts)."""
+        return self._target.task
+
     async def send(self, text: str) -> None:
         """
         Deliver text into the target's inbox (kind "send").
@@ -62,10 +70,9 @@ class Handle:
 
     def kill(self) -> None:
         """
-        Kill the target. No free-text reason (the death notice
-        upstream states the fact: killed by this holder). Cascade
-        is the target's own business: it tears down everything IT
-        holds.
+        Kill the target; the death reason is fixed to this holder.
+        Cascade is the target's own business: it tears down
+        everything IT holds.
         """
         self._target.request_death(f"killed by holder {self.holder_id}")
 

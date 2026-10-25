@@ -19,6 +19,14 @@ task with one inbox. Concurrency comes from spawning subagents;
 coordination comes from handles. This keeps death, pause and
 cascade semantics exact.
 
+## Import direction
+
+`nan/llm/types.py` is pure data: any domain may import it.
+`nan/llm/provider.py` is the transport edge, called only by
+`nan/agent/engine.py`. Verb modules subclass `Verb` from
+`nan/agent/verbs/__init__.py`, so the registry imports them
+inside `_build_registry()` after the base class exists.
+
 ## The turn is the record
 
 Everything that happened in a turn -- inbox drained, injections
@@ -49,18 +57,19 @@ caching work. There is no in-place rewriting of history.
 flowchart TB
     U["user"] -->|"writes"| CORE["nan/<br/>code, persona, config"]
     U -->|"writes"| BI["builtin/<br/>resources"]
-    U -->|"writes"| AU["workspace/autostart.sh<br/>(user-owned)"]
+    U -->|"writes"| AU["builtin/autostart.sh"]
     A["agent"] -->|"shell: read-only"| CORE
     A -->|"shell: read-only"| BI
-    A -->|"shell: write"| WS["workspace/<br/>(except autostart.sh)"]
+    A -->|"shell: write"| WS["workspace/"]
     CORE -.->|"boots and governs"| A
 ```
 
 Three zones: the nan package (core code, persona -- the agent
 cannot write these), `builtin/` (read-only resources), and
-`workspace/` (the agent's writable territory). One exception
-inside the workspace: `autostart.sh` is user-owned -- it boots
-the machine-level components, so the agent must never write it.
+`workspace/` (the agent's writable territory, including its own
+boot script `workspace/autostart.sh`). The user's boot script
+lives in `builtin/` and runs outside the sandbox; the agent's
+one runs inside it.
 
 ## One path for everything important
 

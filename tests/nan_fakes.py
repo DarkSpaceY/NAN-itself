@@ -11,9 +11,10 @@ from typing import Any
 
 import pytest
 
-from nan.agent import Agent, AgentConfig
+from nan.agent import Agent
 from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
+from nan.config import settings
 from nan.injection import InjectionHub
 from nan.llm import ToolCall, Usage
 
@@ -40,9 +41,6 @@ class FakeLLM:
     """
 
     model = "fake"
-    # LLMResponse.provider is a ProviderName literal (the real
-    # contract); the fake identifies as openai to satisfy it.
-    provider = "openai"
 
     def __init__(self) -> None:
         self.scripts: dict[str, list[tuple[Any, ...]]] = {}
@@ -114,7 +112,7 @@ def make_agent(
     book: Book | None = None,
     llm: FakeLLM | None = None,
     persona: str = "ROOTPERSONA",
-    config: AgentConfig | None = None,
+    agent: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> Agent:
     workspace = tmp_path / "workspace"
@@ -122,29 +120,35 @@ def make_agent(
     workspace.mkdir(parents=True, exist_ok=True)
 
     # The persona file is the only source. Tests that pass their
-    # own persona_path get it untouched; the rest get a tmp file
+    # own persona path get it untouched; the rest get a tmp file
     # with the default text.
-    if "persona_path" not in kwargs:
-        persona_file = tmp_path / "persona.md"
+    if "persona_path" in kwargs:
+        persona_path = kwargs.pop("persona_path")
+    else:
+        persona_path = tmp_path / "persona.md"
 
-        persona_file.write_text(persona, encoding="utf-8")
+        persona_path.write_text(persona, encoding="utf-8")
 
-        kwargs["persona_path"] = persona_file
+    # Components read the live global settings; stamp this test's
+    # layout and policy in (the autouse fixture restores them).
+    settings.paths.workspace = workspace
+
+    settings.paths.persona = persona_path
+
+    settings.sandbox.enabled = False
+
+    for key, value in (agent or {}).items():
+        setattr(settings.agent, key, value)
 
     # The sandbox is a required Agent dependency; tests that don't
     # care about isolation get an explicitly disabled one (which
     # warns once, loudly, exactly as in production).
-    sandbox = kwargs.pop(
-        "sandbox",
-        Sandbox(workspace=workspace, package_dir=tmp_path, enabled=False),
-    )
+    sandbox = kwargs.pop("sandbox", Sandbox())
 
     return Agent(
         book=book or Book(),
         llm=llm or FakeLLM(),  # type: ignore[arg-type]
         injections=InjectionHub(),
-        workspace=workspace,
-        config=config or AgentConfig(),
         sandbox=sandbox,
         **kwargs,
     )

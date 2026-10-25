@@ -16,6 +16,12 @@ Server-authoritative stream:
 
 The gateway only formats the stream. Date dividers are rendered
 by the frontend from the events' timestamps.
+
+Surfaces: a service registers its own panel and unregisters it
+itself -- the gateway keeps a {service_id: spec} table, broadcasts
+surface_added/surface_removed to every connected desktop, and
+replays the table on each new connection. Registration is kept in
+a surface table outside the event log; panel urls are loopback.
 """
 
 from __future__ import annotations
@@ -34,37 +40,65 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from .config import settings
 from .events import sink
+from .utils.loopback import entry_allowed, is_local_asset, is_loopback_url
 
 
 class Gateway:
     def __init__(
         self,
         *,
-        host: str = "127.0.0.1",
-        port: int = 8765,
         on_input: Callable[[str, Any], None] | None = None,
         on_pause: Callable[[bool], None] | None = None,
         state_provider: Callable[[], dict] | None = None,
-        frontend_dir: str | Path | None = None,
-        dedup_cache_size: int = 256,
     ) -> None:
-        self.host = host
-        self.port = port
+        # Endpoint and layout come from the process-wide settings;
+        # callbacks are injected.
         self.on_input = on_input
         self.on_pause = on_pause
         self.state_provider = state_provider
-        self.frontend_dir = Path(frontend_dir) if frontend_dir else None
-        self.dedup_cache_size = dedup_cache_size
 
         self._app: FastAPI | None = None
         self._server: uvicorn.Server | None = None
         self._clients: set[WebSocket] = set()
 
-        # Input dedup by mid: a reconnecting client may re-send
-        # the same mid; seen mids are dropped, the cache is
+        # service_id -> surface spec; the panels currently offered.
+        self._surfaces: dict[str, dict[str, Any]] = {}
+
+        # Input dedup by mid: seen mids are dropped; the cache is
         # bounded and evicts oldest entries first.
         self._seen_mids: dict[str, None] = {}
+
+    # ------------------------------------------------------------------
+    # Endpoint / layout (live reads of the global settings)
+    # ------------------------------------------------------------------
+
+    @property
+    def host(self) -> str:
+        return settings.gateway.host
+
+    @property
+    def port(self) -> int:
+        return settings.gateway.port
+
+    @property
+    def dedup_cache_size(self) -> int:
+        return settings.gateway.dedup_cache_size
+
+    @property
+    def frontend_dir(self) -> Path | None:
+        """
+        The built desktop at frontend/dist; None when index.html is missing.
+        """
+        built = settings.paths.frontend
+
+        if (built / "index.html").is_file():
+            return built
+
+        logger.warning("frontend build not found ({}); run `npm run build` in frontend/", built)
+
+        return None
 
     # ==================================================================
     # Lifecycle
@@ -74,40 +108,10 @@ class Gateway:
         """Start the HTTP + WebSocket server; open the browser when asked."""
         app = FastAPI()
 
-        # ---------- Entry guard (loopback authentication) ----------
-        # The socket is loopback-only; the guard closes the
-        # remaining hole, DNS rebinding: a hostile page resolving
-        # its domain to 127.0.0.1 produces requests with the
-        # attacker's Host and Origin, both rejected here. Browser
-        # requests always carry Origin and cannot forge it.
-        allowed_hosts = {
-            f"127.0.0.1:{self.port}",
-            f"localhost:{self.port}",
-            "[::1]:" + str(self.port),
-            "127.0.0.1",
-            "localhost",
-        }
-        allowed_origins = {
-            f"http://127.0.0.1:{self.port}",
-            f"http://localhost:{self.port}",
-            f"http://[::1]:{self.port}",
-        }
-
-        def entry_allowed(headers: Any) -> bool:
-            host = headers.get("host", "")
-
-            if host not in allowed_hosts:
-                return False
-
-            origin = headers.get("origin")
-
-            # Native clients (curl, local ws tools) send no Origin;
-            # browsers always do and cannot forge it.
-            return origin is None or origin in allowed_origins
-
+        # ---------- Entry guard (loopback policy) ----------
         @app.middleware("http")
         async def entry_guard_http(request, call_next):
-            if not entry_allowed(request.headers):
+            if not entry_allowed(request.headers, self.port):
                 return JSONResponse({"error": "forbidden"}, status_code=403)
 
             return await call_next(request)
@@ -115,19 +119,46 @@ class Gateway:
         # ---------- WebSocket endpoint ----------
         @app.websocket("/ws")
         async def ws_endpoint(websocket: WebSocket):
-            if not entry_allowed(websocket.headers):
+            if not entry_allowed(websocket.headers, self.port):
                 await websocket.close(code=1008)
                 return
 
             await websocket.accept()
-            while websocket.client_state.name != "CONNECTED":
-                await asyncio.sleep(0.01)
             await self._ws_handler(websocket)
 
-        # ---------- Frontend static files ----------
-        if self.frontend_dir and self.frontend_dir.exists():
-            frontend_dir = self.frontend_dir
+        # ---------- Surface registration ----------
+        # Services register with POST /surfaces and unregister with
+        # DELETE /surfaces/{service_id}.
+        @app.post("/surfaces")
+        async def register_surface(body: dict[str, Any]) -> JSONResponse:
+            spec, error = _validate_surface(body)
 
+            if spec is None:
+                return JSONResponse({"status": "rejected", "reason": error}, status_code=400)
+
+            self._surfaces[spec["service_id"]] = spec
+
+            logger.info("Surface registered: {} -> {}", spec["service_id"], spec["url"])
+
+            await self._broadcast({"t": "surface_added", "content": spec})
+
+            return JSONResponse({"status": "ok"})
+
+        @app.delete("/surfaces/{service_id}")
+        async def unregister_surface(service_id: str) -> JSONResponse:
+            if self._surfaces.pop(service_id, None) is None:
+                return JSONResponse({"status": "unknown"}, status_code=404)
+
+            logger.info("Surface unregistered: {}", service_id)
+
+            await self._broadcast({"t": "surface_removed", "content": {"service_id": service_id}})
+
+            return JSONResponse({"status": "ok"})
+
+        # ---------- Frontend static files ----------
+        frontend_dir = self.frontend_dir
+
+        if frontend_dir is not None:
             assets_dir = frontend_dir / "assets"
             if assets_dir.exists():
                 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -139,7 +170,7 @@ class Gateway:
                     return FileResponse(str(index_path))
                 return {"error": "Frontend not built"}
 
-            logger.info(f"Frontend static files served from {self.frontend_dir}")
+            logger.info(f"Frontend static files served from {frontend_dir}")
         else:
             logger.warning("Frontend directory not found, skipping static file serving")
 
@@ -152,12 +183,9 @@ class Gateway:
         )
         self._server = uvicorn.Server(config)
 
-        # Run the server as a background task so the port can be
-        # probed and the browser opened.
         server_task = asyncio.create_task(self._server.serve())
 
         if open_browser:
-            # Wait for the server to come up (probe a TCP connection).
             start = asyncio.get_event_loop().time()
             connected = False
             while not connected and (asyncio.get_event_loop().time() - start) < 10:
@@ -177,7 +205,6 @@ class Gateway:
             else:
                 logger.warning("Server did not start in time, browser not opened")
 
-        # Block until the server task ends.
         await server_task
 
     async def close(self) -> None:
@@ -208,27 +235,28 @@ class Gateway:
         logger.info(f"Client {client_id} connected")
 
         try:
-            # Send hello + history replay (date dividers are
-            # rendered by the frontend from event timestamps).
+            # History is replayed after hello; date dividers are
+            # rendered by the frontend from event timestamps.
             await self._send(websocket, self._hello_payload())
+
+            # Replay the surface table to each new connection.
+            for spec in self._surfaces.values():
+                await self._send(websocket, {"t": "surface_added", "content": spec})
+
             for event in sink.history():
                 await self._send(websocket, event)
 
-            # Start the forwarder task.
             forwarder = asyncio.create_task(
                 self._forward(websocket, queue, client_id),
                 name=f"forward-{client_id}",
             )
 
-            # Start the monitor task (detects an unexpected
-            # forwarder death).
             monitor = asyncio.create_task(
                 self._monitor_forwarder(websocket, forwarder, client_id),
                 name=f"monitor-{client_id}",
             )
 
             try:
-                # Receive client messages.
                 async for raw in websocket.iter_text():
                     self._handle_message(websocket, raw)
             finally:
@@ -263,12 +291,9 @@ class Gateway:
 
         try:
             while True:
-                # Get the next event with a timeout so a dead
-                # socket cannot block the loop forever.
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=5.0)
                 except TimeoutError:
-                    # Re-check the connection state.
                     if websocket.client_state.name != "CONNECTED":
                         logger.warning(
                             f"Forwarder: WebSocket not connected for {client_id}, stopping"
@@ -303,7 +328,6 @@ class Gateway:
                     with contextlib.suppress(Exception):
                         await websocket.close(code=1011, reason="Forwarder died")
                     break
-                # Also stop once the connection is gone.
                 if websocket.client_state.name != "CONNECTED":
                     logger.debug(f"Monitor: WebSocket not connected for {client_id}, stopping")
                     break
@@ -318,9 +342,6 @@ class Gateway:
             data = json.loads(raw)
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {raw[:100]}")
-            return
-        except Exception as e:
-            logger.error(f"Error parsing message: {e}")
             return
 
         if not isinstance(data, dict):
@@ -402,6 +423,14 @@ class Gateway:
         with contextlib.suppress(Exception):
             await self._send(websocket, payload)
 
+    async def _broadcast(self, payload: dict) -> None:
+        """Send to every connected desktop; a dead socket is dropped."""
+        for websocket in list(self._clients):
+            try:
+                await self._send(websocket, payload)
+            except Exception:
+                self._clients.discard(websocket)
+
     def _hello_payload(self) -> dict:
         state = {}
         if self.state_provider is not None:
@@ -410,8 +439,7 @@ class Gateway:
             except Exception as e:
                 logger.error(f"State provider error: {e}")
 
-        # The pause snapshot is gateway business: when the app-level
-        # state carries none, derive it from event history.
+        # paused is derived from event history when the app-level state omits it.
         if "paused" not in state:
             state["paused"] = self._latest_paused()
 
@@ -420,3 +448,33 @@ class Gateway:
             "seq": sink.seq,
             "content": state,
         }
+
+
+def _validate_surface(body: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """
+    A surface spec names a service_id, a loopback url and a title;
+    icon is a local path or loopback url.
+    """
+    service_id = str(body.get("service_id") or "").strip()
+
+    url = str(body.get("url") or "").strip()
+
+    title = str(body.get("title") or "").strip()
+
+    icon = str(body.get("icon") or "").strip()
+
+    if not service_id or not url or not title:
+        return None, "service_id, url and title required"
+
+    if not is_loopback_url(url):
+        return None, "url must be loopback"
+
+    if icon and not is_local_asset(icon):
+        return None, "icon must be a local path or loopback url"
+
+    spec: dict[str, Any] = {"service_id": service_id, "url": url, "title": title}
+
+    if icon:
+        spec["icon"] = icon
+
+    return spec, None

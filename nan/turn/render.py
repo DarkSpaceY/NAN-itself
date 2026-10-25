@@ -2,8 +2,7 @@
 Rendering: the ONLY place a turn becomes model messages.
 
 Deterministic by contract: the same Turn always renders to the
-same bytes. Once a turn is frozen its rendered run never changes
--- history is add-only, and the prefix cache depends on it.
+same bytes. A frozen turn keeps its rendered run.
 """
 
 from __future__ import annotations
@@ -34,12 +33,12 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
         )
     )
 
-    for call, result in zip(turn.calls, turn.results, strict=False):
+    for call, result in zip(turn.calls, turn.results, strict=True):
         messages.append(
             Message(
                 role="tool",
                 tool_call_id=call.id,
-                content=result,
+                content=result.output,
             )
         )
 

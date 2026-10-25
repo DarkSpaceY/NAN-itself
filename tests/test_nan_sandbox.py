@@ -6,18 +6,19 @@ from __future__ import annotations
 import shlex
 import shutil
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from nan.agent.sandbox import Sandbox, SandboxUnavailableError
+from nan.agent.sandbox import Sandbox, SandboxUnavailableError, _seatbelt_profile
+from nan.config import settings
 
 FAKE_SANDBOX_EXEC = """#!/bin/bash
-# fake sandbox-exec: verify a profile arg, then run the command
-if [ "$1" = "-f" ]; then
-    test -f "$2" || { echo "profile missing"; exit 3; }
-    shift 3
+# fake sandbox-exec: accept an inline profile (-p), then run the command
+if [ "$1" = "-p" ]; then
+    shift 2
 fi
 exec "$@"
 """
@@ -38,29 +39,32 @@ def with_sandbox_exec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return fake
 
 
-def _sandbox(tmp_path: Path, **kwargs: Any) -> Sandbox:
-    defaults: dict[str, Any] = {
-        "workspace": tmp_path / "workspace",
-        "package_dir": tmp_path / "pkg" / "nan",
-        "builtin_dir": tmp_path / "builtin",
-        "platform": "darwin",
-    }
+def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> Sandbox:
+    settings.paths.workspace = kwargs.pop("workspace", tmp_path / "workspace")
+    settings.paths.package = kwargs.pop("package", tmp_path / "pkg" / "nan")
+    settings.paths.builtin = kwargs.pop("builtin", tmp_path / "builtin")
+    settings.sandbox.enabled = kwargs.pop("enabled", True)
+    settings.sandbox.required = kwargs.pop("required", False)
 
-    defaults.update(kwargs)
+    monkeypatch.setattr(sys, "platform", kwargs.pop("platform", "darwin"))
 
-    return Sandbox(**defaults)
+    assert not kwargs, f"unexpected sandbox arguments: {kwargs}"
+
+    return Sandbox()
 
 
-def test_seatbelt_profile_generation(tmp_path: Path, with_sandbox_exec: Path) -> None:
+def test_seatbelt_profile_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = tmp_path / "workspace"
 
     workspace.mkdir()
 
-    sb = _sandbox(tmp_path, workspace=workspace)
+    sb = _sandbox(tmp_path, monkeypatch, workspace=workspace)
 
-    profile_path = sb.ensure_profile()
-
-    text = profile_path.read_text(encoding="utf-8")
+    text = _seatbelt_profile(
+        workspace=sb.workspace,
+        package_dir=sb.package_dir,
+        builtin_dir=sb.builtin_dir,
+    )
 
     assert "(version 1)" in text
     assert "(deny default)" in text
@@ -80,21 +84,24 @@ def test_seatbelt_profile_generation(tmp_path: Path, with_sandbox_exec: Path) ->
     assert text.index(f'(subpath "{workspace.resolve()}")') < text.index("(deny file-write*")
 
 
-def test_wrap_darwin_quotes_command(tmp_path: Path, with_sandbox_exec: Path) -> None:
-    sb = _sandbox(tmp_path)
+def test_wrap_darwin_quotes_command(
+    tmp_path: Path, with_sandbox_exec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sb = _sandbox(tmp_path, monkeypatch)
 
     wrapped = sb.wrap("echo hi > out.txt")
 
     parts = shlex.split(wrapped)
 
-    assert parts[:3] == ["sandbox-exec", "-f", str(sb.ensure_profile())]
+    assert parts[:2] == ["sandbox-exec", "-p"]
+    assert "(deny default)" in parts[2]
     assert parts[3:] == ["bash", "-c", "echo hi > out.txt"]
 
 
 def test_wrap_linux_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
 
-    sb = _sandbox(tmp_path, platform="linux")
+    sb = _sandbox(tmp_path, monkeypatch, platform="linux")
 
     wrapped = sb.wrap("echo hi")
 
@@ -107,7 +114,7 @@ def test_wrap_linux_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_missing_tool_required_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    sb = _sandbox(tmp_path, required=True)
+    sb = _sandbox(tmp_path, monkeypatch, required=True)
 
     with pytest.raises(SandboxUnavailableError):
         sb.wrap("echo hi")
@@ -118,20 +125,24 @@ def test_missing_tool_optional_degrades_once(
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    sb = _sandbox(tmp_path, required=False)
+    sb = _sandbox(tmp_path, monkeypatch, required=False)
 
     assert sb.wrap("echo hi") == "echo hi"  # degraded, runs unwrapped
     assert sb.wrap("echo again") == "echo again"
 
 
-def test_disabled_passes_through(tmp_path: Path, with_sandbox_exec: Path) -> None:
-    sb = _sandbox(tmp_path, enabled=False)
+def test_disabled_passes_through(
+    tmp_path: Path, with_sandbox_exec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sb = _sandbox(tmp_path, monkeypatch, enabled=False)
 
     assert sb.wrap("echo hi") == "echo hi"
 
 
 @pytest.mark.asyncio
-async def test_shell_verb_runs_wrapped(tmp_path: Path, with_sandbox_exec: Path) -> None:
+async def test_shell_verb_runs_wrapped(
+    tmp_path: Path, with_sandbox_exec: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """End-to-end through the shell verb with the mocked
     sandbox-exec: the profile is generated and the command runs."""
     from nan_fakes import FakeLLM, make_agent
@@ -140,7 +151,7 @@ async def test_shell_verb_runs_wrapped(tmp_path: Path, with_sandbox_exec: Path) 
 
     workspace.mkdir()
 
-    sb = _sandbox(tmp_path, workspace=workspace)
+    sb = _sandbox(tmp_path, monkeypatch, workspace=workspace)
 
     agent = make_agent(tmp_path=tmp_path, llm=FakeLLM(), sandbox=sb)
 

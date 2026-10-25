@@ -1,17 +1,15 @@
 """
 Event sink: lossy, fire-and-forget runtime activity feed.
 
-The UI gateway subscribes; agent code only *emits* and never
-blocks. Every emitted event carries a monotonic seq and a wall
+The UI gateway subscribes; agent code emits without blocking.
+Every emitted event carries a monotonic seq and a wall
 timestamp. A bounded history ring supports reconnect snapshots;
 streaming deltas are coalesced into one entry per stream there,
 so the ring holds turns rather than tokens.
 
 The sink is the process-wide singleton (loguru-style):
-producers call `sink.emit(...)`, consumers call
-`sink.subscribe()` -- nobody ever receives the sink by reference,
-the same way nobody passes loguru's `logger` around. The sink
-carries no domain concepts at all: the three identity keys
+producers call `sink.emit(...)`; consumers call `sink.subscribe()`.
+The sink is domain-free: the three identity keys
 (`agent_hash` / `parent_hash` / `depth`), when present, are
 placed into `content` by the CALLER; an event that carries none
 simply has no agent context (module lifecycle, gateway echo).
@@ -27,9 +25,7 @@ import uuid
 from collections import deque
 from typing import Any
 
-# Reconnect snapshot depth. Deltas of one stream are coalesced in
-# history (see `_merge_stream_delta`), so an entry is roughly one
-# turn's worth of output rather than one token.
+# Reconnect snapshot depth; history coalesces each stream's deltas.
 HISTORY_LIMIT = 4000
 
 SUB_QUEUE_SIZE = 2000
@@ -58,9 +54,8 @@ class Sink:
         self._seq = 0
         self._boot_id: str | None = None
 
-        # ids must be unique across the WHOLE process lifetime, not
-        # just one turn: the UI keys rows and matches updates by id,
-        # and this sink is a process-wide singleton.
+        # ids are unique across the process lifetime; the UI keys
+        # rows and matches updates by id.
         self._ns = uuid.uuid4().hex[:6]
         self._counter = 0
 
@@ -89,10 +84,8 @@ class Sink:
         """
         Coalesce a streaming delta into the previous history entry.
 
-        Deltas arrive per token, so keeping them verbatim makes the
-        history ring hold a few turns at most. Returns the merged
-        entry to store in place of `tail`, or None when there is
-        nothing to merge.
+        Returns the merged entry to store in place of `tail`, or None
+        when there is nothing to merge.
         """
         if tail is None or event["t"] != "output_delta":
             return None
@@ -121,15 +114,9 @@ class Sink:
 
         `t` is the flat event-type discriminant; all business
         fields travel inside `content`, which is always an object
-        (empty when omitted). `content` is passed through
-        verbatim: the sink neither interprets nor adds any field
-        (identity keys included).
+        (empty when omitted). `content` is stored verbatim.
 
-        Must be called from the event loop thread: the fan-out
-        below neither awaits nor locks, which is what makes
-        checking and mutating each queue atomic, and the sequence
-        counter is not synchronized. A publisher on any other
-        thread has to hop through loop.call_soon_threadsafe().
+        Must be called from the event loop thread.
         """
         self._seq += 1
 
@@ -148,9 +135,8 @@ class Sink:
         if self._boot_id is not None:
             event["boot_id"] = self._boot_id
 
-        # History keeps one entry per stream, not one per token. The
-        # merged entry is a copy: subscriber queues still hold the
-        # original, so live forwarding is unaffected.
+        # History keeps one entry per stream; the merged entry is a
+        # copy and live queues keep the original.
         merged = self._merge_stream_delta(self._history[-1] if self._history else None, event)
 
         if merged is None:
@@ -160,7 +146,6 @@ class Sink:
 
         for q in self._subs:
             if q.full():
-                # Drop oldest: the UI is a live view, not a log.
                 q.get_nowait()
 
             q.put_nowait(event)

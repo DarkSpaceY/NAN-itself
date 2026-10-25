@@ -4,7 +4,7 @@
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - An LLM endpoint: any OpenAI-compatible API or the Anthropic API
-  (a local llama.cpp/vLLM server works -- see `llm.providers` in
+  (a local llama.cpp/vLLM server works -- see `llm.base_url` in
   the configuration reference)
 
 ## Install
@@ -17,7 +17,7 @@ All configuration lives in one file: `config/nan.yaml`. The
 minimum you must fill in is the active model:
 
     llm:
-      provider: openai          # "openai" | "anthropic", or a profile key
+      provider: openai          # "openai" | "anthropic"
       base_url: ""              # empty = provider default endpoint
       api_key: ""
       model: ""
@@ -36,9 +36,12 @@ What starts:
 - the agent loop (root agent; event-driven by default, or
   self-rotating with `agent.autonomous_interval > 0`)
 - the gateway web UI on `http://127.0.0.1:8765` (serving
-  `frontend/dist` when built)
+  `frontend/dist`, located automatically; the browser opens once
+  the socket is up)
 - the injection registry on `127.0.0.1:8901`
-- the autostart script (`workspace/autostart.sh`) if enabled and present
+- the autostart scripts, if enabled and present: `builtin/autostart.sh`
+  (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
+  sandboxed)
 
 ```mermaid
 flowchart LR
@@ -46,7 +49,7 @@ flowchart LR
         ROOT["root agent<br/>(turn loop)"]
         GW["gateway<br/>:8765"]
         HUB["injection registry<br/>:8901"]
-        AUTO["autostart script"]
+        AUTO["autostart scripts"]
     end
     BROWSER["browser"] <-->|"HTTP + WebSocket"| GW
     GW -->|"user input"| ROOT

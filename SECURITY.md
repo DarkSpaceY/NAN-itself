@@ -42,10 +42,10 @@ trust is the boundary, consistent with the trust model above.
   config) and builtin resources read-only. Modes: enforcing /
   degraded (sandbox tooling missing, loud warning) / required
   (`sandbox.required: true` -- missing tooling refuses to
-  execute). Services and the autostart script run with user
-  authority, outside the sandbox. The autostart script lives in
-  the workspace but is user-owned: the agent must never write
-  it.
+  execute). Services and `builtin/autostart.sh` run with user
+  authority, outside the sandbox. `workspace/autostart.sh` is
+  agent-writable and runs inside that same sandbox, so its
+  writes stay confined.
 - **Agent authority limits.** `shell_timeout` and
   `shell_output_limit` come from user configuration; tools and
   skills are plain files reached through the sandboxed shell; the
@@ -53,7 +53,7 @@ trust is the boundary, consistent with the trust model above.
 - **LLM endpoint.** The configured endpoint receives the
   assembled conversation, including tool/skill output the agent
   observed. Point NAN-itself at a local model
-  (`llm.providers`) when that matters.
+  (`llm.base_url`) when that matters.
 
 ## Known residual risks
 

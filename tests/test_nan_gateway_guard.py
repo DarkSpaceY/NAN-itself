@@ -6,10 +6,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import socket
+from pathlib import Path
 
 import httpx
 import pytest
 
+from nan.config import settings
 from nan.gateway import Gateway
 
 pytestmark = pytest.mark.asyncio
@@ -38,7 +40,10 @@ async def _wait_port(port: int) -> None:
 
 async def test_entry_guard_rejects_forged_host_and_origin() -> None:
     port = _free_port()
-    gateway = Gateway(host="127.0.0.1", port=port, frontend_dir=None)
+    settings.gateway.port = port
+
+    settings.paths.frontend = Path("/nonexistent/nan-frontend")
+    gateway = Gateway()
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     try:

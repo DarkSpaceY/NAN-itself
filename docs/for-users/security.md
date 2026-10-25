@@ -57,10 +57,26 @@ sequenceDiagram
   pass; browsers always send one and cannot forge it, which is
   what makes this an authentication boundary.
 
-**Injection registry** (service-facing). No token:
-registration, heartbeat and turn delivery are open to loopback.
-Local process trust is the boundary, consistent with the
+**Injection registry** (service-facing). The same guard applies
+to `127.0.0.1:8901`, so a hostile page cannot POST a fake
+service into the chain from the browser. No token: local
+process trust is the boundary, consistent with the
 trusted-machine model.
+
+**Outbound destinations.** Every URL the core will call or hand
+to the desktop must resolve textually to loopback
+(`127.0.0.0/8`, `::1`, `localhost`):
+
+- a service `endpoint` outside loopback is rejected at
+  registration -- no turn payload can leave the machine;
+- a panel `url` outside loopback is rejected -- the desktop
+  never loads an internet page;
+- a panel `icon` must be a local path or a loopback URL, so the
+  rail cannot leak a request to the internet.
+
+These are checked on the literal URL; no DNS resolution
+happens, so a loopback name can never be rebound to a public
+address.
 
 ## Execution sandbox
 
@@ -73,8 +89,9 @@ flowchart TB
     SBX -->|"write"| W["workspace/ + temp dirs"]
     SBX -->|"read-only"| C["nan/ package<br/>persona, config, code"]
     SBX -->|"read-only"| B["builtin/ resources"]
-    OUT["autostart + services"] -->|"user authority,<br/>outside the sandbox"| OS["the machine"]
-    SBX -.->|"cannot reach"| OUT
+    SBX -->|"runs"| AS["workspace/autostart.sh<br/>(agent-writable)"]
+    OUT["builtin/autostart.sh + services"] -->|"user authority,<br/>outside the sandbox"| OS["the machine"]
+    SBX -.->|"cannot write"| OUT
 ```
 
 - writes confined to the workspace and temp directories
@@ -85,9 +102,11 @@ flowchart TB
   (`sandbox.required: true` -- missing tooling refuses to
   execute)
 
-Services and the autostart script run with user authority,
-outside the sandbox. The autostart script lives in the
-workspace but is user-owned: the agent must never write it.
+Services and `builtin/autostart.sh` run with user authority,
+outside the sandbox. `workspace/autostart.sh` is the opposite:
+agents may write it (to set up their own boot services), and it
+runs inside the same sandbox as their shell commands, so its
+writes stay confined too.
 
 ## Agent authority limits
 
@@ -102,7 +121,7 @@ workspace but is user-owned: the agent must never write it.
 The configured LLM endpoint receives the assembled conversation:
 task text, persona, injection contributions, tool/skill output
 the agent observed. Choose endpoints accordingly (see
-`llm.providers` for pointing NAN-itself at a local model).
+`llm.base_url` for pointing NAN-itself at a local model).
 
 ## Known residual risks
 

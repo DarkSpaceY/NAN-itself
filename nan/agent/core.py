@@ -28,43 +28,41 @@ import contextlib
 import time
 import uuid
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nan.agent.engine import DEFAULT_BACKOFF, TurnEngine, next_backoff
-from nan.agent.verbs import VERBS, tool_definitions
+from nan.agent.engine import TurnEngine, next_backoff
+from nan.agent.handle import Handle
+from nan.agent.verbs import VERBS
+from nan.config import settings
 from nan.events import sink
-from nan.llm import LLMRequest, LLMResponse, Message
+from nan.llm import Message
 from nan.turn import (
     DeltaEvent,
     InboxKind,
     InboxMessage,
-    LLMCall,
     Turn,
-    freeze_turn,
-    render_turn,
+    TurnState,
 )
 
 if TYPE_CHECKING:
-    from nan.agent.handle import Book, Handle
+    from nan.agent.handle import Book
     from nan.agent.sandbox import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
 
-HISTORY_CHAR_LIMIT = 100_000
 
+@dataclass(frozen=True)
+class Death:
+    """
+    The one exit record: why this agent stopped, and the finish
+    report when the model ended it itself (None for external
+    deaths). The first record wins; see Agent._begin_death.
+    """
 
-@dataclass
-class AgentConfig:
-    max_depth: int = 3  # -1: unlimited
-    max_children: int = 5  # -1: unlimited
-    autonomous_interval: float = 0.0
-    shell_timeout: float = 30.0  # shell verb execution timeout
-    shell_output_limit: int = 20_000  # shell verb head+tail truncation size
-    backoff: tuple[float, ...] = DEFAULT_BACKOFF
-    history_char_limit: int = HISTORY_CHAR_LIMIT
+    reason: str
+    report: str | None = None
 
 
 class Agent:
@@ -74,74 +72,61 @@ class Agent:
         book: Book,
         llm: LLMProvider,
         injections: InjectionHub,
-        workspace: Path,
-        persona_path: Path,
         sandbox: Sandbox,
         parent: Agent | None = None,
-        config: AgentConfig,
     ) -> None:
+        # --- collaborators (handed in) ---
         self.book = book
         self.llm = llm
         self.engine = TurnEngine(llm)
         self.injections = injections
-        self.workspace = workspace
-
-        # Global persona: the file is a CORE file, config-grade.
-        # Read at boot (an unreadable persona refuses startup)
-        # and re-read every turn; a mid-run read failure fails
-        # the turn (backoff + retry). A content change is a
-        # system-prompt invalidation point (new prompt from that
-        # turn on; unchanged content is a cache no-op).
-        self.persona_path = persona_path
-
-        try:
-            self._persona_last = persona_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise RuntimeError(f"persona file unreadable at boot: {persona_path}") from exc
-
+        self.parent = parent  # upstream channel for send
         self.sandbox = sandbox  # execution-level sandbox for the shell verb
 
-        self.parent = parent  # upstream channel for send
-
-        self.config = config
-
+        # --- identity ---
         self.agent_id = uuid.uuid4().hex[:8]
         self.depth: int = 0 if parent is None else parent.depth + 1
 
-        # Handles I hold for my children. A handle stays with
-        # its spawner, so the cascade follows the spawn tree.
+        # --- persona: boot read ---
+        # The file is CORE: an unreadable persona refuses startup.
+        # It is re-read every turn (a mid-run failure fails that
+        # turn) and a content change is a system-prompt
+        # invalidation point.
+        try:
+            self._persona_last = settings.paths.persona.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(
+                f"persona file unreadable at boot: {settings.paths.persona}"
+            ) from exc
+
+        # --- children: the handles I hold (cascade follows the spawn tree) ---
         self._children: dict[str, Handle] = {}
 
+        # --- inbox: delivery + its wake source ---
         self._inbox: asyncio.Queue[InboxMessage] = asyncio.Queue()
-
-        # Wake source for event-driven mode: set by every delivery.
         self._inbox_wake = asyncio.Event()
 
-        # Pause/resume state: the flag gates the loop, the event
-        # wakes the waiter, and _turn_task is the cancellable
-        # in-flight turn.
-        self._paused = False
-        self._resumed = asyncio.Event()
+        # --- tasks: the loop, and the one cancellable in-flight turn ---
+        self._task: asyncio.Task[None] | None = None
         self._turn_task: asyncio.Task[Turn] | None = None
 
-        # Delta events (subagent lifecycle for now) drained into the
-        # next turn's <delta><subagent> section.
+        # --- pause state: the flag gates the loop, the event wakes it ---
+        self._paused = False
+        self._resume_wake = asyncio.Event()
+
+        # --- per-turn accumulation (drained at each turn boundary) ---
+        # Delta events (subagent lifecycle) render into the next
+        # turn's <delta> sections; history is add-only and cleared
+        # wholesale once over the char limit.
         self._delta_events: list[DeltaEvent] = []
-
-        # Add-only rendered history: cleared wholesale once over
-        # the char limit.
         self._messages: list[Message] = []
-
+        self._cleared = False  # context was cleared before this turn
         self.last_turn: Turn | None = None
         self.cycles = 0
 
-        self.report: str | None = None
-        self.done: bool = False
-        self._dying: bool = False  # death initiated (latch); reason is separate storage
-        self._death_reason: str | None = None
-        self._started: bool = False
-
-        self._task: asyncio.Task[None] | None = None
+        # --- lifecycle: the exit record, and the start flag ---
+        self._death: Death | None = None  # first exit record wins (latch)
+        self._started = False
 
     # ==================================================================
     # Identity / handles
@@ -153,11 +138,6 @@ class Agent:
 
         self._task = asyncio.create_task(self.loop(), name=f"agent:{self.agent_id}")
 
-    def handle_to_self(self, holder_id: str) -> Handle:
-        from nan.agent.handle import Handle
-
-        return Handle(holder_id=holder_id, target=self)
-
     def child_handle(self, agent_id: Any) -> Handle | None:
         if not isinstance(agent_id, str):
             return None
@@ -166,6 +146,11 @@ class Agent:
 
     def child_handles(self) -> list[Handle]:
         return list(self._children.values())
+
+    @property
+    def task(self) -> asyncio.Task[None] | None:
+        """The loop task; None before start()."""
+        return self._task
 
     # ==================================================================
     # Inbox
@@ -186,8 +171,6 @@ class Agent:
         elif source in self._children:
             kind = "subagent"
         else:
-            # Not reachable through any legitimate channel today;
-            # delivered rather than dropped, labelled and logged.
             kind = "unknown"
 
             logger.warning("[{}] message from unverified source '{}'", self.agent_id, source)
@@ -210,24 +193,24 @@ class Agent:
         Create and start a child; return (child, error). The
         caller (spawn verb) renders the error for the model.
         """
-        if self.config.max_depth >= 0 and self.depth + 1 > self.config.max_depth:
-            return self, f"Max depth exceeded: {self.depth + 1} > {self.config.max_depth}"
+        if settings.agent.max_depth >= 0 and self.depth + 1 > settings.agent.max_depth:
+            return self, f"Max depth exceeded: {self.depth + 1} > {settings.agent.max_depth}"
 
-        if self.config.max_children >= 0 and len(self._children) >= self.config.max_children:
-            return self, f"Max children reached: {self.config.max_children}"
+        if settings.agent.max_children >= 0 and len(self._children) >= settings.agent.max_children:
+            return self, f"Max children reached: {settings.agent.max_children}"
 
+        # A child shares the parent's collaborators and inherits
+        # everything else from the process-wide settings.
         child = Agent(
             book=self.book,
             llm=self.llm,
             injections=self.injections,
-            workspace=self.workspace,
-            persona_path=self.persona_path,  # one global persona, inherited
             sandbox=self.sandbox,
             parent=self,
-            config=self.config,
         )
 
-        self._children[child.agent_id] = child.handle_to_self(holder_id=self.agent_id)
+        # The holder is me (the spawner); the target is the child.
+        self._children[child.agent_id] = Handle(holder_id=self.agent_id, target=child)
 
         # "spawn == spawn then send": the task is delivered as the
         # child's first inbox message, tagged from its parent.
@@ -251,41 +234,36 @@ class Agent:
         """
         self._delta_events.append(DeltaEvent(section=section, line=line))
 
+    def _begin_death(self, death: Death) -> bool:
+        """Record the exit; the first record wins (idempotent)."""
+        if self._death is not None:
+            return False
+
+        self._death = death
+
+        return True
+
     def request_death(self, reason: str) -> None:
         """
-        Kill this agent now: flag + task cancellation. Idempotent
-        (the latch is _dying; _death_reason is storage only and
-        may stay None, e.g. finish exits via `done`). The loop's
-        teardown does the rest (cascade, notice).
+        Kill this agent now: record the exit and cancel the loop
+        (the loop's teardown does the rest: in-flight turn
+        discarded, cascade, notice). A death recorded before the
+        loop takes its first step is honored on entry instead.
         """
-        if not self._dying:
-            self._dying = True
+        if not self._begin_death(Death(reason)):
+            return
 
-            self._death_reason = reason
-
-            task = self._task
-
-            if task is not None and not task.done():
-                task.cancel()
-
-            if task is not None and not self._started and not task.done():
-                # The loop task was cancelled before its first
-                # step: its try/finally never ran. Run teardown
-                # here so cascade and upstream notice still happen.
-                asyncio.get_running_loop().create_task(self._teardown(cancelled=False))
+        if self._started and self._task is not None:
+            self._task.cancel()
 
     def finish(self, report: str) -> None:
         """
         Record the final report (FinishVerb). The loop ends at
-        the next check; teardown delivers it upstream. Latches
-        _dying: a kill racing in after finish cannot flip the
-        death notice's semantics.
+        the next boundary; teardown delivers it upstream. The
+        record latches: a second finish is a no-op (the first
+        report wins).
         """
-        self._dying = True
-
-        self.report = report
-
-        self.done = True
+        self._begin_death(Death("finished", report))
 
     def pause(self) -> None:
         """
@@ -293,22 +271,26 @@ class Agent:
         discarded whole; its drained inputs ride back into the
         inbox, so resume opens a clean turn. Idempotent.
         """
+        if self._paused:
+            return
+
         self._paused = True
 
         sink.emit("agent_paused", content={"agent_id": self.agent_id})
 
-        task = self._turn_task
-
-        if task is not None and not task.done():
-            task.cancel()
+        if self._turn_task is not None:
+            self._turn_task.cancel()
 
     def resume(self) -> None:
-        """Lift the pause; the loop opens a clean turn."""
+        """Lift the pause; the loop opens a clean turn. Idempotent."""
+        if not self._paused:
+            return
+
         self._paused = False
 
         sink.emit("agent_resumed", content={"agent_id": self.agent_id})
 
-        self._resumed.set()
+        self._resume_wake.set()
 
     @property
     def paused(self) -> bool:
@@ -328,29 +310,32 @@ class Agent:
                 "agent_id": self.agent_id,
                 "depth": self.depth,
                 "parent_id": (self.parent.agent_id if self.parent else None),
-                "pacing": ("interval" if self.config.autonomous_interval > 0 else "event-driven"),
+                "pacing": (
+                    "interval" if settings.agent.autonomous_interval > 0 else "event-driven"
+                ),
             },
         )
-
-        cancelled = False
 
         backoff_index = 0
 
         try:
-            while not self.done and not self._dying:
+            while self._death is None:
                 if self._paused:
                     await self._wait_while_paused()
 
-                    if self._dying:
+                    if self._death is not None:
                         break
 
                 # Event-driven mode (interval <= 0): no filler
                 # turns -- block until the inbox has something.
-                if self.config.autonomous_interval <= 0:
+                if settings.agent.autonomous_interval <= 0:
                     await self._wait_for_inbox()
 
-                    if self._dying:
+                    if self._death is not None:
                         break
+
+                    if self._paused:
+                        continue
 
                 turn_task = asyncio.create_task(
                     self.run_turn(retries=backoff_index), name=f"turn:{self.agent_id}"
@@ -366,12 +351,18 @@ class Agent:
                         # Paused mid-turn: the turn was discarded
                         # whole (run_turn re-queued its inputs);
                         # wait for the resume, then go clean.
+                        self._turn_task = None
+
                         continue
 
+                    # Death: teardown awaits the unwinding turn
+                    # through this handle.
                     raise
 
                 except Exception as exc:
-                    delay, backoff_index = next_backoff(self.config.backoff, backoff_index)
+                    self._turn_task = None
+
+                    delay, backoff_index = next_backoff(settings.agent.backoff, backoff_index)
 
                     sink.emit(
                         "turn_failed",
@@ -389,38 +380,36 @@ class Agent:
 
                     continue
 
+                self._turn_task = None
+
                 backoff_index = 0
                 self.cycles += 1
 
-                if self.done or self._dying:
+                if self._death is not None:
                     break
 
-                if self.config.autonomous_interval > 0:
-                    await asyncio.sleep(self.config.autonomous_interval)
+                if settings.agent.autonomous_interval > 0:
+                    await asyncio.sleep(settings.agent.autonomous_interval)
 
-                # Yield to the loop even at interval 0: a turn
-                # with no real awaits (stubbed LLM, instant verbs)
-                # would otherwise hog the event loop.
+                # Yield to the loop even at interval 0.
                 await asyncio.sleep(0)
 
         except asyncio.CancelledError:
-            cancelled = True
+            # Cancellation that bypassed request_death (event loop
+            # shutdown) is still an exit: record it like any other.
+            if self._death is None:
+                self._death = Death("cancelled")
 
             raise
 
         finally:
-            await self._teardown(cancelled=cancelled)
+            await self._teardown()
 
     async def _wait_while_paused(self) -> None:
-        self._resumed.clear()
-
         while self._paused:
-            if self._resumed.is_set():
-                self._resumed.clear()
+            await self._resume_wake.wait()
 
-                continue
-
-            await self._resumed.wait()
+            self._resume_wake.clear()
 
     async def _wait_for_inbox(self) -> None:
         while self._inbox.empty():
@@ -430,49 +419,34 @@ class Agent:
                 await self._inbox_wake.wait()
 
     async def run_turn(self, *, retries: int = 0) -> Turn:
-        drained: list[InboxMessage] = []
+        # -- observe: drain inputs, build the arrival skeleton ------
+        drained: list[InboxMessage] = list(self._drain_inbox())
 
-        delta_events: list[DeltaEvent] = []
-
-        try:
-            return await self._run_turn_inner(drained, delta_events, retries=retries)
-
-        except asyncio.CancelledError:
-            # The turn dies whole (pause or agent death): nothing
-            # rendered, nothing in history; drained inputs go
-            # back for the next (clean) turn.
-            sink.emit(
-                "turn_cancelled",
-                content={"agent_id": self.agent_id, "requeued_count": len(drained)},
-            )
-
-            for message in drained:
-                self._deliver(message)
-
-            self._delta_events = [*delta_events, *self._delta_events]
-
-            raise
-
-    async def _run_turn_inner(
-        self,
-        drained: list[InboxMessage],
-        delta_events: list[DeltaEvent],
-        *,
-        retries: int,
-    ) -> Turn:
-        # -- observe ------------------------------------------------------
-        drained.extend(self._drain_inbox())
-
-        delta_events.extend(self._delta_events)
+        pending_deltas: list[DeltaEvent] = list(self._delta_events)
 
         self._delta_events = []
+
+        if self.cycles == 0:
+            state: TurnState = "start"
+        elif self._cleared:
+            state = "context_cleared"
+        else:
+            state = "running"
+
+        # The flag is consumed by this turn; a rollback puts it
+        # back, so the next turn still reports the context epoch.
+        was_cleared, self._cleared = self._cleared, False
+
+        persona, persona_marker = self._persona_for_turn()
 
         skeleton = Turn(
             agent_id=self.agent_id,
             parent_id=(self.parent.agent_id if self.parent else None),
             depth=self.depth,
             inbox=tuple(drained),
-            delta=tuple(delta_events),
+            delta=tuple(pending_deltas),
+            state=state,
+            persona=persona_marker,
         )
 
         sink.emit(
@@ -484,68 +458,39 @@ class Agent:
             },
         )
 
-        contributions, service_events = await self.injections.collect(skeleton)
-
-        sink.emit(
-            "injections_collected",
-            content={
-                "agent_id": self.agent_id,
-                "services": [
-                    {
-                        "service_id": i.service_id,
-                        "ok": i.ok,
-                        "duration_s": i.duration_s,
-                        "text_len": len(i.text),
-                    }
-                    for i in contributions
-                ],
-            },
-        )
-
-        turn = replace(
-            skeleton,
-            injections=contributions,
-            delta=tuple([*delta_events, *service_events]),
-        )
-
-        # -- think --------------------------------------------------------
-        messages = [
-            Message(role="system", content=self._persona_for_turn()),
-            *self._messages,
-            *render_turn(turn),
-        ]
-
+        # -- pipeline: collect -> think -> act -> freeze ------------
         try:
-            generate_started = time.time()
-
-            response = await self.engine.generate(
-                agent_id=self.agent_id,
-                depth=self.depth,
-                request=LLMRequest(messages=messages, tools=tool_definitions(depth=self.depth)),
+            turn = await self.engine.run_turn(
+                skeleton,
+                persona=persona,
+                history=self._messages,
+                prev_turn=self.last_turn,
+                collect=self.injections.collect,
+                execute=self._run_call,
+                retries=retries,
             )
 
-            latency_s = time.time() - generate_started
+        except BaseException as exc:
+            # The turn dies whole (pause, agent death or a failure
+            # inside the pipeline): nothing rendered, nothing in
+            # history; drained inputs go back for the next (clean)
+            # turn, and the state consumed above is restored.
+            if isinstance(exc, asyncio.CancelledError):
+                sink.emit(
+                    "turn_cancelled",
+                    content={"agent_id": self.agent_id, "requeued_count": len(drained)},
+                )
 
-        except Exception as exc:
-            turn = _end_turn(turn, error=f"{type(exc).__name__}: {exc}")
+            self._cleared = was_cleared
+
+            for message in drained:
+                self._deliver(message)
+
+            self._delta_events = [*pending_deltas, *self._delta_events]
 
             raise
 
-        turn = _with_response(turn, response, latency_s=latency_s, retries=retries)
-
-        # -- act ----------------------------------------------------------
-        results: list[str] = []
-
-        for call in turn.calls:
-            logger.info("[{}] verb {} {}", self.agent_id, call.name, call.arguments)
-
-            results.append(await self._run_call(call))
-
-        turn = _with_results(turn, results)
-
-        # -- freeze -------------------------------------------------------
-        turn = freeze_turn(turn)
-
+        # -- apply: the engine returned whole, commit the state -----
         self.last_turn = turn
 
         assert turn.rendered is not None
@@ -560,7 +505,7 @@ class Agent:
                 "agent_id": self.agent_id,
                 "turn_index": self.cycles + 1,
                 "usage": (turn.llm.usage.model_dump() if turn.llm and turn.llm.usage else None),
-                "latency_s": (turn.llm.latency_s if turn.llm else 0.0),
+                "latency_s": (turn.llm.ended_at - turn.llm.started_at if turn.llm else 0.0),
                 "retries": (turn.llm.retries if turn.llm else 0),
                 "calls": len(turn.calls),
                 "history_chars": sum(len(m.content or "") for m in self._messages),
@@ -573,27 +518,29 @@ class Agent:
     # Persona (re-read every turn)
     # ==================================================================
 
-    def _persona_for_turn(self) -> str:
+    def _persona_for_turn(self) -> tuple[str, str | None]:
         """
         Re-read the persona file every turn. A read failure raises
-        (the turn fails and backs off) -- persona is config-grade,
-        we do not silently continue on a stale copy. The last known
-        text is kept only for the changed-or-not log line.
+        (the turn fails and backs off). Returns the text to use
+        plus, when it changed since the last turn, that text as
+        the turn's persona marker.
         """
         try:
-            text = self.persona_path.read_text(encoding="utf-8")
+            text = settings.paths.persona.read_text(encoding="utf-8")
 
         except OSError:
             raise RuntimeError(
-                f"[{self.agent_id}] persona file unreadable: {self.persona_path}"
+                f"[{self.agent_id}] persona file unreadable: {settings.paths.persona}"
             ) from None
 
-        if text != self._persona_last:
+        changed = text != self._persona_last
+
+        if changed:
             logger.info("[{}] persona changed; new system prompt from this turn", self.agent_id)
 
             self._persona_last = text
 
-        return text
+        return text, (text if changed else None)
 
     # ==================================================================
     # Verbs
@@ -660,98 +607,109 @@ class Agent:
     # Teardown (the single death path)
     # ==================================================================
 
-    async def _teardown(self, *, cancelled: bool) -> None:
+    async def _teardown(self) -> None:
+        death = self._death
+
+        if death is None:
+            raise RuntimeError("teardown without a death record")
+
         # An in-flight turn (cancelled with the loop, or still
         # running) is discarded, never written to history.
-        turn_task = self._turn_task
-
-        if turn_task is not None and not turn_task.done():
-            turn_task.cancel()
+        turn_task, self._turn_task = self._turn_task, None
 
         if turn_task is not None:
+            turn_task.cancel()
+
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await turn_task
 
-        # Cascade first: every child I hold dies with me.
-        children = self.child_handles()
+        # Cascade: every child I hold dies with me; its loop task
+        # is awaited.
+        child_tasks = []
 
-        for handle in children:
+        for handle in self.child_handles():
             handle.kill()
 
-        await asyncio.gather(
-            *(t for h in children if (t := getattr(h._target, "_task", None)) is not None),
-            return_exceptions=True,
-        )
+            task = handle.task
+
+            if task is not None:
+                child_tasks.append(task)
+
+        await asyncio.gather(*child_tasks, return_exceptions=True)
 
         # Notify upstream: a finish report rides the inbox (it
         # carries content); a bare death rides the holder's system
         # event ledger, surfacing in their next <delta> section.
+        # Either way the child slot is released here.
         if self.parent is not None:
-            if self.report is not None:
+            if death.report is not None:
                 self.parent._deliver(
                     InboxMessage(
                         kind="subagent",
                         source=self.agent_id,
-                        text=self.report,
+                        text=death.report,
                         event="finish",
                     )
                 )
 
             else:
-                reason = self._death_reason or ("cancelled" if cancelled else "exited")
+                self.parent.note_delta("subagent", f"-{self.agent_id} died: {death.reason}")
 
-                self.parent.note_delta("subagent", f"-{self.agent_id} died: {reason}")
+            self.parent._children.pop(self.agent_id, None)
+
+        # Final delivery: the last turn's complete shape, marked
+        # state=end, rides the slot a next turn's prev_turn would
+        # have carried -- the same collect call as every boundary,
+        # with no arriving turn. The first turn has no prev_turn;
+        # the exit call has no turn.
+        if self.last_turn is not None:
+            with contextlib.suppress(Exception):
+                await self.injections.collect(None, prev_turn=replace(self.last_turn, state="end"))
+
+        self.injections.forget(self.agent_id)
 
         self.book.unregister(self.agent_id)
 
-        reason = (
-            "finished"
-            if self.report is not None
-            else (self._death_reason or ("cancelled" if cancelled else "exited"))
-        )
-
         sink.emit(
             "agent_exited",
-            content={"agent_id": self.agent_id, "reason": reason, "report": self.report},
+            content={"agent_id": self.agent_id, "reason": death.reason, "report": death.report},
         )
 
-        logger.info(
-            "[{}] stopped after {} cycles ({})",
-            self.agent_id,
-            self.cycles,
-            self.report is not None and "finished" or (self._death_reason or "loop end"),
-        )
+        logger.info("[{}] stopped after {} cycles ({})", self.agent_id, self.cycles, death.reason)
 
     # ==================================================================
     # Small helpers
     # ==================================================================
 
     def _drain_inbox(self) -> list[InboxMessage]:
-        items: list[InboxMessage] = []
+        drained: list[InboxMessage] = []
 
         while True:
             try:
-                items.append(self._inbox.get_nowait())
+                drained.append(self._inbox.get_nowait())
 
             except asyncio.QueueEmpty:
-                return items
+                return drained
 
     def _clear_history_over_limit(self) -> None:
         chars = sum(len(m.content or "") for m in self._messages)
 
-        if chars > self.config.history_char_limit:
+        if chars > settings.agent.history_char_limit:
             logger.info(
                 "[{}] history {} chars over limit {}; clearing",
                 self.agent_id,
                 chars,
-                self.config.history_char_limit,
+                settings.agent.history_char_limit,
             )
 
             self._messages.clear()
 
+            # The next turn opens a new context epoch.
+            self._cleared = True
+
 
 # ----------------------------------------------------------------------
-# Module-level pure helpers (keep the Turn a value)
+# Module-level pure helpers
 # ----------------------------------------------------------------------
 
 
@@ -759,27 +717,3 @@ def _self_cancel_pending() -> int:
     task = asyncio.current_task()
 
     return task.cancelling() if task is not None else 0
-
-
-def _with_response(turn: Turn, response: LLMResponse, *, latency_s: float, retries: int) -> Turn:
-    return replace(
-        turn,
-        reply=response.content or "",
-        calls=tuple(response.tool_calls),
-        llm=LLMCall(
-            model=response.model,
-            usage=response.usage,
-            finish_reason=response.finish_reason,
-            latency_s=latency_s,
-            retries=retries,
-        ),
-        ended_at=time.time(),
-    )
-
-
-def _with_results(turn: Turn, results: list[str]) -> Turn:
-    return replace(turn, results=tuple(results))
-
-
-def _end_turn(turn: Turn, error: str) -> Turn:
-    return replace(turn, error=error, ended_at=time.time())

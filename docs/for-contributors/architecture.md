@@ -24,6 +24,10 @@ in it; this document follows the actual layout.
     │   └── client.py     the concurrent collector
     └── config/           pydantic-settings, YAML source
 
+Any domain may import the DTOs in `nan/llm/types.py`; only
+`nan/agent/engine.py` calls `LLMProvider`, the transport edge.
+The agent runtime does not branch on which provider is in use.
+
 ## One agent, one task
 
 An Agent is a single asyncio task running turns in a loop. The
@@ -148,7 +152,7 @@ sequenceDiagram
         H->>S: POST endpoint {turn: {...}}
         S-->>H: text or {"text": "..."}
     end
-    H-->>A: Injection(ok, duration_s)
+    H-->>A: Injection(ok, started_at, ended_at)
     note over A: contributions and failures<br/>both land on the turn record
 ```
 

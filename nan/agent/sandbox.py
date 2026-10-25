@@ -1,14 +1,22 @@
 """
 Execution-level sandbox for agent shell commands.
 
-macOS wraps commands in ``sandbox-exec -f <profile>``; the
-Seatbelt profile is generated once at core startup: write access
+macOS wraps commands in ``sandbox-exec -p <profile>``; the
+Seatbelt profile is built in memory on every wrap: write access
 only to the workspace and temp directories, the nan package and
 the builtin tree explicitly read-only, reads and network open.
-Linux uses the bubblewrap equivalent. Services and the
-autostart script run with user authority, outside the sandbox;
-the autostart script lives in the workspace but is user-owned
-and must never be written by an agent.
+Linux uses the bubblewrap equivalent.
+
+Two autostart scripts exist, with different authority:
+
+    builtin/autostart.sh    maintained by the user, runs outside
+                            this sandbox with the user's full
+                            rights.
+    workspace/autostart.sh  writable by agents and executed
+                            inside this sandbox: an agent can set
+                            up its own boot services, but only
+                            within the same write scope as its
+                            shell commands.
 
 If no sandbox tool exists on the host, ``sandbox.required``
 decides: true -- refuse to execute (raise); false -- degrade to
@@ -26,6 +34,8 @@ from typing import Literal
 
 from loguru import logger
 
+from nan.config import settings
+
 
 class SandboxUnavailableError(RuntimeError):
     """
@@ -38,38 +48,46 @@ class Sandbox:
     """
     Wraps shell-verb commands. Value-ish object: one per core
     process, shared by every agent (the profile is global).
+    Reads the layout and policy from the process-wide settings.
     """
 
-    def __init__(
-        self,
-        *,
-        workspace: Path,
-        package_dir: Path,
-        builtin_dir: Path | None = None,
-        enabled: bool = True,
-        required: bool = False,
-        platform: str | None = None,
-    ) -> None:
-        self.workspace = workspace
-        self.package_dir = package_dir
-        self.builtin_dir = builtin_dir
-        self.enabled = enabled
-        self.required = required
-        self.platform = platform or sys.platform
-
+    def __init__(self) -> None:
         self._tool: Literal["sandbox-exec", "bwrap"] | None = self._detect_tool()
-        self._profile_path: Path | None = None
         self._warned = False
+
+    # ------------------------------------------------------------------
+    # Policy / layout (live reads of the global settings)
+    # ------------------------------------------------------------------
+
+    @property
+    def workspace(self) -> Path:
+        return settings.paths.workspace
+
+    @property
+    def package_dir(self) -> Path:
+        return settings.paths.package
+
+    @property
+    def builtin_dir(self) -> Path:
+        return settings.paths.builtin
+
+    @property
+    def enabled(self) -> bool:
+        return settings.sandbox.enabled
+
+    @property
+    def required(self) -> bool:
+        return settings.sandbox.required
 
     # ------------------------------------------------------------------
     # Detection
     # ------------------------------------------------------------------
 
     def _detect_tool(self) -> Literal["sandbox-exec", "bwrap"] | None:
-        if self.platform == "darwin" and shutil.which("sandbox-exec"):
+        if sys.platform == "darwin" and shutil.which("sandbox-exec"):
             return "sandbox-exec"
 
-        if self.platform.startswith("linux") and shutil.which("bwrap"):
+        if sys.platform.startswith("linux") and shutil.which("bwrap"):
             return "bwrap"
 
         return None
@@ -77,32 +95,6 @@ class Sandbox:
     @property
     def available(self) -> bool:
         return self._tool is not None
-
-    # ------------------------------------------------------------------
-    # Profile (macOS Seatbelt)
-    # ------------------------------------------------------------------
-
-    def ensure_profile(self) -> Path:
-        """
-        Generate the Seatbelt profile once and return its path.
-        Called at core startup; also called lazily by wrap().
-        """
-        if self._profile_path is not None:
-            return self._profile_path
-
-        profile = _seatbelt_profile(
-            workspace=self.workspace,
-            package_dir=self.package_dir,
-            builtin_dir=self.builtin_dir,
-        )
-
-        path = Path(tempfile.gettempdir()) / f"nan-sandbox-{id(self):x}.sb"
-
-        path.write_text(profile, encoding="utf-8")
-
-        self._profile_path = path
-
-        return path
 
     # ------------------------------------------------------------------
     # Wrapping
@@ -125,7 +117,7 @@ class Sandbox:
         if self._tool is None:
             if self.required:
                 raise SandboxUnavailableError(
-                    "sandbox.sandbox_required=true but no sandbox tool found "
+                    "sandbox.required=true but no sandbox tool found "
                     "(sandbox-exec on macOS / bwrap on Linux); refusing to execute"
                 )
 
@@ -139,9 +131,14 @@ class Sandbox:
             return command
 
         if self._tool == "sandbox-exec":
-            profile = self.ensure_profile()
+            # -p takes the profile inline.
+            profile = _seatbelt_profile(
+                workspace=self.workspace,
+                package_dir=self.package_dir,
+                builtin_dir=self.builtin_dir,
+            )
 
-            return f"sandbox-exec -f {shlex.quote(str(profile))} bash -c {shlex.quote(command)}"
+            return f"sandbox-exec -p {shlex.quote(profile)} bash -c {shlex.quote(command)}"
 
         return _bwrap_command(
             command,
@@ -160,13 +157,12 @@ def _seatbelt_profile(
     *,
     workspace: Path,
     package_dir: Path,
-    builtin_dir: Path | None,
+    builtin_dir: Path,
 ) -> str:
     """
     deny default; reads and network open; writes only to the
     workspace and temp locations; the nan package and builtin
-    tree stay read-only even if a later edit broadens the write
-    list (deny beats allow).
+    tree stay read-only.
     """
     tmpdir = tempfile.gettempdir()
 
@@ -192,12 +188,7 @@ def _seatbelt_profile(
         ")",
         "(deny file-write*",
         f'    (subpath "{package_dir.resolve()}")',
-    ]
-
-    if builtin_dir is not None:
-        lines.append(f'    (subpath "{builtin_dir.resolve()}")')
-
-    lines += [
+        f'    (subpath "{builtin_dir.resolve()}")',
         ")",
         "(allow network*)",
         "(allow process*)",
@@ -216,7 +207,7 @@ def _bwrap_command(
     *,
     workspace: Path,
     package_dir: Path,
-    builtin_dir: Path | None,
+    builtin_dir: Path,
 ) -> str:
     """
     Bubblewrap equivalent: / read-only, /dev and /proc provided,
@@ -229,12 +220,10 @@ def _bwrap_command(
         "--proc /proc",
         "--tmpfs /tmp",
         f"--bind {shlex.quote(str(workspace.resolve()))} {shlex.quote(str(workspace.resolve()))}",
-        # already ro via the / bind; pinned again here so it stays
-        # readable even if the / bind changes
         f"--ro-bind {shlex.quote(str(package_dir.resolve()))} {shlex.quote(str(package_dir.resolve()))}",
     ]
 
-    if builtin_dir is not None:
+    if builtin_dir.exists():
         parts.append(
             f"--ro-bind {shlex.quote(str(builtin_dir.resolve()))} "
             f"{shlex.quote(str(builtin_dir.resolve()))}"

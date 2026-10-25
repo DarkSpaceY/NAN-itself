@@ -49,6 +49,41 @@ and starts over. `paused` is a snapshot derived from the newest
 `agent_paused`/`agent_resumed` in history, so a reconnect while
 paused still shows the right button.
 
+## Surfaces
+
+A service registers its own panel with the gateway; the desktop
+never discovers panels by itself:
+
+```
+POST   /surfaces          {service_id, url, title, icon?}
+DELETE /surfaces/{id}
+```
+
+```json
+{ "t": "surface_added",
+  "content": { "service_id": "record",
+               "url": "http://127.0.0.1:9002/ui",
+               "title": "record", "icon": "/icon.svg" } }
+
+{ "t": "surface_removed", "content": { "service_id": "record" } }
+```
+
+- Both registry calls answer `{"status": "ok"}`; a panel `url`
+  that is not loopback is rejected with 400.
+- These messages carry no `seq`: they are live state, not
+  history. The transport handles them before the hub and
+  re-derives windows from them after a reconnect -- the gateway
+  replays the current table right after `hello`, so every
+  connection ends up with the same set.
+- `surface_removed` names only the service: the desktop drops
+  the window and its queue slot. A service that dies without
+  unregistering leaves its panel until it restarts and
+  re-registers (same `service_id` overwrites).
+- The panel is a plain loopback page with no desktop bridge: it
+  talks to its own backend directly (fetch / SSE / WebSocket)
+  and the backend allows that opaque origin. The desktop only
+  hands it a URL and a sandbox.
+
 ## Input
 
 The frontend sends:
@@ -92,7 +127,7 @@ Conventions:
 | `agent_started` | `{agent_id, depth, parent_id?, pacing}` -- pacing ∈ `event-driven` \| `interval` |
 | `agent_paused` | `{agent_id}` |
 | `agent_resumed` | `{agent_id}` |
-| `agent_exited` | `{agent_id, reason, report?}` -- reason ∈ `finished` \| `killed` \| `cancelled` \| `shutdown` \| `exited`; `report` present iff finished |
+| `agent_exited` | `{agent_id, reason, report?}` -- reason ∈ `finished` \| `killed by holder <id>` \| `cancelled` \| `shutdown`; `report` present iff finished |
 
 ### Turn
 

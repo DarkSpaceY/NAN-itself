@@ -21,17 +21,13 @@ if TYPE_CHECKING:
     from nan.agent.core import Agent
     from nan.llm import ToolDefinition
 
-# Shell output truncation: keep head+tail around this size
-# (the default; the effective value is agent.config.shell_output_limit).
-SHELL_OUTPUT_LIMIT = 20_000
-
 
 @dataclass(frozen=True)
 class VerbOutcome:
     """
     What a verb returns: the text the model receives, plus
     structured domain facts for observers (child id, exit code,
-    ...) so no one has to parse the prose.
+    ...).
     """
 
     text: str
@@ -41,8 +37,8 @@ class VerbOutcome:
 class Verb:
     """
     One cognitive action. `name` is the tool name the model
-    sees; `definition()` is the authoritative protocol (the
-    system prompt never repeats it); `execute()` does the work.
+    sees; `definition()` is the protocol it follows;
+    `execute()` does the work.
     """
 
     name: ClassVar[str]
@@ -55,9 +51,6 @@ class Verb:
 
 
 def _build_registry() -> dict[str, Verb]:
-    # Imported inside the function: the base class above must
-    # exist before the verb modules subclass it (they import it
-    # from this partially-initialized package).
     from .finish import FinishVerb
     from .kill import KillVerb
     from .send import SendVerb
@@ -75,7 +68,7 @@ def _build_registry() -> dict[str, Verb]:
     }
 
 
-def truncate_output(output: str, returncode: int | None, limit: int = SHELL_OUTPUT_LIMIT) -> str:
+def truncate_output(output: str, returncode: int | None, limit: int) -> str:
     """Head+tail truncation for shell output, exit code first."""
     output = output.rstrip("\n")
 
@@ -95,7 +88,7 @@ VERBS: dict[str, Verb] = _build_registry()
 def tool_definitions(*, depth: int) -> list[ToolDefinition]:
     """
     The verb list handed to the model. finish exists only below
-    the root: the root has no one to report to.
+    the root.
     """
     verbs = [v for v in VERBS.values() if not (v.name == "finish" and depth == 0)]
 

@@ -1,46 +1,30 @@
 # Configuration
 
-The single source is `config/nan.yaml`. Nothing else is read: no
-environment variables, no dotenv files. Relative paths in the
-YAML resolve against the config file's grandparent (the repo
-root). An alternative file can be passed as the first CLI
-argument (`uv run nan path/to/nan.yaml`); its grandparent then
-anchors the paths.
+The single source is `config/nan.yaml`, loaded once into the
+process-wide `nan.config.settings` object — every component reads
+that one object; nothing is threaded through constructor arguments.
+Nothing else is read: no environment variables, no dotenv files, no
+CLI overrides. Paths are not configuration — they live in the same
+object (`settings.paths`, see [Paths](#paths)).
 
 ## llm
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `provider` | `"openai"` | The active entry: `"openai"`, `"anthropic"`, or the key of a profile below |
+| `provider` | `"openai"` | Protocol: `"openai"` or `"anthropic"` (anything else fails at load) |
 | `base_url` | `""` | Endpoint URL; empty = provider default |
 | `api_key` | `""` | Empty = SDK default behavior (env fallback inside the SDK) |
 | `model` | `""` | Model name sent to the endpoint |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
 | `max_retries` | `2` | SDK-level retry count |
-| `providers` | `{}` | Named endpoint profiles (see below) |
 
-A profile overrides the base fields it sets; the profile's own
-`provider` field carries the protocol type.
-
-```mermaid
-flowchart LR
-    Y["llm: base fields"] --> P{"llm.provider"}
-    P -->|"openai / anthropic"| B["base fields used as-is"]
-    P -->|"a key in llm.providers"| M["profile fields override<br/>the base fields"]
-    M --> R["active endpoint settings"]
-```
-
-Example -- a local
-27B model behind llama.cpp:
+Example -- a local 27B model behind llama.cpp:
 
     llm:
-      provider: local27b
-      providers:
-        local27b:
-          provider: openai          # OpenAI-compatible protocol
-          base_url: http://127.0.0.1:8080/v1
-          model: qwen-27b
-          api_key: none
+      provider: openai            # OpenAI-compatible protocol
+      base_url: http://127.0.0.1:8080/v1
+      model: qwen-27b
+      api_key: none
 
 ## agent
 
@@ -53,7 +37,6 @@ Example -- a local
 | `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Turn-failure retry ladder (seconds); a failed turn is retried whole after these delays |
 | `max_depth` | `3` | Spawn depth limit; `-1` = unlimited |
 | `max_children` | `5` | Per-agent children limit; `-1` = unlimited |
-| `persona_path` | `nan/persona.md` | The persona file, re-read every turn; must exist at boot |
 
 ## sandbox
 
@@ -79,18 +62,30 @@ The registry the external prompt-contributor services talk to.
 |-----|---------|---------|
 | `host` | `127.0.0.1` | Listen address |
 | `port` | `8765` | HTTP + WebSocket port |
-| `frontend_dir` | `null` | Default: `<repo>/frontend/dist` when it exists |
 
 ## autostart
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enabled` | `true` | Run the autostart script once at boot |
-| `path` | `null` | Default: `workspace/autostart.sh` (user-owned; the one workspace file the agent must not edit) |
+| `enabled` | `true` | Run both boot scripts once: `builtin/autostart.sh` (user-owned, outside the sandbox) and `workspace/autostart.sh` (agent-writable, inside the sandbox) |
 
-## Top-level paths
+Both scripts are launched once at boot, fire-and-forget: output
+goes to the log file, and a failure in either script does not
+block the core.
 
-| Key | Default | Meaning |
+## Paths
+
+Paths are not configuration. They are code defaults on
+`nan.config.Paths`, carried by the same `settings` object every
+component reads, so the whole process resolves one location:
+
+| Constant | Value | Meaning |
 |-----|---------|---------|
-| `workspace` | `workspace` | The agents' writable territory |
-| `builtin_dir` | `builtin` | Read-only resource root (tools/skills as plain files) |
+| `paths.workspace` | `<repo>/workspace` | The agents' writable territory |
+| `paths.builtin` | `<repo>/builtin` | Read-only resource root (tools/skills as plain files) |
+| `paths.package` | `nan/` | The package root (read-only to agents) |
+| `paths.persona` | `nan/persona.md` | The global persona, re-read every turn |
+| `paths.frontend` | `<repo>/frontend/dist` | The built desktop served by the gateway |
+| `paths.autostart` | `builtin/autostart.sh` | Boot script, owned by the user (unsandboxed) |
+| `paths.agent_autostart` | `workspace/autostart.sh` | Boot script, writable by agents (sandboxed) |
+| `paths.config` | `<repo>/config/nan.yaml` | This file |

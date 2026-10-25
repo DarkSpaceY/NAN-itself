@@ -1,6 +1,9 @@
 """
 Composition root: core process = agents + injection registry +
 gateway + execution sandbox.
+
+Every component reads the process-wide `settings`; this module wires
+input and pause and owns the process lifecycle.
 """
 
 from __future__ import annotations
@@ -8,22 +11,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import signal
-import sys
 import uuid
-from typing import cast
+from pathlib import Path
 
 from loguru import logger
 
-from nan.agent import Agent, AgentConfig
+from nan.agent import Agent
 from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
-from nan.config import PACKAGE_DIR, Settings
-from nan.config.loader import load_settings, resolve_llm
+from nan.config import settings
 from nan.events import sink
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
-from nan.llm import LLMProvider, ProviderName
+from nan.llm import LLMProvider
 
 _PROXY_KEYS = (
     "ALL_PROXY",
@@ -35,66 +37,22 @@ _PROXY_KEYS = (
 )
 
 
-async def run_core(config_path: str | None = None) -> None:
-    cfg = load_settings(config_path)
-
-    # Strip ambient proxies: model traffic targets loopback
-    # endpoints.
+async def run_core() -> None:
+    # Strip ambient proxies.
     for key in _PROXY_KEYS:
         os.environ.pop(key, None)
 
-    llm_cfg = resolve_llm(cfg)
-
-    # The active entry's protocol must be one of the two supported.
-    if llm_cfg.provider not in ("openai", "anthropic"):
-        raise ValueError(
-            f"llm.provider must resolve to 'openai' or 'anthropic', got {llm_cfg.provider!r}"
-        )
-
-    llm = LLMProvider(
-        provider=cast(ProviderName, llm_cfg.provider),
-        # empty config values = SDK defaults (env fallback / default endpoint)
-        api_key=cast(str, llm_cfg.api_key or None),
-        model=llm_cfg.model,
-        base_url=cast(str, llm_cfg.base_url or None),
-        timeout=llm_cfg.timeout,
-        max_retries=llm_cfg.max_retries,
-    )
+    llm = LLMProvider()
 
     book = Book()
 
-    hub = InjectionHub(
-        host=cfg.injection.host,
-        port=cfg.injection.port,
-        request_timeout=cfg.injection.timeout,
-        heartbeat_ttl=cfg.injection.heartbeat_ttl,
-    )
+    hub = InjectionHub()
 
-    cfg.workspace.mkdir(parents=True, exist_ok=True)
+    settings.paths.workspace.mkdir(parents=True, exist_ok=True)
 
-    sandbox = _build_sandbox(cfg)
+    sandbox = Sandbox()
 
-    sandbox.ensure_profile()
-
-    _ensure_persona(cfg)
-
-    root = Agent(
-        book=book,
-        llm=llm,
-        injections=hub,
-        workspace=cfg.workspace,
-        persona_path=cfg.agent.persona_path,  # re-read every turn
-        sandbox=sandbox,
-        config=AgentConfig(
-            max_depth=cfg.agent.max_depth,
-            max_children=cfg.agent.max_children,
-            autonomous_interval=cfg.agent.autonomous_interval,
-            shell_timeout=cfg.agent.shell_timeout,
-            shell_output_limit=cfg.agent.shell_output_limit,
-            backoff=tuple(cfg.agent.backoff),
-            history_char_limit=cfg.agent.history_char_limit,
-        ),
-    )
+    root = Agent(book=book, llm=llm, injections=hub, sandbox=sandbox)
 
     # ------------------------------------------------------------------
     # Gateway: subscribes to the `sink` singleton on its own.
@@ -105,8 +63,7 @@ async def run_core(config_path: str | None = None) -> None:
     sink.reset(boot_id=BOOT_ID)
 
     def ingest(text: str, mid: str | None = None) -> None:
-        # User input enters the root handle directly: no inbox
-        # module, no indirection.
+        # User input enters the root handle directly.
         asyncio.get_running_loop().create_task(root.receive_up(text, "user"))
 
         sink.emit(
@@ -122,34 +79,30 @@ async def run_core(config_path: str | None = None) -> None:
         else:
             root.resume()
 
-    frontend_dir = cfg.gateway.frontend_dir
-
     gateway = Gateway(
-        host=cfg.gateway.host,
-        port=cfg.gateway.port,
         on_input=ingest,
         on_pause=on_pause,
         state_provider=lambda: {
             "boot": BOOT_ID,
-            "model": llm_cfg.model,
+            "model": llm.model,
             "paused": root.paused,
         },
-        frontend_dir=frontend_dir if (frontend_dir and frontend_dir.exists()) else None,
     )
 
     gateway_task: asyncio.Task[None] | None = None
+    stop_task: asyncio.Task[bool] | None = None
 
     loop = asyncio.get_running_loop()
 
     try:
         await hub.start()
 
-        if cfg.autostart.enabled:
-            _run_autostart(cfg)
+        if settings.autostart.enabled:
+            _run_autostart(sandbox)
 
         root.start()
 
-        gateway_task = asyncio.create_task(gateway.serve(open_browser=False), name="gateway")
+        gateway_task = asyncio.create_task(gateway.serve(open_browser=True), name="gateway")
 
         stop = asyncio.Event()
 
@@ -158,17 +111,30 @@ async def run_core(config_path: str | None = None) -> None:
 
         logger.info(
             "nan running: gateway http://{}:{}, injection registry :{}, workspace {}, sandbox {}",
-            cfg.gateway.host,
-            cfg.gateway.port,
-            cfg.injection.port,
-            cfg.workspace,
+            settings.gateway.host,
+            settings.gateway.port,
+            settings.injection.port,
+            settings.paths.workspace,
             sandbox.available and "on" or "degraded",
         )
 
-        await stop.wait()
+        stop_task = asyncio.create_task(stop.wait(), name="stop")
+
+        # The core lives until a stop signal or until the gateway dies.
+        done, _ = await asyncio.wait({stop_task, gateway_task}, return_when=asyncio.FIRST_COMPLETED)
+
+        if gateway_task in done:
+            # Propagate the gateway's exception.
+            gateway_task.result()
 
     finally:
         _shutdown(root)
+
+        if stop_task is not None and not stop_task.done():
+            stop_task.cancel()
+
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await stop_task
 
         if root._task is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -193,54 +159,58 @@ async def run_core(config_path: str | None = None) -> None:
         logger.info("nan stopped")
 
 
-def _build_sandbox(cfg: Settings) -> Sandbox:
-    return Sandbox(
-        workspace=cfg.workspace,
-        package_dir=PACKAGE_DIR,
-        builtin_dir=cfg.builtin_dir if cfg.builtin_dir.exists() else None,
-        enabled=cfg.sandbox.enabled,
-        required=cfg.sandbox.required,
+def _run_autostart(sandbox: Sandbox) -> None:
+    """
+    Launch the two boot scripts once at boot, each with its own
+    authority:
+
+        builtin/autostart.sh    maintained by the user, runs
+                                outside the sandbox with the user's
+                                full rights.
+        workspace/autostart.sh  writable by agents and runs inside
+                                the execution sandbox.
+    """
+    scripts = (
+        ("user", settings.paths.autostart, False),
+        ("agent", settings.paths.agent_autostart, True),
     )
-
-
-def _ensure_persona(cfg: Settings) -> None:
-    """Boot-time guard: the persona file must exist (fail fast)."""
-
-    if not cfg.agent.persona_path.is_file():
-        raise FileNotFoundError(f"persona file not found: {cfg.agent.persona_path}")
-
-
-def _run_autostart(cfg: Settings) -> None:
-    """
-    Launch the user's autostart script (default components) once
-    at boot, outside any agent's authority and outside the
-    sandbox. Fire-and-forget: its output goes to the log file,
-    its failure must not block the core.
-    """
-    autostart_path = cfg.autostart.path
-
-    if autostart_path is None or not autostart_path.is_file():
-        return
 
     env = {
         **os.environ,
-        "NAN_CORE_HOME": str(PACKAGE_DIR),
-        "NAN_WORKSPACE": str(cfg.workspace),
-        "NAN_INJECTION_PORT": str(cfg.injection.port),
+        "NAN_CORE_HOME": str(settings.paths.package),
+        "NAN_WORKSPACE": str(settings.paths.workspace),
+        "NAN_INJECTION_PORT": str(settings.injection.port),
         "NAN_CORE_PID": str(os.getpid()),
     }
 
-    async def launch() -> None:
-        proc = await asyncio.create_subprocess_shell(
-            f"bash {autostart_path}",
-            env=env,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+    async def launch(script: Path, *, wrapped: bool) -> None:
+        try:
+            command = f"bash {shlex.quote(str(script))}"
+
+            if wrapped:
+                command = sandbox.wrap(command)
+
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                env=env,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+
+        except Exception:
+            logger.exception("Autostart failed to launch: {}", script)
+
+            return
+
+        logger.info("Autostart launched: {} (pid {})", script, proc.pid)
+
+    for label, script, wrapped in scripts:
+        if not script.is_file():
+            continue
+
+        asyncio.get_running_loop().create_task(
+            launch(script, wrapped=wrapped), name=f"autostart:{label}"
         )
-
-        logger.info("Autostart launched: {} (pid {})", autostart_path, proc.pid)
-
-    asyncio.get_running_loop().create_task(launch(), name="autostart")
 
 
 def _shutdown(root: Agent, stop_event: asyncio.Event | None = None) -> None:
@@ -253,10 +223,8 @@ def _shutdown(root: Agent, stop_event: asyncio.Event | None = None) -> None:
 
 
 def main() -> None:
-    config_path = sys.argv[1] if len(sys.argv) > 1 else None
-
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_core(config_path))
+        asyncio.run(run_core())
 
 
 if __name__ == "__main__":

@@ -75,9 +75,12 @@ cd workspace/services/<name> && uv run --frozen pytest
 
 ## Wiring into autostart
 
-`workspace/autostart.sh` is user territory — add a `launch_service`
-line for your service. The core exports `NAN_WORKSPACE` and `NAN_CORE_PID` to
-launched services; logs go to `$NAN_WORKSPACE/<name>.log`.
+`workspace/autostart.sh` is your boot script (you may write it; it
+runs inside the sandbox) — add a `launch_service` line for your
+service. The user's own script, `builtin/autostart.sh`, is
+off-limits (no write access) and runs outside the sandbox. The
+core exports `NAN_WORKSPACE` and `NAN_CORE_PID` to launched
+services; logs go to `$NAN_WORKSPACE/<name>.log`.
 
 ## Before finishing
 

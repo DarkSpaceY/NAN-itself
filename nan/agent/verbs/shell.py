@@ -1,13 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
+import signal
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome, truncate_output
+from nan.config import settings
 from nan.llm import ToolDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
+
+
+def _kill_group(proc: asyncio.subprocess.Process, sig: int) -> None:
+    """
+    Signal the command's whole process group. The command starts
+    in its own session, so its children (subshells, background
+    jobs) die with it.
+    """
+    # ProcessLookupError: already gone, nothing left to kill.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(os.getpgid(proc.pid), sig)
 
 
 class ShellVerb(Verb):
@@ -41,29 +56,28 @@ class ShellVerb(Verb):
         if not isinstance(command, str) or not command.strip():
             return VerbOutcome("shell requires a non-empty 'command'.")
 
-        # The timeout comes from the user's configuration.
-
-        timeout = agent.config.shell_timeout
+        timeout = settings.agent.shell_timeout
 
         # Execution-level sandbox: the command the model wrote is
-        # wrapped by the sandbox profile. wrap() may raise
-        # (required but unavailable): refusing to execute is the
-        # point.
+        # wrapped by the sandbox profile. wrap() may raise when
+        # required but unavailable.
         command = agent.sandbox.wrap(command)
 
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
-                cwd=str(agent.workspace),
+                cwd=str(settings.paths.workspace),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                # Own session: the whole tree can be signalled.
+                start_new_session=True,
             )
 
             try:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
             except TimeoutError:
-                proc.kill()
+                _kill_group(proc, signal.SIGKILL)
 
                 await proc.wait()
 
@@ -73,9 +87,15 @@ class ShellVerb(Verb):
                 )
 
             except asyncio.CancelledError:
-                # Pause/death cancelling the turn must not leave
-                # the child running.
-                proc.terminate()
+                # Pause/death cancellation kills the child's
+                # process tree.
+                _kill_group(proc, signal.SIGTERM)
+
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+
+                if proc.returncode is None:
+                    _kill_group(proc, signal.SIGKILL)
 
                 raise
 
@@ -84,6 +104,6 @@ class ShellVerb(Verb):
 
         output = stdout.decode("utf-8", errors="replace")
 
-        text = truncate_output(output, proc.returncode, agent.config.shell_output_limit)
+        text = truncate_output(output, proc.returncode, settings.agent.shell_output_limit)
 
         return VerbOutcome(text, {"exit_code": proc.returncode, "timed_out": False})

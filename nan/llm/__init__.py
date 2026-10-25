@@ -1,10 +1,8 @@
 """
 LLM boundary package: protocol vocabulary + provider adapter.
-
-`nan.llm.Message` etc. keep working -- everything is re-exported.
-Import discipline: any domain may import the TYPES; only
-nan.agent.engine may call `LLMProvider` (the transport edge).
 """
+
+from nan.config import ProviderName
 
 from .provider import LLMProvider
 from .types import (
@@ -13,7 +11,6 @@ from .types import (
     LLMResponse,
     LLMStreamEvent,
     Message,
-    ProviderName,
     ToolCall,
     ToolDefinition,
     Usage,

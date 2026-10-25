@@ -1,9 +1,7 @@
 """
 LLM protocol vocabulary: the shared DTOs every layer speaks --
 messages, tool calls, usage, the streaming event contract. Pure
-data, no I/O; importing this from any domain is legal. The only
-module that initiates transport is provider.py, and the only
-domain that calls it is nan.agent.engine.
+data, no I/O.
 """
 
 from __future__ import annotations
@@ -11,8 +9,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
-ProviderName = Literal["openai", "anthropic"]
 
 FinishReason = Literal[
     "stop",
@@ -30,8 +26,6 @@ class Usage(BaseModel):
 class ToolDefinition(BaseModel):
     """
     Model-facing tool definition.
-
-    This is intentionally provider-neutral.
     """
 
     name: str
@@ -87,11 +81,6 @@ class LLMRequest(BaseModel):
         default_factory=list,
     )
 
-    # OpenAI-compatible JSON mode ({"type": "json_object"}).
-    # Reserved for structured machine-facing calls; None for normal turns.
-    # Currently no caller in this codebase sets it.
-    response_format: dict | None = None
-
 
 class LLMResponse(BaseModel):
     """
@@ -106,8 +95,6 @@ class LLMResponse(BaseModel):
 
     model: str
     usage: Usage
-
-    provider: ProviderName
 
     finish_reason: FinishReason = "unknown"
 
