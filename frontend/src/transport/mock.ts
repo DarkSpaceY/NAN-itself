@@ -8,9 +8,9 @@
 //   4. two-layer spawn        root -> a3 -> a7, with verb_failed for an unknown verb
 //   5. pause interruption     agent_paused -> turn_cancelled -> reopened after resume
 //
-// Also replays injections_collected (one service ok, one failed) and
-// agent_exited with report. Upstream messages are replayed with real
-// semantics too.
+// Also replays injections_collected (one service ok, one failed),
+// agent_exited with report, and one surface withdrawal. Upstream
+// messages are replayed with real semantics too.
 
 import type { ClientMessage, Envelope, SurfaceSpec } from "../kernel/protocol";
 import type { Hub } from "../kernel/history/hub";
@@ -201,12 +201,15 @@ export class MockTransport implements Transport {
   /** Highest turn_index the root has opened; retries and pause reopens reuse it. */
   private rootTurns = 0;
   private started = false;
+  private onSurfaceRemoved: SurfaceRemovedHandler = () => {};
 
   constructor(private readonly hub: Hub) {}
 
-  start(onSurface: SurfaceHandler, _onSurfaceRemoved: SurfaceRemovedHandler): void {
+  start(onSurface: SurfaceHandler, onSurfaceRemoved: SurfaceRemovedHandler): void {
     if (this.started) return;
     this.started = true;
+
+    this.onSurfaceRemoved = onSurfaceRemoved;
 
     this.hub.global.setConnection("open");
     this.hub.global.applyHello({
@@ -506,7 +509,11 @@ export class MockTransport implements Transport {
       latency: 0.9,
     });
 
-    // 6. pause interruption: the half-streamed sentence is voided with the round; the same turn_index reopens after resume.
+    // 6. Surface withdrawal: a service stops re-posting, the gateway
+    //    drops it after surface_ttl and the rail loses that window.
+    steps.push(() => this.onSurfaceRemoved("tests"));
+
+    // 7. pause interruption: the half-streamed sentence is voided with the round; the same turn_index reopens after resume.
     userInput(steps, "继续分析");
     const cancelledOut = outId();
     steps.push((e) =>
