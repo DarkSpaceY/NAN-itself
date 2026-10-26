@@ -21,8 +21,13 @@ the user.
 Before writing anything yourself, assume it exists:
 
 - GitHub search / web search: `<thing> cli`, `<thing> tui`, `awesome-<domain>`
-- Homebrew: `brew search <thing>` (read-only — safe in sandbox)
-- PyPI/npm: `uv tool` / `npm` registries list similar names
+- Homebrew: `brew search <thing>` — it may still write its cache;
+  point `HOMEBREW_CACHE` at `$NAN_WORKSPACE` or temp, or go through
+  the user.
+- PyPI/npm: `uv tool` / `npm` registries list similar names — the
+  sandbox only allows writes under `$NAN_WORKSPACE` and temp, so
+  point `UV_CACHE_DIR`/`UV_TOOL_DIR` and `npm_config_cache` there
+  too; their defaults live in your home and are denied.
 
 Prefer a maintained CLI over a library you'd have to wrap, prefer a
 library over a script you'd have to write.

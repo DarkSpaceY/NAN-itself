@@ -58,6 +58,10 @@ def test_entry_guard() -> None:
     # hostile page: foreign Origin
     assert not entry_allowed({**headers, "origin": "http://evil.com"}, 8765)
 
+    # a sandboxed panel has an opaque origin, which the browser
+    # sends as "null"
+    assert not entry_allowed({**headers, "origin": "null"}, 8765)
+
     # wrong port on either side
     assert not entry_allowed({"host": "127.0.0.1:9999"}, 8765)
     assert not entry_allowed({**headers, "origin": "http://127.0.0.1:9999"}, 8765)

@@ -17,11 +17,12 @@ Server-authoritative stream:
 The gateway only formats the stream. Date dividers are rendered
 by the frontend from the events' timestamps.
 
-Surfaces: a service registers its own panel and unregisters it
-itself -- the gateway keeps a {service_id: spec} table, broadcasts
-surface_added/surface_removed to every connected desktop, and
-replays the table on each new connection. Registration is kept in
-a surface table outside the event log; panel urls are loopback.
+Surfaces: a service POSTs its own panel spec as a heartbeat; the
+gateway keeps a {service_id: (spec, last_seen)} table, broadcasts
+surface_added/surface_removed to every connected desktop, replays
+the table on each new connection, and drops entries whose
+heartbeat stops. Registration is kept outside the event log;
+panel urls are loopback.
 """
 
 from __future__ import annotations
@@ -63,8 +64,9 @@ class Gateway:
         self._server: uvicorn.Server | None = None
         self._clients: set[WebSocket] = set()
 
-        # service_id -> surface spec; the panels currently offered.
-        self._surfaces: dict[str, dict[str, Any]] = {}
+        # service_id -> (surface spec, last heartbeat); entries whose
+        # heartbeat stops expire after surface_ttl.
+        self._surfaces: dict[str, tuple[dict[str, Any], float]] = {}
 
         # Input dedup by mid: seen mids are dropped; the cache is
         # bounded and evicts oldest entries first.
@@ -85,6 +87,10 @@ class Gateway:
     @property
     def dedup_cache_size(self) -> int:
         return settings.gateway.dedup_cache_size
+
+    @property
+    def surface_ttl(self) -> float:
+        return settings.gateway.surface_ttl
 
     @property
     def frontend_dir(self) -> Path | None:
@@ -127,8 +133,9 @@ class Gateway:
             await self._ws_handler(websocket)
 
         # ---------- Surface registration ----------
-        # Services register with POST /surfaces and unregister with
-        # DELETE /surfaces/{service_id}.
+        # POST is a heartbeat: the same spec refreshes last_seen, a
+        # changed spec replaces the panel, and a stopped heartbeat
+        # expires it.
         @app.post("/surfaces")
         async def register_surface(body: dict[str, Any]) -> JSONResponse:
             spec, error = _validate_surface(body)
@@ -136,9 +143,21 @@ class Gateway:
             if spec is None:
                 return JSONResponse({"status": "rejected", "reason": error}, status_code=400)
 
-            self._surfaces[spec["service_id"]] = spec
+            service_id = spec["service_id"]
 
-            logger.info("Surface registered: {} -> {}", spec["service_id"], spec["url"])
+            previous = self._surfaces.get(service_id)
+
+            self._surfaces[service_id] = (spec, asyncio.get_running_loop().time())
+
+            if previous is not None and previous[0] == spec:
+                return JSONResponse({"status": "ok"})
+
+            if previous is not None:
+                await self._broadcast(
+                    {"t": "surface_removed", "content": {"service_id": service_id}}
+                )
+
+            logger.info("Surface registered: {} -> {}", service_id, spec["url"])
 
             await self._broadcast({"t": "surface_added", "content": spec})
 
@@ -185,27 +204,36 @@ class Gateway:
 
         server_task = asyncio.create_task(self._server.serve())
 
-        if open_browser:
-            start = asyncio.get_event_loop().time()
-            connected = False
-            while not connected and (asyncio.get_event_loop().time() - start) < 10:
-                try:
-                    reader, writer = await asyncio.open_connection(self.host, self.port)
-                    writer.close()
-                    await writer.wait_closed()
-                    connected = True
-                except Exception:
-                    await asyncio.sleep(0.2)
-            if connected:
-                url = f"http://{self.host}:{self.port}/"
-                if webbrowser.open(url):
-                    logger.info(f"🌐 Opened browser at {url}")
-                else:
-                    logger.warning(f"Could not open browser, please navigate to {url}")
-            else:
-                logger.warning("Server did not start in time, browser not opened")
+        reaper = asyncio.create_task(self._reap_surfaces(), name="surface-reaper")
 
-        await server_task
+        try:
+            if open_browser:
+                start = asyncio.get_event_loop().time()
+                connected = False
+                while not connected and (asyncio.get_event_loop().time() - start) < 10:
+                    try:
+                        reader, writer = await asyncio.open_connection(self.host, self.port)
+                        writer.close()
+                        await writer.wait_closed()
+                        connected = True
+                    except Exception:
+                        await asyncio.sleep(0.2)
+                if connected:
+                    url = f"http://{self.host}:{self.port}/"
+                    if webbrowser.open(url):
+                        logger.info(f"🌐 Opened browser at {url}")
+                    else:
+                        logger.warning(f"Could not open browser, please navigate to {url}")
+                else:
+                    logger.warning("Server did not start in time, browser not opened")
+
+            await server_task
+
+        finally:
+            reaper.cancel()
+
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
 
     async def close(self) -> None:
         """Shut the server down."""
@@ -220,6 +248,26 @@ class Gateway:
                 logger.exception("WebSocket close failed during gateway shutdown")
 
         logger.info("Gateway closed")
+
+    async def _reap_surfaces(self) -> None:
+        """Drop panels whose heartbeat stopped and withdraw them."""
+        interval = max(1.0, self.surface_ttl / 3)
+
+        while True:
+            await asyncio.sleep(interval)
+
+            cutoff = asyncio.get_running_loop().time() - self.surface_ttl
+
+            expired = [sid for sid, (_, seen) in self._surfaces.items() if seen < cutoff]
+
+            for service_id in expired:
+                self._surfaces.pop(service_id, None)
+
+                logger.info("Surface expired: {}", service_id)
+
+                await self._broadcast(
+                    {"t": "surface_removed", "content": {"service_id": service_id}}
+                )
 
     # ==================================================================
     # WebSocket connection handling
@@ -240,7 +288,7 @@ class Gateway:
             await self._send(websocket, self._hello_payload())
 
             # Replay the surface table to each new connection.
-            for spec in self._surfaces.values():
+            for spec, _ in self._surfaces.values():
                 await self._send(websocket, {"t": "surface_added", "content": spec})
 
             for event in sink.history():

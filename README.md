@@ -31,13 +31,19 @@ source; any OpenAI-compatible or Anthropic endpoint works):
       api_key: ""
       model: ""
 
+Build the web UI (from the repo root):
+
+    cd frontend && npm install && npm run build && cd ..
+
 Run:
 
     uv run nan
 
-The web UI comes up on `http://127.0.0.1:8765`. Talk to the root
-agent; it can spawn subagents, run shell commands in its sandboxed
-workspace, and hold conversations across turns.
+The web UI comes up on `http://127.0.0.1:8765` once
+`frontend/dist/index.html` exists; without it the gateway serves
+only `/ws` and `/surfaces`. Talk to the root agent; it can spawn
+subagents, run shell commands in its sandboxed workspace, and hold
+conversations across turns.
 
 ## How it works
 
@@ -52,8 +58,7 @@ workspace, and hold conversations across turns.
   not transferable, so when an agent dies everything it holds
   dies with it.
 - **Injection services.** Prompt contributions come from
-  independent local processes over a small HTTP protocol --
-  no in-process plugin system.
+  independent local processes over a small HTTP protocol
 - **Shell-first.** Tools and skills are plain files; the agent
   reaches them with shell commands inside the sandbox.
 - **The turn is the record.** Every turn keeps what it drained,
@@ -66,7 +71,7 @@ workspace, and hold conversations across turns.
 |---|---|
 | [Get started](docs/for-users/get-started.md) | Install, configure, run |
 | [Configuration](docs/for-users/configuration.md) | Every key in `config/nan.yaml` |
-| [Security model](docs/for-users/security.md) | Trust model, entry guard, sandbox |
+| [Security model](SECURITY.md) | Trust model, entry guard, sandbox |
 | [Injection services](docs/for-service-authors/injection-service.md) | Write a prompt-contributor service |
 | [Architecture](docs/for-contributors/architecture.md) | How the core is built |
 | [Principles](docs/for-contributors/principles.md) | The design rules |

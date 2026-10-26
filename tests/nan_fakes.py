@@ -135,14 +135,11 @@ def make_agent(
 
     settings.paths.persona = persona_path
 
-    settings.sandbox.enabled = False
-
     for key, value in (agent or {}).items():
         setattr(settings.agent, key, value)
 
     # The sandbox is a required Agent dependency; tests that don't
-    # care about isolation get an explicitly disabled one (which
-    # warns once, loudly, exactly as in production).
+    # care about isolation get the process-wide one.
     sandbox = kwargs.pop("sandbox", Sandbox())
 
     return Agent(

@@ -65,7 +65,6 @@ class AgentSettings(BaseModel):
 
 
 class SandboxSettings(BaseModel):
-    enabled: bool = True
     required: bool = False
 
 
@@ -80,6 +79,7 @@ class GatewaySettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8765
     dedup_cache_size: int = 256
+    surface_ttl: float = 30.0
 
 
 class AutostartSettings(BaseModel):

@@ -43,7 +43,6 @@ def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> 
     settings.paths.workspace = kwargs.pop("workspace", tmp_path / "workspace")
     settings.paths.package = kwargs.pop("package", tmp_path / "pkg" / "nan")
     settings.paths.builtin = kwargs.pop("builtin", tmp_path / "builtin")
-    settings.sandbox.enabled = kwargs.pop("enabled", True)
     settings.sandbox.required = kwargs.pop("required", False)
 
     monkeypatch.setattr(sys, "platform", kwargs.pop("platform", "darwin"))
@@ -111,13 +110,13 @@ def test_wrap_linux_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert shlex.split(wrapped)[-3:] == ["bash", "-c", "echo hi"]
 
 
-def test_missing_tool_required_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_tool_required_refuses_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    sb = _sandbox(tmp_path, monkeypatch, required=True)
-
     with pytest.raises(SandboxUnavailableError):
-        sb.wrap("echo hi")
+        _sandbox(tmp_path, monkeypatch, required=True)
 
 
 def test_missing_tool_optional_degrades_once(
@@ -129,14 +128,6 @@ def test_missing_tool_optional_degrades_once(
 
     assert sb.wrap("echo hi") == "echo hi"  # degraded, runs unwrapped
     assert sb.wrap("echo again") == "echo again"
-
-
-def test_disabled_passes_through(
-    tmp_path: Path, with_sandbox_exec: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    sb = _sandbox(tmp_path, monkeypatch, enabled=False)
-
-    assert sb.wrap("echo hi") == "echo hi"
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,10 @@
 
     uv sync
 
+Build the web UI:
+
+    cd frontend && npm install && npm run build && cd ..
+
 ## Configure
 
 All configuration lives in one file: `config/nan.yaml`. The
@@ -36,8 +40,9 @@ What starts:
 - the agent loop (root agent; event-driven by default, or
   self-rotating with `agent.autonomous_interval > 0`)
 - the gateway web UI on `http://127.0.0.1:8765` (serving
-  `frontend/dist`, located automatically; the browser opens once
-  the socket is up)
+  `frontend/dist`; without `frontend/dist/index.html` only `/ws` and
+  `/surfaces` are served, not the UI; the browser opens once the
+  socket is up)
 - the injection registry on `127.0.0.1:8901`
 - the autostart scripts, if enabled and present: `builtin/autostart.sh`
   (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,

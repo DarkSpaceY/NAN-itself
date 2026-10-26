@@ -80,17 +80,21 @@ A Handle is a cross-agent channel plus the control right over
 one agent:
 
 - bound to exactly one target and one implicit holder (the
-  spawner; the root's handle is held by the composition root)
+  spawner; there is no root handle -- the composition root
+  delivers user input by calling the root's `receive_up`
+  directly)
 - not transferable: the cascade-death graph is exactly the
   spawn tree
 - through it the holder may `send()` into the target's inbox
   and `kill()` the target; the target replies upstream through
   its parent reference
 
-The `Book` is the process-wide id -> agent registry used for
-routing, status snapshots and whole-tree shutdown. When an agent
-dies it tears down everything it holds (cascade), then its
-parent's inbox receives a finish report or a death notice.
+The `Book` is the process-wide id -> agent registry; routing
+goes through handles, and whole-tree shutdown starts at
+`root.request_death` and follows the cascade. When an agent
+dies it tears down everything it holds (cascade), then a finish
+report goes to its parent's inbox; a bare death becomes a
+`parent.note_delta` line in `<delta>`.
 
 ```mermaid
 flowchart TD
@@ -127,9 +131,10 @@ flowchart TB
     O --> X["inbox<br/>contentful messages"]
     D --> D1["service online / offline"]
     D --> D2["subagent spawned"]
+    D --> D3["subagent/child death notice"]
     I --> I1["per service_id: contributed text<br/>failures marked ok=false"]
     X --> X1["parent / user message"]
-    X --> X2["subagent finish or death notice"]
+    X --> X2["subagent finish report"]
 ```
 
 The boundary: state changes ride `<delta>`, contentful messages
@@ -149,8 +154,8 @@ sequenceDiagram
     end
     A->>H: collect(turn)
     par concurrent, per live service
-        H->>S: POST endpoint {turn: {...}}
-        S-->>H: text or {"text": "..."}
+        H->>S: POST endpoint {"turn": {...}, "prev_turn": {...}}
+        S-->>H: {"text": "<str>"} (plain text => ok=false)
     end
     H-->>A: Injection(ok, started_at, ended_at)
     note over A: contributions and failures<br/>both land on the turn record
@@ -182,4 +187,4 @@ reference.
 The gateway formats the event stream for the web UI and carries
 user input back to the root agent's inbox. It owns nothing about
 agent semantics. Loopback-only with a Host/Origin entry guard
-(see for-users/security.md).
+(see [SECURITY.md](../../SECURITY.md)).

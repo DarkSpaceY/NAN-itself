@@ -20,8 +20,7 @@ agent:
   max_children: 5           # -1: unlimited, per agent
 
 sandbox:
-  enabled: true             # wrap shell-verb commands
-  required: false           # true: refuse to execute when no sandbox tool exists
+  required: false           # true: refuse to start when no sandbox tool exists
 
 injection:
   host: 127.0.0.1
@@ -32,6 +31,7 @@ injection:
 gateway:
   host: 127.0.0.1
   port: 8765
+  surface_ttl: 30.0        # seconds without a panel heartbeat before the window is dropped
 
 autostart:
   enabled: true

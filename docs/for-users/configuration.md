@@ -1,11 +1,9 @@
 # Configuration
 
 The single source is `config/nan.yaml`, loaded once into the
-process-wide `nan.config.settings` object — every component reads
-that one object; nothing is threaded through constructor arguments.
-Nothing else is read: no environment variables, no dotenv files, no
-CLI overrides. Paths are not configuration — they live in the same
-object (`settings.paths`, see [Paths](#paths)).
+process-wide `nan.config.settings` object.
+NAN reads only `config/nan.yaml`; the provider SDKs may still fall
+back to their env vars when `api_key`/`base_url` are empty.
 
 ## llm
 
@@ -13,7 +11,7 @@ object (`settings.paths`, see [Paths](#paths)).
 |-----|---------|---------|
 | `provider` | `"openai"` | Protocol: `"openai"` or `"anthropic"` (anything else fails at load) |
 | `base_url` | `""` | Endpoint URL; empty = provider default |
-| `api_key` | `""` | Empty = SDK default behavior (env fallback inside the SDK) |
+| `api_key` | `""` | Empty = SDK default behavior |
 | `model` | `""` | Model name sent to the endpoint |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
 | `max_retries` | `2` | SDK-level retry count |
@@ -42,8 +40,7 @@ Example -- a local 27B model behind llama.cpp:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enabled` | `true` | Wrap `shell` commands in the OS-level sandbox |
-| `required` | `false` | `true`: refuse to execute when no sandbox tool exists (instead of running degraded) |
+| `required` | `false` | `true`: refuse to start when no sandbox tool exists (instead of degrading) |
 
 ## injection
 
@@ -62,6 +59,8 @@ The registry the external prompt-contributor services talk to.
 |-----|---------|---------|
 | `host` | `127.0.0.1` | Listen address |
 | `port` | `8765` | HTTP + WebSocket port |
+| `surface_ttl` | `30.0` | Seconds without a panel re-declaration before the window is dropped |
+| `dedup_cache_size` | `256` | Inbound mid dedup cache entries (oldest evicted first) |
 
 ## autostart
 
@@ -69,15 +68,15 @@ The registry the external prompt-contributor services talk to.
 |-----|---------|---------|
 | `enabled` | `true` | Run both boot scripts once: `builtin/autostart.sh` (user-owned, outside the sandbox) and `workspace/autostart.sh` (agent-writable, inside the sandbox) |
 
-Both scripts are launched once at boot, fire-and-forget: output
-goes to the log file, and a failure in either script does not
-block the core.
+Both scripts are launched once at boot, fire-and-forget:
+stdout/stderr are discarded, and a failure in either script does
+not block the core.
 
 ## Paths
 
-Paths are not configuration. They are code defaults on
-`nan.config.Paths`, carried by the same `settings` object every
-component reads, so the whole process resolves one location:
+Paths default to the `nan.config.Paths` values, carried by the same
+`settings` object every component reads; a `paths:` block in
+`config/nan.yaml` overrides them.
 
 | Constant | Value | Meaning |
 |-----|---------|---------|

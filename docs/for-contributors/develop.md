@@ -9,7 +9,7 @@
 
     uv run pytest tests/ -q
 
-The suite (30 tests) covers the agent loop (pause/resume, death
+The suite (43 tests) covers the agent loop (pause/resume, death
 cascade, persona re-read, depth/children limits), injection
 hub/client, sandbox behavior, gateway entry guard and config
 loading. Shared fakes (scripted LLM, slow LLM) live in
@@ -37,11 +37,7 @@ Line length 100; isort-style import order enforced by ruff.
 
     uv run mypy nan/
 
-Checks run on `nan/` only. `legacy/` (the parked pre-rewrite
-resources) is excluded from ruff and mypy and is not part of the
-runtime.
-
-## Conventions
+## Conventions (For AI Agents)
 
 - Comments describe what the code does, not what it used to do;
   no changelog or task-marker comments.

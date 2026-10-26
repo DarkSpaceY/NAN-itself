@@ -22,7 +22,6 @@ agent:
   history_char_limit: 1234
 
 sandbox:
-  enabled: false
   required: true
 
 injection:
@@ -52,7 +51,6 @@ def test_load_yaml_text() -> None:
     assert cfg.agent.shell_timeout == 10.0
     assert cfg.agent.max_depth == -1
     assert cfg.agent.history_char_limit == 1234
-    assert cfg.sandbox.enabled is False
     assert cfg.sandbox.required is True
     assert cfg.injection.port == 9001
     assert cfg.gateway.port == 8000
@@ -98,7 +96,6 @@ def test_default_yaml_is_the_committed_template() -> None:
     assert settings.gateway.port == 8765
     assert settings.injection.host == "127.0.0.1"
     assert settings.injection.port == 8901
-    assert settings.sandbox.enabled is True
     assert settings.sandbox.required is False
     assert settings.agent.autonomous_interval == 0.0
     assert settings.autostart.enabled is True

@@ -13,7 +13,7 @@ it:
 {
   "t": "turn_done",
   "seq": 4127,
-  "ts": "2026-10-22T12:00:00.123456+08:00",
+  "ts": 1761192000.123,
   "id": "e3f1...",
   "content": { "agent_id": "root", "turn_index": 3, "...": "..." }
 }
@@ -22,9 +22,9 @@ it:
 - `t` -- event type; the frontend dispatches on it
 - `seq` -- process-wide monotonic counter (gap = missed events,
   reconnect)
-- `ts` -- wall-clock emission time
-- `id` -- emitter-chosen correlation id (only the `output_*`
-  stream uses it today)
+- `ts` -- wall-clock emission time, unix seconds (float)
+- `id` -- event id: every event carries one; the `output_*`
+  events of one stream share the same id
 - `content` -- the payload; the protocol lives HERE, per event
   type, decoupled from the envelope
 
@@ -34,10 +34,9 @@ Payload schemas are the contract.
 ## Hello snapshot
 
 On connect the gateway sends `hello` with the current `seq` and
-gateway-level state; events after it are live. The history ring
-is available to the gateway but the frontend contract starts
-from `hello` -- missed events between reconnects are detected
-via `seq` gaps, not replayed.
+gateway-level state, then replays the history ring; events after
+that are live. `seq` is used for dedup and gap detection, not
+for skipping the replay.
 
 ```json
 { "t": "hello", "seq": 1,
@@ -51,23 +50,33 @@ paused still shows the right button.
 
 ## Surfaces
 
-A service registers its own panel with the gateway; the desktop
-never discovers panels by itself:
+A service declares its own panel to the gateway
 
 ```
 POST   /surfaces          {service_id, url, title, icon?}
 DELETE /surfaces/{id}
 ```
 
+`POST /surfaces` is a declaration, not a registration followed by
+a separate heartbeat: the body carries the full spec, the call is
+an upsert keyed by `service_id`, and repeating it both refreshes
+the entry and re-states what the panel is. A service that restarts
+on another port is re-declared by the loop it already runs, so
+liveness and spec do not drift apart.
+
 ```json
 { "t": "surface_added",
   "content": { "service_id": "record",
                "url": "http://127.0.0.1:9002/ui",
-               "title": "record", "icon": "/icon.svg" } }
+               "title": "record",
+               "icon": "http://127.0.0.1:9002/icon.svg" } }
 
 { "t": "surface_removed", "content": { "service_id": "record" } }
 ```
 
+- Re-post every 10-15 s. An entry without a POST for
+  `gateway.surface_ttl` (30 s) is dropped and `surface_removed` is
+  broadcast.
 - Both registry calls answer `{"status": "ok"}`; a panel `url`
   that is not loopback is rejected with 400.
 - These messages carry no `seq`: they are live state, not
@@ -76,9 +85,10 @@ DELETE /surfaces/{id}
   replays the current table right after `hello`, so every
   connection ends up with the same set.
 - `surface_removed` names only the service: the desktop drops
-  the window and its queue slot. A service that dies without
-  unregistering leaves its panel until it restarts and
-  re-registers (same `service_id` overwrites).
+  the window and its queue slot. A service that stops posting is
+  dropped after `gateway.surface_ttl`, and `surface_removed` is
+  broadcast; a later declaration with the same `service_id` adds
+  it again.
 - The panel is a plain loopback page with no desktop bridge: it
   talks to its own backend directly (fetch / SSE / WebSocket)
   and the backend allows that opaque origin. The desktop only
@@ -92,8 +102,8 @@ The frontend sends:
 { "t": "input", "mid": "<client-generated id>", "text": "..." }
 ```
 
-`mid` is echoed on nothing -- delivery is fire-and-forget; the
-visible effect is the `user_input` event.
+`mid` comes back on the `user_input` event; the gateway drops
+repeated `mid` values.
 
 Pause and resume are socket messages too, not HTTP endpoints:
 
@@ -124,10 +134,10 @@ Conventions:
 | t | content |
 |---|---|
 | `user_input` | `{text, mid?}` |
-| `agent_started` | `{agent_id, depth, parent_id?, pacing}` -- pacing ∈ `event-driven` \| `interval` |
+| `agent_started` | `{agent_id, depth, parent_id, pacing}` -- `parent_id` is always present, null for the root; pacing ∈ `event-driven` \| `interval` |
 | `agent_paused` | `{agent_id}` |
 | `agent_resumed` | `{agent_id}` |
-| `agent_exited` | `{agent_id, reason, report?}` -- reason ∈ `finished` \| `killed by holder <id>` \| `cancelled` \| `shutdown`; `report` present iff finished |
+| `agent_exited` | `{agent_id, reason, report}` -- reason ∈ `finished` \| `killed by holder <id>` \| `cancelled` \| `shutdown`; `report` is always present, null unless finished |
 
 ### Turn
 

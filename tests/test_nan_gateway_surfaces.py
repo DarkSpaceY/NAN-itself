@@ -105,3 +105,42 @@ async def test_surface_registration_broadcast_and_replay(no_sink: None) -> None:
 
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_surface_expires_without_heartbeat(no_sink: None) -> None:
+    port = _free_port()
+    original_ttl = settings.gateway.surface_ttl
+    settings.gateway.port = port
+    settings.gateway.surface_ttl = 1.0
+    gateway = Gateway()
+    task = asyncio.create_task(gateway.serve(open_browser=False))
+
+    try:
+        await _wait_port(port)
+
+        base = f"http://127.0.0.1:{port}"
+        ws_url = f"ws://127.0.0.1:{port}/ws"
+
+        spec = {"service_id": "record", "url": f"http://127.0.0.1:{port}/ui", "title": "record"}
+
+        async with websockets.connect(ws_url, proxy=None) as first:
+            assert (await _until(first, "hello"))["t"] == "hello"
+
+            async with httpx.AsyncClient(trust_env=False) as client:
+                assert (await client.post(f"{base}/surfaces", json=spec)).status_code == 200
+                # A repeated POST is a heartbeat, not a new panel.
+                assert (await client.post(f"{base}/surfaces", json=spec)).status_code == 200
+
+            assert (await _until(first, "surface_added"))["content"] == spec
+
+            assert await _until(first, "surface_removed") == {
+                "t": "surface_removed",
+                "content": {"service_id": "record"},
+            }
+
+    finally:
+        settings.gateway.surface_ttl = original_ttl
+        await gateway.close()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5.0)

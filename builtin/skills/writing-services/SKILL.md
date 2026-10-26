@@ -33,13 +33,17 @@ The core never links service code; the only contract is HTTP.
    ```
 
 2. Heartbeat `POST /heartbeat {"service_id": "<name>"}` more often
-   than every 15 s (the hub evicts stale entries at 15 s TTL). A dead
-   heartbeat simply means the next turn runs without you — never
-   blocks anything.
-3. Before every prompt assembly the core POSTs the full new Turn JSON
-   (no `rendered` field) to your `/turn`. You have **2 seconds**.
-   Reply with plain text — that text rides the turn as an Injection.
-   Any non-2xx, timeout, or crash is recorded on the Turn, not fatal.
+   than every 15 s. After `injection.heartbeat_ttl` (15 s) a stale
+   service stops receiving turns; the entry itself is not deleted.
+   A dead heartbeat simply means the next turn runs without you —
+   never blocks anything.
+3. Before every prompt assembly the core POSTs
+   `{"turn": <fresh turn>, "prev_turn": <complete turn | null>}` to
+   your `/turn`; `prev_turn` includes `rendered`. You have **2
+   seconds**. Reply with a JSON object `{"text": "<str>"}` — that
+   text rides the turn as an Injection; plain text or any other
+   shape is a failed delivery (`ok=False`). Any non-2xx, timeout, or
+   crash is recorded on the Turn, not fatal.
 4. On shutdown `POST /unregister`. Use a FastAPI lifespan to do
    register → run → unregister so the sequence always holds.
 
@@ -66,7 +70,8 @@ The core never links service code; the only contract is HTTP.
 Inject fakes — clock, probe functions, subprocess shims — so tests
 never touch real hardware or the real network. Cover the differential
 logic (each event fires exactly on transition) and the `/turn`
-contract (status code, text body, empty-ok on no data). Run from the
+contract (status code, JSON `{"text": ...}` body, empty-ok on no
+data). Run from the
 service directory:
 
 ```bash
@@ -78,9 +83,11 @@ cd workspace/services/<name> && uv run --frozen pytest
 `workspace/autostart.sh` is your boot script (you may write it; it
 runs inside the sandbox) — add a `launch_service` line for your
 service. The user's own script, `builtin/autostart.sh`, is
-off-limits (no write access) and runs outside the sandbox. The
-core exports `NAN_WORKSPACE` and `NAN_CORE_PID` to launched
-services; logs go to `$NAN_WORKSPACE/<name>.log`.
+off-limits (no write access); if present it runs outside the
+sandbox (the repo does not ship one). The core exports
+`NAN_WORKSPACE`, `NAN_CORE_HOME`, `NAN_INJECTION_PORT` and
+`NAN_CORE_PID` to launched services; logs go to
+`$NAN_WORKSPACE/<name>.log`.
 
 ## Before finishing
 
@@ -89,3 +96,6 @@ services; logs go to `$NAN_WORKSPACE/<name>.log`.
 - [ ] Every config key has a default; `config.yaml` documents each one
 - [ ] Re-read `nan/injection/hub.py` — if your assumptions differ from the
       code, the code wins
+
+A service may also provide only a panel: register it by heartbeating
+`POST /surfaces` (see `docs/for-service-authors/injection-service.md`).

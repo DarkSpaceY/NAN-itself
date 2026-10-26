@@ -19,8 +19,8 @@ Two autostart scripts exist, with different authority:
                             shell commands.
 
 If no sandbox tool exists on the host, ``sandbox.required``
-decides: true -- refuse to execute (raise); false -- degrade to
-an unwrapped command with a warning, once.
+decides: true -- refuse to start; false -- degrade to an
+unwrapped command with a warning, once.
 """
 
 from __future__ import annotations
@@ -55,6 +55,12 @@ class Sandbox:
         self._tool: Literal["sandbox-exec", "bwrap"] | None = self._detect_tool()
         self._warned = False
 
+        if self.required and self._tool is None:
+            raise SandboxUnavailableError(
+                "sandbox.required=true but no sandbox tool found "
+                "(sandbox-exec on macOS / bwrap on Linux); refusing to start"
+            )
+
     # ------------------------------------------------------------------
     # Policy / layout (live reads of the global settings)
     # ------------------------------------------------------------------
@@ -70,10 +76,6 @@ class Sandbox:
     @property
     def builtin_dir(self) -> Path:
         return settings.paths.builtin
-
-    @property
-    def enabled(self) -> bool:
-        return settings.sandbox.enabled
 
     @property
     def required(self) -> bool:
@@ -103,24 +105,9 @@ class Sandbox:
     def wrap(self, command: str) -> str:
         """
         The command the model asked to run, wrapped for
-        execution. Raises SandboxUnavailableError when a sandbox
-        is required but no tool exists.
+        execution.
         """
-        if not self.enabled:
-            if not self._warned:
-                self._warned = True
-
-                logger.warning("sandbox disabled by config; shell commands run UNSANDBOXED")
-
-            return command
-
         if self._tool is None:
-            if self.required:
-                raise SandboxUnavailableError(
-                    "sandbox.required=true but no sandbox tool found "
-                    "(sandbox-exec on macOS / bwrap on Linux); refusing to execute"
-                )
-
             if not self._warned:
                 self._warned = True
 
