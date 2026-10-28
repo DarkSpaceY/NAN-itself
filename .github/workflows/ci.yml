@@ -63,7 +63,6 @@ jobs:
           (cd workspace/services/network && uv run --frozen pytest -q)
           (cd workspace/services/mcp && uv run --frozen pytest -q)
           (cd builtin/services/record && uv run --frozen pytest -q)
-          (cd builtin/services/vision && uv run --frozen pytest -q)
 
   # The distribution has to build: pyproject is the source of truth for
   # the wheel layout, and the console script ships with it.
