@@ -14,6 +14,7 @@ wheels/
 .mypy_cache/
 .ruff_cache/
 .cache/
+.screenshots/
 .DS_Store
 *.tsbuildinfo
 
