@@ -52,8 +52,6 @@ class LLMSettings(BaseModel):
     model: str = ""
     timeout: float = 120.0
     max_retries: int = 2
-    # "": direct, ambient proxies ignored. "env": environment or system
-    # proxy. Anything else: that proxy URL.
     proxy: str = ""
 
 
