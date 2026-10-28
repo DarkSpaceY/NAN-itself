@@ -42,3 +42,6 @@ paper_search/
 design/
 legacy/
 .trae-html-share-packages/
+
+# vision is being rewritten; the ignore goes away with the rewrite
+builtin/services/vision/
