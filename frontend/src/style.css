@@ -1,8 +1,8 @@
 /* Visuals: flat, monochrome, one accent color. Hierarchy comes from
  * surfaces and hairlines, not shadows.
  *
- * Scaling happens only on .frame (parent transform); every size here is
- * a design pixel: a real value inside the 1024-wide context.
+ * Every size here is a real CSS pixel; the pane hands each surface the
+ * width and height it actually has.
  */
 
 :root {
@@ -319,7 +319,8 @@ button {
 
 .frame {
   position: relative;
-  will-change: transform;
+  width: 100%;
+  height: 100%;
 }
 
 .workspace-empty {

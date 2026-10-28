@@ -1,7 +1,9 @@
 # Configuration
 
 The single source is `config/nan.yaml`, loaded once into the
-process-wide `nan.config.settings` object.
+process-wide `nan.config.settings` object. The file is git-ignored
+(it holds your key); `config/nan.yaml.example` is the committed
+template, and a fresh checkout starts by copying it.
 NAN reads only `config/nan.yaml`; the provider SDKs may still fall
 back to their env vars when `api_key`/`base_url` are empty.
 
@@ -15,6 +17,7 @@ back to their env vars when `api_key`/`base_url` are empty.
 | `model` | `""` | Model name sent to the endpoint |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
 | `max_retries` | `2` | SDK-level retry count |
+| `proxy` | `""` | `""`: direct, ambient environment and system proxies are ignored. `"env"`: use them. Any other value: that proxy URL |
 
 Example -- a local 27B model behind llama.cpp:
 
@@ -68,9 +71,10 @@ The registry the external prompt-contributor services talk to.
 |-----|---------|---------|
 | `enabled` | `true` | Run both boot scripts once: `builtin/autostart.sh` (user-owned, outside the sandbox) and `workspace/autostart.sh` (agent-writable, inside the sandbox) |
 
-Both scripts are launched once at boot, fire-and-forget:
-stdout/stderr are discarded, and a failure in either script does
-not block the core.
+Both scripts are launched once at boot. The core keeps each script's
+process group and stops it on exit, so the services started there do
+not outlive the core or hold their ports for the next boot. A failure
+in either script does not block the core.
 
 ## Paths
 

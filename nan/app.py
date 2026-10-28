@@ -11,10 +11,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import shlex
 import signal
 import uuid
-from pathlib import Path
 
 from loguru import logger
 
@@ -26,22 +24,10 @@ from nan.events import sink
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
-
-_PROXY_KEYS = (
-    "ALL_PROXY",
-    "all_proxy",
-    "HTTP_PROXY",
-    "http_proxy",
-    "HTTPS_PROXY",
-    "https_proxy",
-)
+from nan.utils.autostart import Autostart
 
 
 async def run_core() -> None:
-    # Strip ambient proxies.
-    for key in _PROXY_KEYS:
-        os.environ.pop(key, None)
-
     llm = LLMProvider()
 
     book = Book()
@@ -92,13 +78,30 @@ async def run_core() -> None:
     gateway_task: asyncio.Task[None] | None = None
     stop_task: asyncio.Task[bool] | None = None
 
+    autostart: Autostart | None = None
+
     loop = asyncio.get_running_loop()
 
     try:
         await hub.start()
 
         if settings.autostart.enabled:
-            _run_autostart(sandbox)
+            autostart = Autostart(
+                (
+                    ("user", settings.paths.autostart, False),
+                    ("agent", settings.paths.agent_autostart, True),
+                ),
+                env={
+                    **os.environ,
+                    "NAN_CORE_HOME": str(settings.paths.package),
+                    "NAN_WORKSPACE": str(settings.paths.workspace),
+                    "NAN_INJECTION_PORT": str(settings.injection.port),
+                    "NAN_CORE_PID": str(os.getpid()),
+                },
+                wrap=sandbox.wrap,
+            )
+
+            autostart.start()
 
         root.start()
 
@@ -140,6 +143,13 @@ async def run_core() -> None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await root._task
 
+        # The boot scripts' services are children of this core: stop
+        # them while the gateway and the hub are still up, so they can
+        # unregister and close their stores, and so the next boot finds
+        # the ports free.
+        if autostart is not None:
+            await autostart.stop()
+
         try:
             await gateway.close()
 
@@ -157,60 +167,6 @@ async def run_core() -> None:
         await llm.close()
 
         logger.info("nan stopped")
-
-
-def _run_autostart(sandbox: Sandbox) -> None:
-    """
-    Launch the two boot scripts once at boot, each with its own
-    authority:
-
-        builtin/autostart.sh    maintained by the user, runs
-                                outside the sandbox with the user's
-                                full rights.
-        workspace/autostart.sh  writable by agents and runs inside
-                                the execution sandbox.
-    """
-    scripts = (
-        ("user", settings.paths.autostart, False),
-        ("agent", settings.paths.agent_autostart, True),
-    )
-
-    env = {
-        **os.environ,
-        "NAN_CORE_HOME": str(settings.paths.package),
-        "NAN_WORKSPACE": str(settings.paths.workspace),
-        "NAN_INJECTION_PORT": str(settings.injection.port),
-        "NAN_CORE_PID": str(os.getpid()),
-    }
-
-    async def launch(script: Path, *, wrapped: bool) -> None:
-        try:
-            command = f"bash {shlex.quote(str(script))}"
-
-            if wrapped:
-                command = sandbox.wrap(command)
-
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                env=env,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-
-        except Exception:
-            logger.exception("Autostart failed to launch: {}", script)
-
-            return
-
-        logger.info("Autostart launched: {} (pid {})", script, proc.pid)
-
-    for label, script, wrapped in scripts:
-        if not script.is_file():
-            continue
-
-        asyncio.get_running_loop().create_task(
-            launch(script, wrapped=wrapped), name=f"autostart:{label}"
-        )
 
 
 def _shutdown(root: Agent, stop_event: asyncio.Event | None = None) -> None:

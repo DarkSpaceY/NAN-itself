@@ -13,18 +13,22 @@ wheels/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
 .DS_Store
 *.tsbuildinfo
 
 # Environment / secrets
 .env
+# The live config holds the API key; config/nan.yaml.example is the
+# committed template.
+config/nan.yaml
 
 # Runtime data
 data/
-workspace/.DS_Store
-workspace/*.log
+# RocksDB renames a store to data.<reason>-<timestamp>/ when it fails to open.
+data.*/
+*.log
 workspace/*.pid
-workspace/services/**/*.log
 
 # Model weights (large binaries, managed outside git)
 models/
@@ -37,3 +41,4 @@ paper_search/
 # local-only trees
 design/
 legacy/
+.trae-html-share-packages/

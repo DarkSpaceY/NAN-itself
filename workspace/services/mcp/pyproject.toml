@@ -1,0 +1,25 @@
+[project]
+name = "nan-mcp-service"
+version = "0.1.0"
+description = "MCP gateway: holds the configured MCP servers and exposes their tools to the sandbox shell"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.14.1",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "pyyaml>=6.0.2",
+    "uvicorn>=0.30.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.3.0"]
+
+[tool.pytest.ini_options]
+# The service writes package-manager caches under data/ while it runs;
+# without this, a test run against a live service collects the cached
+# third-party test suites as well.
+testpaths = ["tests"]

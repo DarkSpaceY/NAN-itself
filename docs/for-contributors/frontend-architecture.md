@@ -22,7 +22,6 @@ Everything on screen arrived as an event.
     │   ├── store.ts      connection, boot, root pause, model
     │   ├── agents.ts     agent tree: identity, status, turn count
     │   ├── queue.ts      window order + the one active window
-    │   ├── scale.ts      fixed design width, transform math
     │   └── history/
     │       ├── hub.ts    the single ingest path; routing to mappers
     │       ├── mapper.ts one agent's events folded into rounds
@@ -135,18 +134,19 @@ intentional:
   its WebSocket handshake is rejected the same way. The panel
   reaches its own backend, and that backend is what registers the
   surface.
-- There is no bridge: the desktop hands the panel a URL and
-  nothing else. No tokens, no scale, no theme push.
-- The panel styles itself and reads `prefers-color-scheme`; the
-  desktop's own `data-theme` switch does not reach it.
+- One message crosses the boundary: the desktop posts
+  `{type: "nan:theme", theme}` to the panel on load and on every
+  switch. No tokens, no state, no other traffic.
+- The panel owns its palette; the message only selects one, and a
+  panel never switches theme on its own. Opened outside the desktop,
+  it falls back to `prefers-color-scheme`.
 
-## Scaling
+## Layout
 
-Every pane renders the same fixed-width design (`DESIGN_W = 1024`)
-and the pane header, rail and footer render at true size. Inside
-the pane context is always 1024px, so media queries hit one
-branch regardless of window width; the frame is scaled down to
-fit and capped at `MAX_SCALE = 1.5`, letterboxing beyond it.
+Every pane hands its surface the size the pane actually has: the
+frame is 100% by 100% and nothing is scaled, so a surface lays out
+in real CSS pixels and adapts with ordinary CSS. Only the chrome
+(pane header, rail, footer) carries sizes of its own.
 
 ## Build, dev, test
 

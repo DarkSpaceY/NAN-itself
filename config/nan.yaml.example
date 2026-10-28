@@ -1,14 +1,20 @@
-# NAN core configuration (nan/ package).
+# Template for the NAN core configuration (nan/ package).
+# Copy to config/nan.yaml and fill in the active model. The copy is
+# git-ignored: it holds the API key, so it never enters the repository.
+#
+#   cp config/nan.yaml.example config/nan.yaml
+#
 # Loaded once into nan.config.settings; environment variables are never read.
 # Paths are not configuration: they are code defaults in nan/config (Paths).
 
 llm:
   provider: openai          # "openai" | "anthropic"
   base_url: ""              # empty = provider default endpoint
-  api_key: ""
+  api_key: ""               # anything OpenAI-compatible: OpenAI, OpenRouter, llama.cpp...
   model: ""
   timeout: 120.0
   max_retries: 2
+  proxy: ""                 # "": direct (ambient proxies ignored) | "env" | http://host:port
 
 agent:
   autonomous_interval: 0.0  # >0: self-rotating loop (seconds); <=0: event-driven
@@ -17,7 +23,7 @@ agent:
   shell_output_limit: 20000 # shell verb output truncation (head+tail)
   backoff: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]  # turn-failure backoff ladder (s)
   max_depth: 3              # -1: unlimited
-  max_children: 5           # -1: unlimited, per agent
+  max_children: 5            # -1: unlimited, per agent
 
 sandbox:
   required: false           # true: refuse to start when no sandbox tool exists

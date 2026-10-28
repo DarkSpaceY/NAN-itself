@@ -1,1 +1,1 @@
-"""Shared, dependency-free helpers."""
+"""Shared helpers."""

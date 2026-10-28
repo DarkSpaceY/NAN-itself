@@ -65,12 +65,13 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
 
   // -- service registration -------------------------------------------
 
+  // A declaration is an upsert: a changed spec replaces the window
+  // in place, keeping its rail position and any unread badge.
   const addSurface = useCallback((spec: SurfaceSpec) => {
     const win = serviceWindow(spec);
     setWindows((previous) => {
-      if (previous.has(win.id)) return previous;
       const next = new Map(previous);
-      next.set(win.id, win);
+      next.set(win.id, { ...previous.get(win.id), ...win });
       return next;
     });
     setQueue((previous) => registerWindow(previous, win.id));
@@ -130,7 +131,7 @@ export function Shell({ hub, transport }: { hub: Hub; transport: Transport }) {
         onDrill={(agentId) => setFocusAgentId(agentId)}
       />
     ) : (
-      <ServiceSurface win={win} />
+      <ServiceSurface win={win} theme={theme} />
     );
 
   return (

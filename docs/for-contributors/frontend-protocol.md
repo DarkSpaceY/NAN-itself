@@ -74,6 +74,11 @@ liveness and spec do not drift apart.
 { "t": "surface_removed", "content": { "service_id": "record" } }
 ```
 
+- `surface_added` is an upsert: a changed spec (new port, title,
+  icon) updates the existing window in place under the same
+  `service_id`, with no `surface_removed` in between. The desktop
+  keeps the window's rail position and only swaps its spec, so the
+  panel is not torn down and rebuilt.
 - Re-post every 10-15 s. An entry without a POST for
   `gateway.surface_ttl` (30 s) is dropped and `surface_removed` is
   broadcast.

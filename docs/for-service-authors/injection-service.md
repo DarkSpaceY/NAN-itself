@@ -93,13 +93,17 @@ request.
   refreshes the deadline, posting a changed one replaces the
   panel. A restarted service reports its new `url` the same way.
 - The panel is sandboxed without same-origin privileges, so it is
-  an opaque origin: answer its requests with
-  `Access-Control-Allow-Origin: *` and keep state on the backend.
-- There is no desktop bridge; the panel talks to its own backend
-  directly (see `docs/for-contributors/frontend-protocol.md`).
-- The desktop does not push its theme: the panel reads
-  `prefers-color-scheme`. A manual desktop theme switch is not
-  synced.
+  an opaque origin and its fetches / SSE carry `Origin: null`:
+  answer them with `Access-Control-Allow-Origin: null` and keep
+  state on the backend.
+- The panel talks to its own backend directly (see
+  `docs/for-contributors/frontend-protocol.md`). The one thing the
+  desktop sends it is the theme, as
+  `{type: "nan:theme", theme: "light" | "dark"}` on load and on
+  every switch. Panels with a dark palette listen for it; the rest
+  ignore it. A panel has no theme switch of its own: light / dark is
+  decided by the desktop, and by `prefers-color-scheme` only when the
+  page is opened outside it.
 
 ## The turn JSON
 

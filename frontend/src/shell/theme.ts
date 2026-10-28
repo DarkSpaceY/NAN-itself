@@ -1,8 +1,8 @@
 // Theme: two equivalent first-class themes, resolved once and written
 // to the root node.
 //
-// Panels are plain loopback pages: they style themselves, the desktop
-// only reads and writes data-theme.
+// Panels keep their own palettes; they receive the theme name as a
+// postMessage from the service window.
 
 export type Theme = "light" | "dark";
 
@@ -24,23 +24,4 @@ export function applyTheme(theme: Theme): void {
 
 export function toggleTheme(theme: Theme): Theme {
   return theme === "dark" ? "light" : "dark";
-}
-
-/** The minimal token set for panels: color name -> resolved value. */
-export function themeTokens(theme: Theme): Record<string, string> {
-  const read = (name: string) =>
-    getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
-  void theme;
-  return {
-    canvas: read("--canvas"),
-    surface: read("--surface"),
-    raised: read("--raised"),
-    border: read("--border"),
-    ink: read("--ink"),
-    muted: read("--muted"),
-    live: read("--live"),
-    warn: read("--warn"),
-    error: read("--error"),
-  };
 }

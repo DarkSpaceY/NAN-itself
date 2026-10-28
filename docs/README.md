@@ -25,7 +25,8 @@ injection, and the shell as the universal tool surface.
 ## Repository layout
 
     nan/          the core package (the only runtime code)
-    builtin/      read-only resources the agent reaches through shell
+    builtin/      user-owned resources the agent reads but never
+                  writes: skills, services/, autostart.sh
     config/       nan.yaml -- the single configuration source
     frontend/     the gateway's web UI (built to frontend/dist)
     workspace/    the agents' writable territory (services live in

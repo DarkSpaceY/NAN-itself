@@ -11,20 +11,33 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml/badge.svg)](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml)
 
-A self-contained, local-first agent core. One asyncio task per
-agent; handles for a multi-agent spawn tree; external processes
-for prompt injection; the shell as the universal tool surface --
-inside an OS-level sandbox. Built to run against locally deployed
-models as well as frontier APIs.
+**NAN is a local-first, self-extending agent.**
+
+It runs on your machine and can connect to a local model or a frontier API.
+During operation, it can acquire new capabilities on demand: install a CLI into its sandbox, write a skill file, connect a service.
+Capabilities are files, and NAN uses capabilities through the shell.
 
 > **NAN-itself is in early development.** Interfaces may change without notice.
 
 ## Quick start
 
+> **Windows users**: install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+> and run NAN inside it. NAN is not natively compatible with Windows:
+> it executes the agent's shell commands inside an OS-level sandbox
+> (sandbox-exec on macOS, bubblewrap on Linux), and Windows has no
+> equivalent process-isolation mechanism; the rest of the runtime
+> (bash boot scripts, POSIX paths, the shell-first tooling) builds
+> on that same Unix foundation. Inside WSL2 everything works as on
+> Linux.
+
     uv sync
 
-Fill in the active model in `config/nan.yaml` (the only config
-source; any OpenAI-compatible or Anthropic endpoint works):
+Copy the config template -- the resulting `config/nan.yaml` is
+git-ignored because it holds your key -- then fill in the active model
+(the only config source; any OpenAI-compatible or Anthropic endpoint
+works):
+
+    cp config/nan.yaml.example config/nan.yaml
 
     llm:
       provider: openai
@@ -81,7 +94,8 @@ conversations across turns.
 ## Repository layout
 
     nan/          the core package (the only runtime code)
-    builtin/      read-only resources the agent reaches through shell
+    builtin/      user-owned resources the agent reads but never
+                  writes: skills, services/, autostart.sh
     config/       nan.yaml -- the single configuration source
     frontend/     the gateway's web UI (built to frontend/dist)
     workspace/    the agents' writable territory (services live in

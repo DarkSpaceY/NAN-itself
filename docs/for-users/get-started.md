@@ -6,19 +6,35 @@
 - An LLM endpoint: any OpenAI-compatible API or the Anthropic API
   (a local llama.cpp/vLLM server works -- see `llm.base_url` in
   the configuration reference)
+- macOS or Linux. Windows is supported through
+  [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+  only: the sandbox (bubblewrap) and the shell-first runtime have
+  no native Windows equivalent. See the note in the README.
 
 ## Install
+
+One-liner (macOS or Linux; installs uv if missing, clones to
+`~/nan`, syncs dependencies, builds the web UI, override the
+location with `NAN_HOME`):
+
+    curl -fsSL https://raw.githubusercontent.com/DarkSpaceY/NAN-itself/main/scripts/install.sh | sh
+
+Or install manually. Sync the python dependencies:
 
     uv sync
 
 Build the web UI:
 
-    cd frontend && npm install && npm run build && cd ..
+    cd frontend && npm install && npm run build
 
 ## Configure
 
-All configuration lives in one file: `config/nan.yaml`. The
-minimum you must fill in is the active model:
+All configuration lives in one file: `config/nan.yaml`. It is
+git-ignored (it holds your key), so start from the template:
+
+    cp config/nan.yaml.example config/nan.yaml
+
+The minimum you must fill in is the active model:
 
     llm:
       provider: openai          # "openai" | "anthropic"
@@ -46,7 +62,7 @@ What starts:
 - the injection registry on `127.0.0.1:8901`
 - the autostart scripts, if enabled and present: `builtin/autostart.sh`
   (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
-  sandboxed)
+  sandboxed); the core stops what they start when it exits
 
 ```mermaid
 flowchart LR

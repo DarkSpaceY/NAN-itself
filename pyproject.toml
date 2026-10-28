@@ -52,6 +52,7 @@ extend-exclude = [
     "models",
     "paper_search",
     "workspace",
+    "builtin",
     "data",
     "frontend",
     "legacy",

@@ -284,3 +284,38 @@ async def test_unverified_source_delivered_as_unknown(tmp_path: Path, no_sink: N
     message = root._inbox.get_nowait()
 
     assert message.kind == "subagent"
+
+
+async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sink: None) -> None:
+    """
+    Event-driven ReACT: a turn that called a verb still owes the
+    model its results, so the loop takes that next step on its own
+    and parks only once a turn ends without calls.
+    """
+    llm = FakeLLM()
+
+    llm.script("react-probe", [("tool", "sleep", {"seconds": 0}), ("text",)])
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.0})
+
+    root.start()
+
+    assert root._task is not None
+
+    await root.receive_up("react-probe", "user")
+
+    # no second input: the tool result itself drives turn 2
+    await await_until(lambda: root.cycles == 2)
+
+    assert len(llm.requests) == 2
+
+    # the follow-up request already carries turn 1's tool result
+    assert [m.role for m in llm.requests[1].messages].count("tool") == 1
+
+    # turn 2 had no calls: the loop parks here instead of spinning
+    assert root.last_turn is not None and root.last_turn.calls == ()
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task

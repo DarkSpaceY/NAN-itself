@@ -39,6 +39,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      # config/nan.yaml is git-ignored (it holds the API key); the
+      # loader needs a file, so CI starts from the template.
+      - name: Prepare local config
+        run: cp config/nan.yaml.example config/nan.yaml
+
       - name: Ruff lint
         run: uv run --no-sync ruff check .
 
@@ -56,6 +61,9 @@ jobs:
         run: |
           (cd workspace/services/system && uv run --frozen pytest -q)
           (cd workspace/services/network && uv run --frozen pytest -q)
+          (cd workspace/services/mcp && uv run --frozen pytest -q)
+          (cd builtin/services/record && uv run --frozen pytest -q)
+          (cd builtin/services/vision && uv run --frozen pytest -q)
 
   # The distribution has to build: pyproject is the source of truth for
   # the wheel layout, and the console script ships with it.

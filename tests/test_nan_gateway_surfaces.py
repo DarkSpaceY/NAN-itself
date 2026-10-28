@@ -107,6 +107,54 @@ async def test_surface_registration_broadcast_and_replay(no_sink: None) -> None:
             await asyncio.wait_for(task, timeout=5.0)
 
 
+async def test_surface_update_replaces_without_removal(no_sink: None) -> None:
+    """A different spec under the same service_id is an update: the
+    desktop swaps the window in place instead of losing it first."""
+    port = _free_port()
+    settings.gateway.port = port
+    gateway = Gateway()
+    task = asyncio.create_task(gateway.serve(open_browser=False))
+
+    try:
+        await _wait_port(port)
+
+        base = f"http://127.0.0.1:{port}"
+        ws_url = f"ws://127.0.0.1:{port}/ws"
+
+        spec = {"service_id": "record", "url": f"http://127.0.0.1:{port}/ui", "title": "record"}
+
+        moved = {**spec, "url": f"http://127.0.0.1:{port}/ui2", "title": "record v2"}
+
+        async with websockets.connect(ws_url, proxy=None) as first:
+            assert (await _until(first, "hello"))["t"] == "hello"
+
+            async with httpx.AsyncClient(trust_env=False) as client:
+                assert (await client.post(f"{base}/surfaces", json=spec)).status_code == 200
+
+            assert (await _until(first, "surface_added"))["content"] == spec
+
+            async with httpx.AsyncClient(trust_env=False) as client:
+                assert (await client.post(f"{base}/surfaces", json=moved)).status_code == 200
+
+            # Strictly the next event: a surface_removed here would
+            # read as a passed test if it were skipped by _until.
+            message = json.loads(await asyncio.wait_for(first.recv(), timeout=5))
+
+            assert message == {"t": "surface_added", "content": moved}
+
+            # A desktop connecting later replays the updated table.
+            async with websockets.connect(ws_url, proxy=None) as second:
+                assert (await _until(second, "hello"))["t"] == "hello"
+
+                assert (await _until(second, "surface_added"))["content"] == moved
+
+    finally:
+        await gateway.close()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5.0)
+
+
 async def test_surface_expires_without_heartbeat(no_sink: None) -> None:
     port = _free_port()
     original_ttl = settings.gateway.surface_ttl

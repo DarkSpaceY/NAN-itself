@@ -116,12 +116,14 @@ export interface AgentExited extends AgentIdentity {
 }
 
 /**
- * Surface registration: a service posts to the gateway, which
- * broadcasts `surface_added` with this spec to every desktop and
- * `surface_removed` ({service_id}) when the service withdraws.
- * Both are handled by the transport, never by the hub: they are
- * live state, not history, and the gateway replays the table on
- * each new connection.
+ * Surface declaration: a service posts to the gateway, which
+ * broadcasts `surface_added` with this spec to every desktop --
+ * an upsert, so a changed spec updates the existing window instead
+ * of removing and re-adding it -- and `surface_removed`
+ * ({service_id}) only when the service withdraws or expires. Both
+ * are handled by the transport, never by the hub: they are live
+ * state, not history, and the gateway replays the table on each new
+ * connection.
  */
 export interface SurfaceSpec {
   service_id: string;
@@ -160,6 +162,23 @@ export const EVENT_TYPES = new Set([
   "output_cancelled",
   "user_input",
 ]);
+
+/**
+ * A surface frame. Unlike an envelope it carries no seq and no ts --
+ * it is live state, not history -- so it has to be recognised before
+ * the envelope guard, which would reject it.
+ */
+export function isSurfaceFrame(
+  msg: unknown,
+): msg is { t: "surface_added" | "surface_removed"; content: Record<string, unknown> } {
+  if (typeof msg !== "object" || msg === null) return false;
+  const m = msg as { t?: unknown; content?: unknown };
+  return (
+    (m.t === "surface_added" || m.t === "surface_removed") &&
+    typeof m.content === "object" &&
+    m.content !== null
+  );
+}
 
 export function isEnvelope(msg: unknown): msg is Envelope {
   if (typeof msg !== "object" || msg === null) return false;

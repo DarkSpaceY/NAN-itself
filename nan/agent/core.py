@@ -327,8 +327,13 @@ class Agent:
                         break
 
                 # Event-driven mode (interval <= 0): no filler
-                # turns -- block until the inbox has something.
-                if settings.agent.autonomous_interval <= 0:
+                # turns -- block until the inbox has something,
+                # unless the last committed turn called verbs: those
+                # results are still owed to the model, so the next
+                # step of the ReACT cycle runs without new input.
+                if settings.agent.autonomous_interval <= 0 and not (
+                    self.last_turn is not None and self.last_turn.calls
+                ):
                     await self._wait_for_inbox()
 
                     if self._death is not None:

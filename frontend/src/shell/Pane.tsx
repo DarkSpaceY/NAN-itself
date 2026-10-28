@@ -1,15 +1,10 @@
-// The single window in the content area: native chrome + scaled
-// viewport.
-//
-// The chrome does not scale (breadcrumbs stay readable on narrow
-// windows); inside, the context is always DESIGN_W wide, scaled down
-// to the available size by the parent's transform.
+// The single window in the content area: native chrome over a
+// viewport that hands the surface the size the pane actually has.
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import type { AgentStatus } from "../kernel/agents";
 import type { WindowRef } from "../kernel/queue";
-import { DESIGN_W, fitFrame } from "../kernel/scale";
 import { WindowIcon } from "../surfaces/registry";
 
 export interface Crumb {
@@ -35,24 +30,6 @@ export function Pane({
   onClose,
   children,
 }: PaneProps) {
-  const viewport = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
-
-  useLayoutEffect(() => {
-    const el = viewport.current;
-    if (!el) return;
-
-    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const frame = fitFrame(box.w, box.h);
-  const gutter = Math.max(0, (box.w - DESIGN_W * frame.scale) / 2);
-
   return (
     <section className="pane" data-status={status ?? undefined}>
       <header className="pane-head">
@@ -101,20 +78,8 @@ export function Pane({
         )}
       </header>
 
-      <div className="viewport" ref={viewport}>
-        {box.w > 0 && (
-          <div
-            className="frame"
-            style={{
-              width: frame.width,
-              height: frame.height,
-              transform: `translateX(${gutter}px) scale(${frame.scale})`,
-              transformOrigin: frame.transformOrigin,
-            }}
-          >
-            {children}
-          </div>
-        )}
+      <div className="viewport">
+        <div className="frame">{children}</div>
       </div>
     </section>
   );

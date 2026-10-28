@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from anthropic import AsyncAnthropic
+from anthropic import DefaultAsyncHttpxClient as AsyncHttpxClientAnthropic
 from anthropic.types import (
     InputJSONDelta,
     RawContentBlockDeltaEvent,
@@ -24,6 +25,7 @@ from anthropic.types import (
 from anthropic.types.raw_message_delta_event import Delta as MessageDeltaDelta
 from loguru import logger
 from openai import AsyncOpenAI
+from openai import DefaultAsyncHttpxClient as AsyncHttpxClientOpenAI
 
 from nan.config import settings
 
@@ -35,6 +37,17 @@ from .types import (
     ToolCall,
     Usage,
 )
+
+
+def _proxy_kwargs(proxy: str) -> dict[str, Any]:
+    """
+    Proxy discipline: the endpoint never inherits an ambient proxy
+    unless the configuration asks for it.
+    """
+    if proxy == "env":
+        return {"trust_env": True}
+
+    return {"trust_env": False, "proxy": proxy or None}
 
 
 class LLMProvider:
@@ -62,6 +75,7 @@ class LLMProvider:
         base_url = cfg.base_url or None
         timeout = cfg.timeout
         max_retries = cfg.max_retries
+        proxy = cfg.proxy
 
         self.provider = provider
         self.model = model
@@ -74,7 +88,8 @@ class LLMProvider:
             f"model={model}, "
             f"base_url={base_url}, "
             f"timeout={timeout}, "
-            f"max_retries={max_retries}",
+            f"max_retries={max_retries}, "
+            f"proxy={proxy or 'direct'}",
         )
 
         # Typed clients: one per protocol; each use site
@@ -88,6 +103,7 @@ class LLMProvider:
                 base_url=base_url,
                 timeout=timeout,
                 max_retries=max_retries,
+                http_client=AsyncHttpxClientOpenAI(**_proxy_kwargs(proxy)),
             )
         else:
             self._anthropic = AsyncAnthropic(
@@ -95,6 +111,7 @@ class LLMProvider:
                 base_url=base_url,
                 timeout=timeout,
                 max_retries=max_retries,
+                http_client=AsyncHttpxClientAnthropic(**_proxy_kwargs(proxy)),
             )
 
         self._closed = False

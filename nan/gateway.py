@@ -134,8 +134,8 @@ class Gateway:
 
         # ---------- Surface registration ----------
         # POST is a heartbeat: the same spec refreshes last_seen, a
-        # changed spec replaces the panel, and a stopped heartbeat
-        # expires it.
+        # changed spec updates the panel in place, and a stopped
+        # heartbeat expires it.
         @app.post("/surfaces")
         async def register_surface(body: dict[str, Any]) -> JSONResponse:
             spec, error = _validate_surface(body)
@@ -152,11 +152,11 @@ class Gateway:
             if previous is not None and previous[0] == spec:
                 return JSONResponse({"status": "ok"})
 
-            if previous is not None:
-                await self._broadcast(
-                    {"t": "surface_removed", "content": {"service_id": service_id}}
-                )
-
+            # A changed spec is an update of the same window, not a
+            # withdrawal plus a new one: the desktop replaces the
+            # spec under the same id, so the panel is not torn down
+            # and rebuilt (or flashed out of its queue slot) just
+            # because the service restarted on another port.
             logger.info("Surface registered: {} -> {}", service_id, spec["url"])
 
             await self._broadcast({"t": "surface_added", "content": spec})

@@ -11,6 +11,7 @@
 import {
   isEnvelope,
   isHello,
+  isSurfaceFrame,
   str,
   type ClientMessage,
   type Envelope,
@@ -194,20 +195,21 @@ export class WsTransport implements Transport {
       return;
     }
 
+    // Surface registration is not history: it carries no seq and does
+    // not enter the hub. It is read before the envelope guard, which
+    // would otherwise drop it.
+    if (isSurfaceFrame(msg)) {
+      if (msg.t === "surface_added") {
+        const spec = parseSurface(msg.content);
+        if (spec) this.onSurface(spec);
+      } else {
+        const serviceId = str(msg.content.service_id);
+        if (serviceId) this.onSurfaceRemoved(serviceId);
+      }
+      return;
+    }
+
     if (!isEnvelope(msg)) return;
-
-    // Surface registration is not history; it does not enter the hub
-    if (msg.t === "surface_added") {
-      const spec = parseSurface(msg.content as Record<string, unknown>);
-      if (spec) this.onSurface(spec);
-      return;
-    }
-
-    if (msg.t === "surface_removed") {
-      const serviceId = str((msg.content as Record<string, unknown>).service_id);
-      if (serviceId) this.onSurfaceRemoved(serviceId);
-      return;
-    }
 
     this.hub.ingest(msg as Envelope);
   }
