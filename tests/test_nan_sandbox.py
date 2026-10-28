@@ -3,6 +3,7 @@ wrapping, missing-tool behavior (required vs degrade)."""
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import stat
@@ -26,13 +27,18 @@ exec "$@"
 
 @pytest.fixture
 def with_sandbox_exec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """A fake sandbox-exec on PATH: validates the -f profile then
+    """A fake sandbox-exec first on PATH: takes the -p profile then
     executes the wrapped command."""
     fake = tmp_path / "sandbox-exec"
 
     fake.write_text(FAKE_SANDBOX_EXEC)
 
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+    # Wrapped commands are resolved by the shell through PATH, so the
+    # fake has to be reachable there; mocking which alone would still
+    # run whatever the host has installed.
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
 
     monkeypatch.setattr(shutil, "which", lambda name: str(fake) if name == "sandbox-exec" else None)
 
