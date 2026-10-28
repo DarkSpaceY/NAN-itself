@@ -1,28 +1,58 @@
-# Pre-commit: fast local checks only. Type checking (mypy) and tests run in CI.
-# Install: uv sync && uv run pre-commit install
+# Pre-commit: the same checks CI runs, minus the packaging step.
+# Install: uv sync && npm --prefix frontend ci && uv run pre-commit install
 # Run all: uv run pre-commit run --all-files
+#
+# Every hook runs through uv, so the ruff/style version is the one in
+# uv.lock -- the same binary CI uses. No separate hook environment, so
+# the formatter cannot disagree with the one committed to the repo.
+#
+# Hooks are scoped by path: a Python-only commit never pays for the
+# frontend type checker and vice versa. Full run is ~8s.
 repos:
-  # ---- Python ----
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.0
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-        files: ^(backend|builtin|tests)/
-      - id: ruff-format
-        files: ^(backend|builtin|tests)/
-
-  # ---- Frontend (React/TS in frontend/) ----
   - repo: local
     hooks:
-      - id: frontend-eslint
-        name: frontend eslint
-        entry: npm run lint:fix --prefix frontend
+      # ---- Python ----
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --frozen ruff check --fix --force-exclude
+        language: system
+        types: [python]
+        files: ^(nan|builtin|tests)/
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format --force-exclude
+        language: system
+        types: [python]
+        files: ^(nan|builtin|tests)/
+
+      - id: mypy
+        name: mypy
+        entry: uv run --frozen mypy
         language: system
         pass_filenames: false
-        files: ^frontend/src/
-      - id: frontend-prettier
-        name: frontend prettier
-        entry: npx --prefix frontend prettier --write
+        files: ^(nan|tests)/
+
+      - id: pytest
+        name: pytest
+        entry: uv run --frozen pytest -q
         language: system
-        files: ^frontend/src/.*\.(ts|tsx|css|json)$
+        pass_filenames: false
+        files: ^(nan|builtin|tests)/
+
+      # ---- Frontend ----
+      # npm --prefix runs the script with frontend/ as its cwd, so the
+      # hook does not need a shell to cd first.
+      - id: tsc
+        name: tsc
+        entry: npm --prefix frontend run check
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$
+
+      - id: vitest
+        name: vitest
+        entry: npm --prefix frontend run test
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|tsx)$

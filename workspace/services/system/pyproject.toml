@@ -1,0 +1,20 @@
+[project]
+name = "nan-system-service"
+version = "0.1.0"
+description = "System self-perception injection service: deterministic host facts for the NAN agent"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "mss>=10.0.0",
+    "psutil>=7.0.0",
+    "pyyaml>=6.0.2",
+    "uvicorn>=0.30.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.3.0"]

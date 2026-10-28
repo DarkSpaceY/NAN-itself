@@ -11,20 +11,25 @@ wheels/
 
 # Caches and tooling
 .pytest_cache/
+.mypy_cache/
 .ruff_cache/
+.cache/
+.screenshots/
 .DS_Store
+*.tsbuildinfo
 
 # Environment / secrets
 .env
+# The live config holds the API key; config/nan.yaml.example is the
+# committed template.
+config/nan.yaml
 
 # Runtime data
 data/
-
-# Workspace: user-editable overrides. Seed files (persona.md,
-# modules/workspace.py) ARE tracked as shipped defaults; anything
-# else the user drops in here stays local.
-workspace/*
-!workspace/persona.md
+# RocksDB renames a store to data.<reason>-<timestamp>/ when it fails to open.
+data.*/
+*.log
+workspace/*.pid
 
 # Model weights (large binaries, managed outside git)
 models/
@@ -33,3 +38,11 @@ infraend/
 # research
 paper_search/
 .memos/
+
+# local-only trees
+design/
+legacy/
+.trae-html-share-packages/
+
+# vision is being rewritten; the ignore goes away with the rewrite
+builtin/services/vision/

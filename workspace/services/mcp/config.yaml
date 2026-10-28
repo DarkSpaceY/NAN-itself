@@ -1,0 +1,51 @@
+# The MCP gateway's single configuration file: every MCP server the
+# agent can reach is one entry under `servers`. The gateway reloads
+# this file on change; edits take effect without a restart.
+#
+# Server entry fields:
+#   name     unique id used by the CLI and the API
+#   command  executable (npx / uvx / ...)
+#   args     command arguments; "{workspace}" expands to the
+#            workspace root, "{service_data}" to this service's data
+#            dir, "{service_dir}" to this service's directory
+#   env      optional extra environment variables for the server process
+#   cwd      optional working directory
+
+hub_url: http://127.0.0.1:8901
+service_id: mcp
+host: 127.0.0.1
+port: 9005
+call_timeout: 120.0
+
+servers:
+  - name: calculation
+    command: npx
+    args: ["--yes", "@cyanheads/calculator-mcp-server@0.4.0"]
+
+  - name: command
+    command: uvx
+    args: ["mcp-shell-server==1.1.4"]
+
+  - name: files
+    command: npx
+    args: ["--yes", "@modelcontextprotocol/server-filesystem@2026.7.10", "{workspace}"]
+
+  - name: playwright
+    command: npx
+    args: ["--yes", "@playwright/mcp@0.0.79", "--headless"]
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: "{service_data}/pw-browsers"
+
+  - name: prolog
+    command: npx
+    args: ["--yes", "@vpursuit/swipl-mcp-server@2.0.6"]
+
+  - name: touchpoint
+    command: uvx
+    args: ["--from", "touchpoint-py", "--with", "mcp<2", "touchpoint-mcp"]
+
+  - name: search
+    command: uv
+    args: ["run", "--script", "{service_dir}/servers/search/server.py"]
+    env:
+      SEARXNG_CLI_SETTINGS: "{service_dir}/servers/search/searxng-settings.yaml"

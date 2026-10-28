@@ -1,0 +1,23 @@
+# System service configuration. Loaded from this file's directory.
+# Every probe failure degrades to null; the service never dies
+# from a missing binary or a missing sensor.
+
+hub_url: "http://127.0.0.1:8901"   # injection hub (register / heartbeat)
+service_id: "system"
+host: "127.0.0.1"
+port: 9001
+
+poll_interval: 5.0                 # seconds between samples
+
+disk_threshold: 90.0               # % that raises a disk event (throttled)
+disk_announce_every: 600.0         # min seconds between repeated disk events
+runaway_cpu: 90.0                  # % cpu for a process to count as runaway
+runaway_samples: 3                 # consecutive samples before announcing
+idle_reset_after: 300.0            # idle seconds that reset work_seconds
+assertions_every: 30.0             # seconds between sleep-assertion sweeps (pmset)
+top_cpu_threshold: 20.0            # % cpu for a process to appear in the top line
+top_procs_max: 3                   # max processes shown in the top line
+
+events_max: 8                      # event ring size
+events_render_limit: 3             # events shown per injection
+focus_title_cap: 80                # focus window title truncation

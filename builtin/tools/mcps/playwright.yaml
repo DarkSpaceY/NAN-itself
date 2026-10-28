@@ -1,6 +1,0 @@
-name: playwright
-command: npx
-args:
-  - "--yes"
-  - "@playwright/mcp@0.0.79"
-  - "--headless"

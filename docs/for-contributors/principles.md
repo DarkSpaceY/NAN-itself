@@ -1,76 +1,136 @@
-# Core Principles
+# Principles
 
-These are the load-bearing principles of NAN-itself. They constrain
-design decisions across the framework; when a change violates one of
-these, the change needs an explicit, argued exception — not a quiet
-workaround.
+The design rules the codebase is written against. When a change
+feels ambiguous, these decide.
 
-## 1. Local-first
+## Shell-first
 
-Everything runs on the user's machine. The only external calls are the
-LLM endpoint(s) the user configures in `settings.yaml`. No cloud
-services, no telemetry, no accounts in the core.
+The model already knows the shell. Tools, skills, data
+processing, service management -- all of it is reachable through
+`shell`. New capabilities are added by writing files into
+`builtin/` (read-only resources) or `workspace/` (agent-writable).
 
-## 2. Cross-platform runtime
+## Import direction
 
-No OS-specific or hardware-specific runtime dependencies in the core.
-The portability baseline is CTranslate2 / onnxruntime / torch /
-transformers — the same code must run on macOS, Linux and Windows, on
-any vendor's hardware. Hardware-specific accelerators (MLX, CoreML,
-DirectML) are optional extras layered on top, never requirements, and
-never the only code path. (Precedent: the VLM backend is
-transformers/torch, MLX explicitly excluded.)
+The runtime module graph is acyclic and points downward: a module
+imports from its own package or a lower layer, never from a layer
+above it. `TYPE_CHECKING` blocks are the one place a module may
+name a type from above.
 
-## 3. The LLM stays out of the hot path
+    app.py               composition root
+    ├── gateway          HTTP + WS; reads the sink, owns no runtime state
+    ├── injection        registry + per-turn collection
+    └── agent            loop, turn engine, verbs, handles, sandbox
+        ├── turn         the Turn record and prompt rendering
+        ├── llm          DTOs (types.py) + transport (provider.py)
+        ├── config       settings singleton
+        ├── events       sink singleton
+        └── utils        loopback policy
 
-Deliberation belongs to the agent turn loop. Perceive → decide → act
-loops that need a faster rhythm than LLM round-trips run *inside*
-modules, at module frequency, through channels. Ambient state is
-computed continuously in the background; the model reads projections,
-it is never the inner loop of a control system.
+The layers, bottom up:
 
-## 4. Turn snapshot
+1. **Leaves.** `events.py`, `utils/loopback.py`,
+   `config/models.py`, `llm/types.py` import nothing else from
+   `nan`. `agent/handle.py` belongs here too: its `Agent`
+   reference is type-only. Any layer may import these.
+2. **Singletons.** `config` (reads `config/nan.yaml` at import)
+   and `events` (builds the sink) are imported by every layer and
+   import nothing upward. They are the only modules carrying
+   import-time state.
+3. **Model layer.** `llm/provider.py` imports `config` and
+   `llm/types`, and is called only from `agent/engine.py` --
+   `app.py` is where it is constructed. `turn/` reads DTOs from
+   `llm`; `llm` never imports `turn`.
+4. **Agent.** `agent/` imports `config`, `events`, `llm`, `turn`.
+   It does not import `gateway`, `injection` or `app`: the
+   injection hub arrives as a constructor argument and is named
+   only under `TYPE_CHECKING`.
+5. **Injection.** `injection/` imports `config`, `turn`,
+   `utils/loopback`. It does not import `agent`, `gateway` or
+   `app`: delivery is an outbound HTTP call, never a call into
+   the agent loop.
+6. **Gateway.** Imports `config`, `events`, `utils/loopback` only.
+   It broadcasts what the sink carries and does not import the
+   agent runtime or the injection registry, which is what keeps
+   the web layer replaceable.
+7. **Composition root.** `app.py` is the only module that
+   imports `agent`, `injection` and `gateway` together, and the
+   only one that constructs `LLMProvider`, `Sandbox`, `Gateway`
+   and `InjectionHub`. Nothing imports `app`.
 
-One round of agent execution is captured in a single `Turn` record:
-`persona` + `history` (the snapshot the model saw) + `messages` (what
-this round produced). There is no separate persistent history store —
-the next round's snapshot is derived from the last turn, so anything
-the model saw is reconstructible exactly.
+Three rules cover the cases that do not fit the ladder:
 
-## 5. One folder = one unit; two parallel roots
+- **Type-only cycles** go inside `if TYPE_CHECKING:` with
+  `from __future__ import annotations`. Current pairs:
+  `handle` <-> `core`, `verbs` -> `core`,
+  `injection/client` -> `injection/hub`. A cycle that has to
+  exist at runtime means the ownership split is wrong, not that
+  the import should be deferred.
+- **Intra-package loading order.** `agent/verbs/__init__.py`
+  imports the six verb classes inside `_build_registry()`, after
+  `Verb` and `VerbOutcome` exist. Verb modules import the
+  package, never each other.
+- **Package re-exports.** `nan/llm/__init__.py` exports the DTOs
+  and the provider, so `from nan.llm import Message` also loads
+  `provider` and `config`. A module that wants only DTOs imports
+  `nan.llm.types`.
 
-One file (or directory) is exactly one provider, module, or skill —
-no multi-unit files. Modules and local tools are folders with a
-main.py entry. Builtin (`builtin/`) and user territory
-(`workspace/`) are two parallel roots scanned with identical hot-reload
-semantics. A reload is a transaction: the replacement starts first,
-unregistered; it is committed only after it is fully connected; the old
-generation keeps serving until that moment. Deleting the entry file (or the folder)
-disables its unit.
+## The turn is the record
 
-## 6. Bounded by design
+Everything that happened in a turn -- inbox drained, injections
+collected, deltas observed, the reply -- lives on the Turn.
+LLM calls are metered on the record (`LLMCall`: model, usage,
+started_at/ended_at, finish_reason, retries).
 
-Every tool call is timeout-bounded. The only inbound listener is the
-gateway, bound to the loopback interface. All repo-relative paths
-resolve through a single path-anchoring module — the process never
-depends on its working directory and writes no state outside the repo
-directories. Workspace sources are code and inherit the user's trust;
-review before adding.
+## Add-only context
 
-## 7. Full implement, let it crash
+```mermaid
+flowchart LR
+    P["system prompt<br/>(persona; changes invalidate the prefix)"]
+    P --> T1["turn 1"]
+    T1 --> T2["turn 2"]
+    T2 --> T3["turn 3"]
+    T3 -.->|"append only:<br/>existing bytes unchanged"| SOLID["stable prompt prefix<br/>= cache hit"]
+```
 
-Implement features completely — never ship partial implementations,
-placeholder behavior, or silent simplifications. On failure, crash
-loudly and surface the error: no silent fallbacks, no masking, no
-"unavailable" limbo states that quietly keep running at half capacity.
-Supervisors restart crashed units with backoff, and the error stays
-visible until the cause is fixed. A module with missing weights comes
-up failed and revives the moment the weights land.
+Rendered turns freeze on first render and never change. History
+grows by appending; when the char limit trips, it clears whole.
+Unchanged prefixes stay byte-stable, which is what makes prompt
+caching work. There is no in-place rewriting of history.
 
-## 8. Data flows up, decisions flow down
+## Core files vs agent territory
 
-Modules publish facts, never conclusions — interpretation belongs to
-the agent. The agent's intent reaches back down through write-only
-module channels. `ask()` is a cheap projection (it runs on the agent's
-critical path every turn); heavy work lives in module loops. Neither
-side blocks the other.
+```mermaid
+flowchart TB
+    U["user"] -->|"writes"| CORE["nan/<br/>code, persona, config"]
+    U -->|"writes"| BI["builtin/<br/>resources"]
+    U -->|"writes"| AU["builtin/autostart.sh"]
+    A["agent"] -->|"shell: read-only"| CORE
+    A -->|"shell: read-only"| BI
+    A -->|"shell: write"| WS["workspace/"]
+    CORE -.->|"boots and governs"| A
+```
+
+Three zones: the nan package (core code, persona -- the agent
+cannot write these), `builtin/` (read-only resources), and
+`workspace/` (the agent's writable territory, including its own
+boot script `workspace/autostart.sh`). The user's boot script
+lives in `builtin/` and runs outside the sandbox; the agent's
+one runs inside it.
+
+## One path for everything important
+
+Death has one path (finish or kill, both through the same
+teardown). Configuration has one source (the YAML). Event flow
+has one singleton (sink). Duplicated paths drift; when two
+mechanisms could do a job, the codebase picks one and deletes
+the other.
+
+## Loud failure
+
+A missing persona fails startup. A failed turn is retried on
+the backoff ladder and every failure is recorded. A sandbox
+missing its tooling warns loudly, or refuses to start when
+`sandbox.required` is true. Silence hides decay; the
+system is designed so that breakage is visible at the point it
+happens.

@@ -1,0 +1,23 @@
+# Record service configuration. Loaded from this file's directory.
+#
+# The archive is best-effort: it observes completed turns, never
+# contributes to the prompt, and never fails a turn.
+
+hub_url: "http://127.0.0.1:8901"     # injection hub (register / heartbeat)
+gateway_url: "http://127.0.0.1:8765" # gateway (surface registration)
+service_id: "record"
+host: "127.0.0.1"
+port: 9003
+
+surface_every: 10.0                 # seconds between surface heartbeats (gateway TTL 30s)
+
+data_dir: "data"                    # relative to this directory; gitignored
+max_bytes: 0                        # 0 = keep everything; set a byte cap to enable pruning
+prune_to: 0.95                      # retention deletes down to this fraction of max_bytes
+
+batch_size: 256                     # turns per write batch
+batch_interval: 0.1                  # max seconds a batch waits for more turns
+queue_max: 10000                    # in-memory backlog; overflow drops (archive stays best-effort)
+
+ledger_limit: 300                   # rows per page of the global time order
+activity_buckets: 1200              # cap on histogram buckets (the UI sends its width)

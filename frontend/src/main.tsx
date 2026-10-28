@@ -1,71 +1,27 @@
-// NAN frontend — entry
-// 数据层（store/ws/mapper/db，框架无关）+ React 呈现层（assistant-ui）。
+// Entry: one tab = one view of the event stream; each tab's queue is
+// independent.
+//
+// ?mock runs the local scripted stream; by default the same-origin
+// /ws is used (in dev, vite proxies it to the gateway).
 
-import './style.css';
-import { createRoot } from 'react-dom/client';
-import { createElement } from 'react';
+import { createRoot } from "react-dom/client";
 
-import { Store } from './store';
-import { Mapper } from './history/mapper';
-import { createRoundStore } from './persistence/db';
-import { App } from './ui/App';
+import "./style.css";
+import { Hub } from "./kernel/history/hub";
+import { GlobalStore } from "./kernel/store";
+import { Shell } from "./shell/Shell";
+import { applyTheme, loadTheme } from "./shell/theme";
+import { MockTransport } from "./transport/mock";
+import { WsTransport } from "./transport/ws";
 
-const store = new Store();
-const mapper = new Mapper();
-const db = createRoundStore();
+applyTheme(loadTheme());
 
-let sendInput: (text: string) => void = () => {};
-let setPaused: (paused: boolean) => void = () => {};
+const global = new GlobalStore();
+const hub = new Hub(global);
 
-const root = createRoot(document.getElementById('root')!);
-root.render(
-  createElement(App, {
-    store,
-    mapper,
-    db,
-    sendInput: (text) => sendInput(text),
-    setPaused: (paused) => setPaused(paused),
-  }),
+const mock = new URLSearchParams(location.search).has("mock");
+const transport = mock ? new MockTransport(hub) : new WsTransport(hub);
+
+createRoot(document.getElementById("root")!).render(
+  <Shell hub={hub} transport={transport} />,
 );
-
-async function boot() {
-  // 恢复本地历史（重放会按 mid 覆盖对齐）
-  try {
-    const rounds = await db.loadRounds();
-    if (rounds.length > 0) mapper.seed(rounds);
-  } catch (err) {
-    console.warn('[nan] history restore failed', err);
-  }
-
-  const useMock = new URLSearchParams(location.search).has('mock');
-
-  if (useMock) {
-    const { createMockClient } = await import('./dev/mock');
-    const mock = createMockClient({
-      onEnvelope: (env) => {
-        store.applyMessage(env);
-        mapper.feed(env);
-      },
-      onConnection: (state) => store.setConnection(state),
-    });
-    sendInput = (text) => mock.sendInput(text);
-    setPaused = (paused) => (paused ? mock.pause() : mock.resume());
-    mock.connect();
-    return;
-  }
-
-  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
-  const { WsClient } = await import('./ws');
-  const client = new WsClient({
-    url: wsUrl,
-    store,
-    onEnvelope: (env) => mapper.feed(env),
-    onHello: (bootId) => mapper.onHello(bootId),
-  });
-  store.setConnection('connecting');
-  client.connect();
-  sendInput = (text) => client.sendInput(text);
-  setPaused = (paused) => (paused ? client.pause() : client.resume());
-}
-
-void boot();

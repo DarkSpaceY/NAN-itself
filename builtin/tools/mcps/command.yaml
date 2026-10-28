@@ -1,4 +1,0 @@
-name: command
-command: uvx
-args:
-  - "mcp-shell-server==1.1.4"

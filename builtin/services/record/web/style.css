@@ -1,0 +1,785 @@
+/* The record panel.
+ *
+ * Same visual language as the rest of NAN: flat, monochrome, one
+ * accent (--live). Hierarchy comes from surfaces and hairlines, not
+ * from shadows. This panel lives in an iframe without same-origin,
+ * so it carries the tokens itself; the theme is the desktop's, and
+ * outside it the OS preference.
+ *
+ * Composition, not chrome: a warm canvas holds two soft cards -- the
+ * time instrument on top, the ledger below. Inside the ledger the
+ * turn's own line is the loudest thing on the row and everything
+ * measured about it is quiet, so it reads as a log of what happened
+ * rather than a spreadsheet of columns.
+ */
+
+:root {
+  --canvas: #f7f7f5;
+  --surface: #ffffff;
+  --raised: #f0f0ee;
+  --border: #e3e3e0;
+  --ink: #0d0d0d;
+  --muted: #6e6e6e;
+  --live: #10a37f;
+  --warn: #b45309;
+  --error: #d93025;
+
+  --font-ui:
+    ui-sans-serif, -apple-system, "SF Pro Text", "Helvetica Neue", Inter,
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+
+  /* One row of the ledger, and the shared column track. */
+  --row-h: 30px;
+  --gap-h: 26px;
+  --cols: 86px 60px 164px minmax(0, 1fr) 100px;
+  --pad: 16px;
+  --radius: 14px;
+
+  /* Derived: hairlines that should never shout. */
+  --hair: color-mix(in srgb, var(--ink) 8%, transparent);
+  --tint: color-mix(in srgb, var(--ink) 5%, transparent);
+  --well: color-mix(in srgb, var(--ink) 3.5%, transparent);
+  --dot-l: 46%;
+}
+
+[data-theme="dark"] {
+  --canvas: #0e0e0e;
+  --surface: #1a1a1a;
+  --raised: #2b2b2b;
+  --border: #3f3f3f;
+  --ink: #ececec;
+  --muted: #a3a3a3;
+  --live: #19c37d;
+  --warn: #f5a524;
+  --error: #f97066;
+  --hair: color-mix(in srgb, var(--ink) 12%, transparent);
+  --tint: color-mix(in srgb, var(--ink) 8%, transparent);
+  --well: color-mix(in srgb, var(--ink) 7%, transparent);
+  --dot-l: 62%;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font: 13px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ghost {
+  font: 11px var(--font-mono);
+  color: var(--muted);
+  padding: 5px 9px;
+  border-radius: 8px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.ghost:hover { background: var(--raised); color: var(--ink); }
+.ghost.icon { padding: 5px 8px; }
+
+.spacer { flex: 1; }
+
+/* ------------------------------------------------------------ header */
+
+/* No rule under the bar: the canvas shows through and the cards
+ * below carry the structure on their own. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 52px;
+  padding: 0 14px 0 20px;
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 11px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: var(--ink);
+}
+
+.wordmark::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--live);
+}
+
+.stats {
+  font: 10.5px var(--font-mono);
+  color: var(--muted);
+  margin-left: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.search input {
+  width: 176px;
+  height: 28px;
+  padding: 0 10px;
+  font: 11px var(--font-mono);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.search input:focus { border-color: color-mix(in srgb, var(--ink) 32%, transparent); }
+.search input::placeholder { color: var(--muted); opacity: 0.75; }
+
+/* ------------------------------------------------------- instrument */
+
+/* Two levels. The top strip is the whole archive: context, and a
+ * click takes you there. The window strip below covers only the
+ * range the ledger is showing, so it can afford real resolution,
+ * and dragging across it drills in. Between them they span minutes
+ * to years without ever lying about the scale. */
+.instrument {
+  flex: none;
+  margin: 0 14px 10px;
+  padding: 9px 14px 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.band {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.cap {
+  font: 9.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  opacity: 0.85;
+  user-select: none;
+}
+
+.strip {
+  position: relative;
+  border-radius: 7px;
+  background: var(--well);
+  overflow: hidden;
+}
+
+#overview {
+  height: 26px;
+  cursor: default;
+}
+
+#focus {
+  height: 58px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  margin-top: 5px;
+}
+
+#focus:active { cursor: grabbing; }
+
+.strip .hist {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: block;
+}
+
+#hist-all { top: 4px; height: 19px; }
+/* Kept clear of the tick band below it. */
+#hist-win { top: 4px; height: 36px; }
+
+#bars-all { fill: var(--ink); opacity: 0.2; }
+#bars-win { fill: var(--ink); opacity: 0.32; }
+
+/* Where the window sits inside the archive, and the handle that
+ * moves it. Position only: the window strip's wheel owns the size. */
+.window-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.window-mark:active { cursor: grabbing; }
+
+.window-mark:hover { border-color: color-mix(in srgb, var(--ink) 44%, transparent); }
+
+.window-mark.full { background: transparent; }
+
+.ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  font: 9.5px var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+/* The time cursor. It is always there: it marks the row at the top of
+ * the ledger, so the strip and the list read as one instrument.
+ * Dragging it runs the ledger; scrolling the ledger moves it.
+ *
+ * It needs real weight -- the anchor is often the first row in the
+ * window, which puts it against the left edge, so a hairline would
+ * simply not be seen. Hence the solid rule and the inverted pill. */
+.cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: color-mix(in srgb, var(--ink) 46%, transparent);
+  pointer-events: none;
+  z-index: 2;
+  transition: background 100ms ease;
+}
+
+.cursor.drag { background: var(--live); }
+
+.cursor b {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  font: 500 9.5px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--surface);
+  background: var(--ink);
+  white-space: nowrap;
+}
+
+.cursor.drag b { background: var(--live); color: #fff; }
+
+/* An empty archive has no time to report. */
+.cursor b:empty { display: none; }
+
+/* Near the right end the label has to hang to the left instead. */
+.cursor.flip b { left: auto; right: 4px; }
+
+.range-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  height: 28px;
+  margin-top: 1px;
+  padding-left: 64px;
+  font: 10.5px var(--font-mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.range-span { flex: 1; text-align: center; opacity: 0.7; }
+
+/* ----------------------------------------------------------- ledger */
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.ledger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ledger-head,
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+}
+
+/* A legend, not a header band: no fill, the quietest rule we have. */
+.ledger-head {
+  flex: none;
+  height: 30px;
+  padding: 0 var(--pad);
+  font: 9.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hair);
+}
+
+.ledger-head .c-meta { text-align: right; }
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 28px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.scroll::-webkit-scrollbar { width: 11px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 3px solid var(--surface);
+}
+
+.rows { position: relative; width: 100%; }
+
+.row {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: var(--row-h);
+  padding: 0 8px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 90ms ease;
+}
+
+.row:hover { background: var(--raised); }
+
+/* The row the time cursor points at. Neutral on purpose: the accent
+ * belongs to the drawer's selection, this is just "you are here". */
+.row.marked {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 15%, transparent);
+}
+
+.row.marked .t { color: var(--ink); }
+
+/* Hovering must still read as hover, so only the ring strengthens --
+ * the row stays marked. */
+.row.marked:hover {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 24%, transparent);
+}
+
+.row.selected {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--live);
+}
+
+/* A turn that recorded a failed injection keeps a whisper of colour
+ * on the row itself, so it is visible without hovering. */
+.row.err { background: color-mix(in srgb, var(--error) 7%, transparent); }
+
+.row.err:hover { background: color-mix(in srgb, var(--error) 13%, var(--raised)); }
+
+.row .c-gut { display: flex; align-items: center; overflow: hidden; }
+.row svg { display: block; }
+
+/* The lineage gutter. Lanes are neutral; identity rides on the
+ * node's hue, derived from the agent id, and only the selected
+ * turn's own path is allowed the accent. */
+.row .lane {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 22%, transparent);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.row .lane.hot { stroke: var(--live); opacity: 0.95; }
+
+.row .node {
+  fill: hsl(var(--h) 26% var(--dot-l));
+  stroke: var(--surface);
+  stroke-width: 1.2;
+}
+
+/* A closed branch: hollow, like an exited process. Ending is not a
+ * failure, so it never earns a warning colour. */
+.row .node.dead {
+  fill: var(--surface);
+  stroke: hsl(var(--h) 26% var(--dot-l));
+  stroke-width: 1.6;
+}
+
+.t {
+  font: 10.5px var(--font-mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The agent, its state mark, and which turn of its life this was. */
+.a {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.mk {
+  flex: none;
+  width: 11px;
+  font: 10px var(--font-mono);
+  text-align: center;
+}
+
+.mk.err { color: var(--error); }
+.mk.warn { color: var(--warn); }
+.mk.dim { color: var(--muted); opacity: 0.75; }
+.mk.faint { color: var(--muted); opacity: 0.45; }
+
+.a .nm {
+  font: 11px var(--font-mono);
+  color: var(--ink);
+  opacity: 0.86;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a .sq {
+  flex: none;
+  font: 9.5px var(--font-mono);
+  color: var(--muted);
+  opacity: 0.62;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The line itself: the only loud thing on the row. */
+.sum {
+  font: 12.5px/1.4 var(--font-ui);
+  color: var(--ink);
+  opacity: 0.88;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 14px;
+}
+
+.row.err .sum { opacity: 1; }
+
+.meta {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  font: 10.5px var(--font-mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.meta .tok { opacity: 0.72; }
+.meta .dur { min-width: 46px; text-align: right; }
+
+/* Day breaks and idle stretches, both just a caption on a hairline. */
+.gap {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  height: var(--gap-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gap span {
+  font: 9.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.gap.idle::before,
+.gap.idle::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+
+.gap.idle span { opacity: 0.7; }
+
+/* A new day: the date heads the time column, and a hairline carries
+ * the eye out to the right. */
+.gap.day {
+  align-items: center;
+  padding-top: 10px;
+  padding-left: 86px;
+}
+
+.gap.day span { color: var(--ink); opacity: 0.62; }
+.gap.day::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+
+.foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 var(--pad);
+  font: 10px var(--font-mono);
+  color: var(--muted);
+  border-top: 1px solid var(--hair);
+}
+
+.empty {
+  padding: 48px 0;
+  text-align: center;
+  font: 12px var(--font-ui);
+  color: var(--muted);
+}
+
+/* ----------------------------------------------------------- drawer */
+
+.drawer {
+  flex: none;
+  width: min(460px, 42vw);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.drawer[hidden] { display: none; }
+
+.d-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 52px;
+  padding: 4px 10px 0 var(--pad);
+}
+
+.d-head .d-id {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The number is the identity; "turn" is only its unit, so it is set
+ * small and quiet, like a column heading rather than part of a name. */
+.d-head .d-kicker {
+  font: 500 9px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.d-head .d-title {
+  font: 500 13px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.d-head .d-agent { font: 11px var(--font-mono); color: var(--muted); }
+
+.tabs {
+  display: flex;
+  gap: 3px;
+  flex: none;
+  padding: 0 var(--pad) 10px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.tab {
+  font: 10.5px var(--font-mono);
+  color: var(--muted);
+  padding: 5px 9px;
+  border-radius: 8px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tab:hover { background: var(--raised); color: var(--ink); }
+
+.tab.on {
+  color: var(--ink);
+  background: var(--raised);
+}
+
+.d-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px var(--pad) 44px;
+  scrollbar-width: thin;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0 0 22px;
+}
+
+.kv dt { font: 10.5px var(--font-mono); color: var(--muted); }
+
+.kv dd {
+  margin: 0;
+  font: 11.5px var(--font-mono);
+  word-break: break-word;
+}
+
+.kv dd.link { color: var(--live); cursor: pointer; }
+
+.msg { margin-bottom: 18px; }
+
+.msg-role {
+  font: 9.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+.msg-body {
+  font: 12.5px/1.62 var(--font-ui);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Tool calls read as small objects of their own: a verb on a raised
+ * card, the object beside it, both on one line. Wrapping, never
+ * scrolling sideways, and the full text stays in the title. */
+.calls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.call {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 7px 4px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ink) 13%, transparent);
+  background: var(--raised);
+  font: 10px var(--font-mono);
+}
+
+.call-name { color: var(--ink); font-weight: 500; }
+
+.call-args {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* The archive keeps a call and its output as one pair, so the drawer
+ * shows them as one card: the verb, its arguments, a peek at what came
+ * back, and how long it took. Closed by default -- a turn with six
+ * calls should still read as a list, not a wall. */
+.tools { margin-top: 14px; }
+
+.tool {
+  margin-top: 5px;
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  border-radius: 7px;
+  background: var(--raised);
+}
+
+.tool > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 9px;
+  cursor: pointer;
+  list-style: none;
+  font: 10px var(--font-mono);
+}
+
+.tool > summary::-webkit-details-marker { display: none; }
+
+.tool > summary::before {
+  content: "+";
+  transform: translateY(-1px);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.tool[open] > summary::before { content: "−"; }
+
+.tool-name { color: var(--ink); font-weight: 500; white-space: nowrap; }
+
+.tool-args,
+.tool-peek {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.tool-peek { flex: 1 1 auto; }
+
+.tool-meta { margin-left: auto; white-space: nowrap; color: var(--muted); }
+
+.tool.bad .tool-name,
+.tool.bad .tool-meta { color: var(--error); }
+
+/* Opened, the full output says what the peek said, only all of it. */
+.tool[open] .tool-peek { display: none; }
+
+.tool-out {
+  margin: 0;
+  padding: 7px 9px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  font: 10px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+  max-height: 220px;
+  overflow: auto;
+}
+
+pre.raw {
+  margin: 0;
+  font: 11px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}

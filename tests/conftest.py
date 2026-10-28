@@ -1,29 +1,39 @@
+"""Pytest fixtures for the nan test suite."""
+
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_PARENT = PROJECT_ROOT.parent
-
-# Belt-and-suspenders: make the project parent importable when pytest
-# is launched from elsewhere. `nan_itself` itself resolves through the
-# editable install, not through this entry (src layout).
-if str(PROJECT_PARENT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_PARENT))
-
 
 @pytest.fixture(autouse=True)
-def _isolated_persona(tmp_path, monkeypatch):
+def _restore_settings() -> Iterator[None]:
     """
-    Redirect the Agent's persona path to a per-test temp file, so no
-    test reads or writes the repository's workspace/persona.md.
+    Snapshot the process-wide settings and restore them after each
+    test: components read the live object, so a test that retunes
+    it must not leak into the next one.
     """
-    from nan_itself.utils import paths
+    from nan.config import settings
 
-    path = tmp_path / "persona.md"
-    path.write_text("persona", encoding="utf-8")
-    monkeypatch.setattr(paths, "persona_path", lambda: path)
-    return path
+    snapshot = {
+        name: getattr(settings, name).model_copy(deep=True) for name in type(settings).model_fields
+    }
+
+    yield
+
+    for name, value in snapshot.items():
+        setattr(settings, name, value)
+
+
+@pytest.fixture
+def no_sink() -> Any:
+    """Ensure no event bus is attached (the default state)."""
+    from nan.events import sink
+
+    sink.reset()
+
+    yield sink
+
+    sink.reset()

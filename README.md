@@ -11,139 +11,98 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml/badge.svg)](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml)
 
-A general-purpose, local-first autonomous agent framework. NAN-itself runs an
-agent loop on your own machine, wiring an LLM to hot-reloadable tools (MCP
-servers and in-process Python providers), ambient perception modules,
-skills, and an HTTP gateway with a web UI.
+**NAN is a local-first, self-extending agent.**
+
+It runs on your machine and can connect to a local model or a frontier API.
+During operation, it can acquire new capabilities on demand: install a CLI into its sandbox, write a skill file, connect a service.
+Capabilities are files, and NAN uses capabilities through the shell.
 
 > **NAN-itself is in early development.** Interfaces may change without notice.
 
-## Documentation
+## Quick start
 
-The full documentation index is in [docs/README.md](docs/README.md); it is
-organized so you can go straight to the page that matches what you need.
+> **Windows users**: install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+> and run NAN inside it. NAN is not natively compatible with Windows:
+> it executes the agent's shell commands inside an OS-level sandbox
+> (sandbox-exec on macOS, bubblewrap on Linux), and Windows has no
+> equivalent process-isolation mechanism; the rest of the runtime
+> (bash boot scripts, POSIX paths, the shell-first tooling) builds
+> on that same Unix foundation. Inside WSL2 everything works as on
+> Linux.
+
+    uv sync
+
+Copy the config template -- the resulting `config/nan.yaml` is
+git-ignored because it holds your key -- then fill in the active model
+(the only config source; any OpenAI-compatible or Anthropic endpoint
+works):
+
+    cp config/nan.yaml.example config/nan.yaml
+
+    llm:
+      provider: openai
+      api_key: ""
+      model: ""
+
+Build the web UI (from the repo root):
+
+    cd frontend && npm install && npm run build && cd ..
+
+Run:
+
+    uv run nan
+
+The web UI comes up on `http://127.0.0.1:8765` once
+`frontend/dist/index.html` exists; without it the gateway serves
+only `/ws` and `/surfaces`. Talk to the root agent; it can spawn
+subagents, run shell commands in its sandboxed workspace, and hold
+conversations across turns.
+
+## How it works
+
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="NAN-itself architecture: one agent core, spawned subagents, injection services, gateway and sandboxed shell" width="840">
+</p>
+
+- **One agent = one asyncio task.** Turns run continuously,
+  paced by configuration; messages queue at turn boundaries.
+- **Handles.** A spawned child is reached through a handle:
+  send messages in, kill it. Handles are held by spawners and
+  not transferable, so when an agent dies everything it holds
+  dies with it.
+- **Injection services.** Prompt contributions come from
+  independent local processes over a small HTTP protocol
+- **Shell-first.** Tools and skills are plain files; the agent
+  reaches them with shell commands inside the sandbox.
+- **The turn is the record.** Every turn keeps what it drained,
+  collected, observed and replied; rendered history freezes and
+  is add-only, keeping the prompt prefix cache-friendly.
+
+## Documentation
 
 | Document | Contents |
 |---|---|
-| [Get started](docs/for-users/get-started.md) | Quick start: install, configure, start, converse |
-| [Configuration](docs/for-users/configuration.md) | core `settings.yaml` + per-plugin `config.yaml` reference |
-| [Add a tool](docs/for-plugin-authors/add-a-tool.md) | Create an MCP or local Python tool provider |
-| [Add a module](docs/for-plugin-authors/add-a-module.md) | Create an ambient or reactive module |
-| [Add a skill](docs/for-plugin-authors/add-a-skill.md) | Create a skill package |
-| [Tools](docs/for-plugin-authors/tools.md) | Tool subsystem reference: provider kinds, reload, verbs |
-| [Modules](docs/for-plugin-authors/modules.md) | Module subsystem reference: surface, lifecycle, DataSpace, channel downlink |
-| [Skills](docs/for-plugin-authors/skills.md) | Skill subsystem reference: format, discovery, resources |
-| [Develop](docs/for-contributors/develop.md) | Setup, tests, conventions, pull requests |
-| [Core principles](docs/for-contributors/principles.md) | The load-bearing principles behind every design decision |
-| [Architecture](docs/for-contributors/architecture.md) | How the system is shaped, and why |
+| [Get started](docs/for-users/get-started.md) | Install, configure, run |
+| [Configuration](docs/for-users/configuration.md) | Every key in `config/nan.yaml` |
+| [Security model](SECURITY.md) | Trust model, entry guard, sandbox |
+| [Injection services](docs/for-service-authors/injection-service.md) | Write a prompt-contributor service |
+| [Architecture](docs/for-contributors/architecture.md) | How the core is built |
+| [Principles](docs/for-contributors/principles.md) | The design rules |
+| [Frontend protocol](docs/for-contributors/frontend-protocol.md) | The event stream contract |
+| [Developing](docs/for-contributors/develop.md) | Test, lint, type-check |
 
-## Features
+## Repository layout
 
-- **Turn-based agent core** — every round is captured in a single
-  structured `Turn` record (history snapshot + the round's reply, calls
-  and results), so any round can be restored or inspected exactly as the
-  model saw it.
-- **Hot-reloadable tool providers** — two interchangeable kinds, reloaded
-  live from source with zero restarts:
-  - **MCP providers**: one YAML file = one stdio MCP server.
-  - **Local providers**: one folder = one in-process tool class.
-- **Parallel builtin + workspace sources** — builtin and workspace tool
-  directories are scanned with identical hot-reload semantics; deleting a
-  source disables its provider.
-- **Ambient perception modules** — audio, vision (photometry → flow →
-  faces → YOLO → OCR → VLM captioning), inbox, network and system modules
-  run as background daemons and contribute ambient context every turn.
-- **Module channels (reactive modules)** — modules can declare downlink
-  channels the model writes to through
-  `list_channels` / `show_channels` / `invoke_channels`, enabling
-  perceive → decide → act loops that run *inside* a module, at module
-  frequency, with the LLM staying out of the hot path.
-- **Skills** — hot-reloadable skill packages following the same
-  builtin/workspace split.
-- **Bounded by design** — every tool call is timeout-bounded, the only
-  inbound listener is the gateway bound to `127.0.0.1`, and all repo paths
-  resolve through a single path-anchoring module.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U[User] --> G[Gateway<br/>FastAPI on 127.0.0.1:8765]
-    G <--> C[Agent core<br/>turn loop + snapshot history]
-    C <--> T[Tool runtime<br/>hot-reload providers]
-    T --> MCP[MCP servers<br/>stdio subprocesses]
-    T --> LP[Local Python tools<br/>in-process]
-    C <--> SK[Skills<br/>hot-reload]
-    C <--> MD[Modules<br/>audio / voice / vision / network / system]
-    C -. "channels: list / show / invoke" .-> MD
-    MD -. "ask() ambient + events" .-> C
-```
-
-See [docs/for-contributors/architecture.md](docs/for-contributors/architecture.md) for the
-turn loop, module channels, and hot reload explained in full.
-
-## Quick start
-
-Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
-
-```bash
-git clone https://github.com/DarkSpaceY/NAN-itself.git
-cd NAN-itself
-uv sync --all-extras
-
-# Point the LLM settings at your provider, then start the agent:
-# config/settings.yaml -> llm.api_key / llm.base_url / llm.model
-uv run nan-itself
-```
-
-The gateway listens on `http://127.0.0.1:8765` by default; the web UI is
-served from the same port. On first run the perception modules download
-their model weights into each module folder's `data/` (gitignored). A
-module whose weights are missing or fail to load crashes loudly at
-start, shows the error, and keeps retrying with backoff — it revives
-automatically once the weights land. Nothing runs silently at half
-capacity.
-
-## Development
-
-```bash
-uv sync --all-extras # framework + dev group + the builtin plugins' deps
-uv run pytest -q     # full test suite
-```
-
-CI runs the framework/contract suite. Tests for the builtin content —
-the shipped modules and tools that pull in the full local-inference
-stack — live in `tests/builtin/` and are excluded there.
-
-Contributor conventions (path anchoring, one-folder-one-unit, hot-reload
-contracts) are documented in
-[docs/for-contributors/develop.md](docs/for-contributors/develop.md).
-
-## Project layout
-
-```
-NAN-itself/
-├── builtin/              # Shipped sources (hot-reloadable)
-│   ├── modules/          # Ambient + reactive modules, one folder each
-│   │                     # (audio, voice, vision, ...; data/ holds weights + state)
-│   ├── skills/           # Built-in skills
-│   └── tools/
-│       ├── mcps/         # MCP server configs (one YAML = one provider)
-│       └── local/        # Local tool providers (one folder = one provider)
-├── workspace/            # User-editable overrides (same layout as builtin/)
-├── config/               # settings.yaml
-├── backend/nan_itself/   # Framework source
-│   ├── agent/            # Core agent loop (turns, engine, verbs)
-│   ├── tools/            # Provider runtime (MCP + local backends, hot reload)
-│   ├── modules/          # Module machinery (Facade, channels, persistence)
-│   ├── skills/           # Skill machinery
-│   ├── gateway.py        # HTTP gateway
-│   └── utils/            # paths, hotload (shared detection/loading), backoff
-├── frontend/             # Demo web UI
-├── docs/                 # Documentation
-└── tests/                # Pytest suite
-```
+    nan/          the core package (the only runtime code)
+    builtin/      user-owned resources the agent reads but never
+                  writes: skills, services/, autostart.sh
+    config/       nan.yaml -- the single configuration source
+    frontend/     the gateway's web UI (built to frontend/dist)
+    workspace/    the agents' writable territory (services live in
+                  workspace/services/, one uv project each)
+    tests/        pytest suite
+    docs/         this documentation
 
 ## License
 
-[Apache-2.0](LICENSE)
+Apache-2.0. See [LICENSE](LICENSE).

@@ -5,31 +5,90 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only token: no job here writes to the repo.
+permissions:
+  contents: read
+
+# A newer push to the same ref makes the older run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
 jobs:
-  lint-python:
+  # Python core: style, types, tests. uv is the only tool manager,
+  # so every step goes through the same locked environment.
+  python:
+    name: python
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
 
+      # --locked fails when pyproject and uv.lock disagree, which is
+      # exactly the drift that bites later.
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --locked
+
+      # config/nan.yaml is git-ignored (it holds the API key); the
+      # loader needs a file, so CI starts from the template.
+      - name: Prepare local config
+        run: cp config/nan.yaml.example config/nan.yaml
 
       - name: Ruff lint
-        run: uv run ruff check backend builtin tests
+        run: uv run --no-sync ruff check .
 
       - name: Ruff format check
-        run: uv run ruff format --check backend builtin tests
+        run: uv run --no-sync ruff format --check .
 
-      - name: Type check (mypy)
-        run: uv run mypy
+      - name: Type check
+        run: uv run --no-sync mypy
 
-  lint-frontend:
+      - name: Tests
+        run: uv run --no-sync pytest -q
+
+      # Each service is its own uv project with its own tests.
+      - name: Service tests
+        run: |
+          (cd workspace/services/system && uv run --frozen pytest -q)
+          (cd workspace/services/network && uv run --frozen pytest -q)
+          (cd workspace/services/mcp && uv run --frozen pytest -q)
+          (cd builtin/services/record && uv run --frozen pytest -q)
+          (cd builtin/services/vision && uv run --frozen pytest -q)
+
+  # The distribution has to build: pyproject is the source of truth for
+  # the wheel layout, and the console script ships with it.
+  package:
+    name: package
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+  # Desktop: the kernel and surfaces are plain React, so the checks are
+  # the compiler, the tests, and a production build.
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -39,41 +98,18 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
-        run: npm run lint
-
       - name: Type check
         run: npm run check
 
-      - name: Frontend tests
+      - name: Tests
         run: npm run test
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-
-      # `uv sync` installs the framework alone: the builtin plugins'
-      # dependencies live in the `perception` extra, which CI does not
-      # install. Their tests live in tests/builtin/ and are excluded
-      # from the run below.
-      - name: Install dependencies
-        run: uv sync
-
-      - name: Run tests
-        run: |
-          uv run pytest -q \
-            --ignore=tests/builtin \
-            --deselect "tests/test_paths_anchoring.py::test_builtin_modules_anchor_from_foreign_cwd"
+      - name: Build
+        run: npm run build

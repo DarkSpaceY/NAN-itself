@@ -1,801 +1,835 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@import 'tw-shimmer';
-
-@custom-variant dark (&:is(.dark *));
-
-/* ------------------------------------------------------------------
-   令牌
-   中性灰微带冷调（hue 260，chroma ≤ 0.008），只多一个语义色 --live：
-   「正在发生」。它只出现在进行中的呼吸点上——整个界面唯一的颜色。
-   ------------------------------------------------------------------ */
+/* Visuals: flat, monochrome, one accent color. Hierarchy comes from
+ * surfaces and hairlines, not shadows.
+ *
+ * Every size here is a real CSS pixel; the pane hands each surface the
+ * width and height it actually has.
+ */
 
 :root {
-  --background: oklch(0.994 0.002 260);
-  --foreground: oklch(0.2 0.006 260);
-  --card: oklch(0.994 0.002 260);
-  --card-foreground: oklch(0.2 0.006 260);
-  --popover: oklch(0.994 0.002 260);
-  --popover-foreground: oklch(0.2 0.006 260);
-  --primary: oklch(0.22 0.006 260);
-  --primary-foreground: oklch(0.985 0.002 260);
-  --secondary: oklch(0.966 0.003 260);
-  --secondary-foreground: oklch(0.22 0.006 260);
-  --muted: oklch(0.966 0.003 260);
-  --muted-foreground: oklch(0.54 0.008 260);
-  --accent: oklch(0.966 0.003 260);
-  --accent-foreground: oklch(0.22 0.006 260);
-  --destructive: oklch(0.577 0.22 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.93 0.004 260);
-  --input: oklch(0.93 0.004 260);
-  --ring: oklch(0.708 0.01 260);
-  --radius: 0.625rem;
+  --canvas: #f7f7f5;
+  --surface: #ffffff;
+  --raised: #f0f0ee;
+  --border: #e3e3e0;
+  --ink: #0d0d0d;
+  --muted: #6e6e6e;
+  --live: #10a37f;
+  --warn: #b45309;
+  --error: #d93025;
 
-  /* 正在发生 */
-  --live: oklch(0.6 0.14 250);
-
-  /* 时间线栅格：点所在的列宽 / 点与文字的间距 */
-  --nan-gutter: 1rem;
-  --nan-gap: 0.5rem;
+  --font-ui:
+    ui-sans-serif, -apple-system, "SF Pro Text", "Helvetica Neue", Inter,
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
 }
 
-.dark {
-  --background: oklch(0.158 0.004 260);
-  --foreground: oklch(0.975 0.002 260);
-  --card: oklch(0.2 0.004 260);
-  --card-foreground: oklch(0.975 0.002 260);
-  --popover: oklch(0.2 0.004 260);
-  --popover-foreground: oklch(0.975 0.002 260);
-  --primary: oklch(0.92 0.003 260);
-  --primary-foreground: oklch(0.2 0.006 260);
-  --secondary: oklch(0.262 0.005 260);
-  --secondary-foreground: oklch(0.975 0.002 260);
-  --muted: oklch(0.262 0.005 260);
-  --muted-foreground: oklch(0.7 0.008 260);
-  --accent: oklch(0.262 0.005 260);
-  --accent-foreground: oklch(0.975 0.002 260);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.556 0.01 260);
-
-  --live: oklch(0.76 0.12 250);
+/* Dark theme layers spaced evenly by perceptual lightness (L*): 3 / 9 / 18 / 27.
+   The eye discriminates poorly at low luminance, so the sRGB steps must
+   be wider than in the light theme. */
+[data-theme="dark"] {
+  --canvas: #0e0e0e;
+  --surface: #1a1a1a;
+  --raised: #2b2b2b;
+  --border: #3f3f3f;
+  --ink: #ececec;
+  --muted: #a3a3a3;
+  --live: #19c37d;
+  --warn: #f5a524;
+  --error: #f97066;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-live: var(--live);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  @keyframes collapsible-down {
-    from {
-      height: 0;
-    }
-    to {
-      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
-    }
-  }
-  @keyframes collapsible-up {
-    from {
-      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
-    }
-    to {
-      height: 0;
-    }
-  }
+* {
+  box-sizing: border-box;
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  html {
-    font-family:
-      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
-    /* 中英混排自动留白（支持的浏览器生效，其余忽略） */
-    text-autospace: normal;
-  }
-  body {
-    @apply bg-background text-foreground;
-    line-height: 1.7;
-  }
-  code,
-  pre,
-  kbd {
-    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-variant-ligatures: contextual;
-  }
-  ::selection {
-    background: color-mix(in oklch, var(--live) 24%, transparent);
-  }
+html,
+body,
+#root {
+  height: 100%;
 }
 
-/* ------------------------------------------------------------------
-   markdown 排版（.aui-md）——Agent 的「言语」。
-   留白优先：层级靠灰度与间距而非边框；表格走横线风格。
-   ------------------------------------------------------------------ */
-
-.aui-md {
-  font-size: 0.9375rem;
-  line-height: 1.8;
-  color: color-mix(in oklch, var(--foreground) 90%, transparent);
-}
-
-.aui-md > :first-child {
-  margin-top: 0;
-}
-.aui-md > :last-child {
-  margin-bottom: 0;
-}
-
-.aui-md p {
-  margin-block: 0.75rem;
-  text-wrap: pretty;
-}
-
-.aui-md strong {
-  font-weight: 600;
-  color: var(--foreground);
-}
-
-.aui-md a {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in oklch, var(--foreground) 28%, transparent);
-  text-underline-offset: 0.2em;
-  transition: text-decoration-color 150ms ease;
-}
-.aui-md a:hover {
-  text-decoration-color: var(--foreground);
-}
-
-.aui-md h1,
-.aui-md h2,
-.aui-md h3,
-.aui-md h4 {
-  margin-block: 1.5rem 0.75rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
-  color: var(--foreground);
-  text-wrap: balance;
-}
-.aui-md h1 {
-  font-size: 1.25rem;
-}
-.aui-md h2 {
-  font-size: 1.125rem;
-}
-.aui-md h3 {
-  font-size: 1rem;
-}
-.aui-md h4 {
-  font-size: 0.9375rem;
-  color: color-mix(in oklch, var(--foreground) 80%, transparent);
-}
-
-.aui-md hr {
-  margin-block: 1.5rem;
-  border: none;
-  border-top: 1px solid var(--border);
-}
-
-/* 行内代码：与正文明确区分，但不抢戏 */
-.aui-md :not(pre) > code {
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
-  border-radius: 5px;
-  padding: 0.12em 0.38em;
-  font-size: 0.85em;
-  color: color-mix(in oklch, var(--foreground) 92%, transparent);
-}
-
-/* 代码块：与 CodeHeader（语言条）连为一体——顶边直角无上边距，
-   只留自己的侧/底边框和圆角 */
-.aui-md pre {
-  margin-block: 0 1.25rem;
-  padding: 0.875rem 1rem;
-  border-radius: 0 0 calc(var(--radius) + 2px) calc(var(--radius) + 2px);
-  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  border-top: none;
-  background: color-mix(in oklch, var(--muted) 40%, var(--background));
-  font-size: 0.8125rem;
-  line-height: 1.6;
-  overflow-x: auto;
-}
-.aui-md pre code {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: inherit;
-}
-
-/* 表格：横线为主；separate + overflow hidden 让表头底色被整体圆角裁掉 */
-.aui-md table {
-  width: 100%;
-  margin-block: 1.25rem;
-  border-collapse: separate;
-  border-spacing: 0;
-  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  border-radius: var(--radius);
-  overflow: hidden;
-  font-size: 0.875rem;
-}
-.aui-md thead {
-  background: color-mix(in oklch, var(--muted) 45%, transparent);
-}
-.aui-md th,
-.aui-md td {
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  padding: 0.5rem 0.875rem;
-  text-align: left;
-  vertical-align: top;
-}
-.aui-md tbody tr:last-child td {
-  border-bottom: none;
-}
-.aui-md th {
-  font-weight: 600;
-  color: var(--foreground);
-}
-.aui-md tbody tr:hover {
-  background: color-mix(in oklch, var(--muted) 25%, transparent);
-}
-
-/* 列表 */
-.aui-md ul,
-.aui-md ol {
-  margin-block: 0.75rem;
-  padding-left: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-.aui-md ul {
-  list-style: disc;
-}
-.aui-md ol {
-  list-style: decimal;
-}
-.aui-md li::marker {
-  color: color-mix(in oklch, var(--muted-foreground) 80%, transparent);
-}
-.aui-md li > ul,
-.aui-md li > ol {
-  margin-block: 0.375rem;
-}
-.aui-md blockquote {
-  margin-block: 1rem;
-  border-left: 2px solid var(--border);
-  padding-left: 1rem;
-  color: var(--muted-foreground);
-}
-
-/* ------------------------------------------------------------------
-   语法高亮（rehype-highlight → hljs class）
-   自绘 token 色：跟随主题变量，浅色/深色各一套。
-   ------------------------------------------------------------------ */
-
-.aui-md .hljs-comment,
-.aui-md .hljs-quote {
-  color: color-mix(in oklch, var(--muted-foreground) 85%, transparent);
-  font-style: italic;
-}
-.aui-md .hljs-keyword,
-.aui-md .hljs-selector-tag,
-.aui-md .hljs-doctag,
-.aui-md .hljs-meta {
-  color: oklch(0.58 0.19 285);
-}
-.aui-md .hljs-string,
-.aui-md .hljs-regexp,
-.aui-md .hljs-addition {
-  color: oklch(0.55 0.14 150);
-}
-.aui-md .hljs-number,
-.aui-md .hljs-literal,
-.aui-md .hljs-built_in {
-  color: oklch(0.6 0.15 55);
-}
-.aui-md .hljs-title,
-.aui-md .hljs-function,
-.aui-md .hljs-name,
-.aui-md .hljs-section {
-  color: oklch(0.52 0.16 250);
-}
-.aui-md .hljs-attr,
-.aui-md .hljs-attribute,
-.aui-md .hljs-variable,
-.aui-md .hljs-template-variable,
-.aui-md .hljs-type {
-  color: oklch(0.55 0.15 25);
-}
-.aui-md .hljs-deletion {
-  color: oklch(0.55 0.2 25);
-}
-
-.dark .aui-md .hljs-keyword,
-.dark .aui-md .hljs-selector-tag,
-.dark .aui-md .hljs-doctag,
-.dark .aui-md .hljs-meta {
-  color: oklch(0.75 0.14 290);
-}
-.dark .aui-md .hljs-string,
-.dark .aui-md .hljs-regexp,
-.dark .aui-md .hljs-addition {
-  color: oklch(0.78 0.13 150);
-}
-.dark .aui-md .hljs-number,
-.dark .aui-md .hljs-literal,
-.dark .aui-md .hljs-built_in {
-  color: oklch(0.8 0.13 70);
-}
-.dark .aui-md .hljs-title,
-.dark .aui-md .hljs-function,
-.dark .aui-md .hljs-name,
-.dark .aui-md .hljs-section {
-  color: oklch(0.78 0.12 250);
-}
-.dark .aui-md .hljs-attr,
-.dark .aui-md .hljs-attribute,
-.dark .aui-md .hljs-variable,
-.dark .aui-md .hljs-template-variable,
-.dark .aui-md .hljs-type {
-  color: oklch(0.78 0.12 30);
-}
-.dark .aui-md .hljs-deletion {
-  color: oklch(0.72 0.18 25);
-}
-
-/* ------------------------------------------------------------------
-   活动时间线（RecordTool）
-
-   一条脊线 + 脊线上的点。无芯片、无容器底色、无图标。
-     ○ ring     感知    ● dot   行动    · pip   轻量    ◆ diamond  收尾
-   「现在」最亮：进行中的行标题全亮、点带呼吸光晕；已完成的行退后。
-
-   脊线画在容器上（.nan-activity / 独立出现的 .nan-activity-group），
-   点用 3px 背景色外环把穿过它的脊线遮住。
-   ------------------------------------------------------------------ */
-
-.nan-activity {
-  display: flex;
-  flex-direction: column;
-  margin-block: 0.375rem;
-}
-
-.nan-activity,
-.nan-activity-group {
-  position: relative;
-}
-
-.nan-activity::before,
-.nan-activity-group::before {
-  content: '';
-  position: absolute;
-  left: calc(var(--nan-gutter) / 2 - 0.5px);
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--border) 0.875rem,
-    var(--border) calc(100% - 0.875rem),
-    transparent
-  );
-  pointer-events: none;
-}
-
-/* 脊线在 DOM 里最先出现；子元素显式 relative，才能压在它上面 */
-.nan-activity > *,
-.nan-activity-group > * {
-  position: relative;
-}
-
-/* 只有一行时没有「串联」可言：不画脊线 */
-.nan-activity:has(> :only-child:not(.nan-activity-group))::before {
-  display: none;
-}
-/* 折叠组收起时只是一行，同样不画脊线 */
-.nan-activity:has(> .nan-activity-group[data-open='false']:only-child)::before,
-.nan-activity-group[data-open='false']::before {
-  display: none;
-}
-/* 动作组落在 .nan-activity 里时，共用外层脊线 */
-.nan-activity .nan-activity-group::before {
-  display: none;
-}
-
-/* ── 行 ─────────────────────────────────────────────────────────── */
-
-.nan-row {
-  display: flex;
-  align-items: center;
-  gap: var(--nan-gap);
-  width: 100%;
-  min-height: 1.75rem;
+body {
   margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0.375rem;
-  background: none;
-  font: inherit;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: var(--muted-foreground);
-  text-align: start;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
 
-button.nan-row {
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
   cursor: pointer;
 }
-button.nan-row:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--ring) 80%, transparent);
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ghost {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.ghost:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+/* -- interaction feedback -------------------------------------------- */
+
+:where(button, summary):focus-visible {
+  outline: 2px solid var(--live);
   outline-offset: 2px;
+  border-radius: 6px;
 }
 
-.nan-row[data-weight='sense'],
-.nan-row[data-weight='light'] {
-  min-height: 1.5rem;
-}
-.nan-row[data-weight='sense'] {
-  font-size: 0.78125rem;
-}
-
-.nan-row-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* 展开后允许完整阅读被截断的标题 */
-.nan-row[aria-expanded='true'] .nan-row-label {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.nan-verb {
-  margin-right: 0.5em;
-  color: var(--muted-foreground);
-  letter-spacing: 0.01em;
-}
-
-.nan-title {
-  font-weight: 500;
-  color: color-mix(in oklch, var(--foreground) 78%, var(--background));
-  transition: color 150ms ease;
-}
-.nan-row[data-weight='sense'] .nan-title {
-  color: color-mix(in oklch, var(--foreground) 62%, var(--background));
-}
-.nan-row[data-weight='light'] .nan-title {
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.nan-row[data-state='running'] .nan-title,
-button.nan-row:hover .nan-title {
-  color: var(--foreground);
-}
-
-/* 内联字段（感知行 / 组摘要）：标签灰、数值深 */
-.nan-field {
-  margin-left: 0.75em;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.nan-field b {
-  margin-left: 0.3em;
-  font-weight: 500;
-  color: color-mix(in oklch, var(--foreground) 85%, var(--background));
-}
-.nan-field[data-tone='error'] {
-  color: var(--destructive);
-}
-
-.nan-row-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex: none;
-  margin-left: auto;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  color: color-mix(in oklch, var(--muted-foreground) 75%, transparent);
-}
-
-/* 展开提示：悬停/聚焦/展开时才出现；触屏无悬停，常驻淡显 */
-.nan-chevron {
-  width: 0.875rem;
-  height: 0.875rem;
-  opacity: 0;
+.chip,
+.ghost,
+.crumb-btn,
+.pane-close {
   transition:
-    opacity 150ms ease,
-    transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+    background-color 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
 }
-.nan-chevron[data-open='true'] {
-  transform: rotate(90deg);
-}
-.nan-row:hover .nan-chevron,
-.nan-row:focus-visible .nan-chevron,
-.nan-chevron[data-open='true'] {
+
+.chip:active,
+.ghost:active,
+.crumb-btn:active,
+.pane-close:active {
   opacity: 0.7;
 }
-@media (hover: none) {
-  .nan-chevron {
-    opacity: 0.45;
-  }
+
+/* -- layout ----------------------------------------------------------- */
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-/* ── 点 ─────────────────────────────────────────────────────────── */
+.stage {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
 
-.nan-dot {
-  --d: 0.4375rem;
-  --c: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
-  position: relative;
+.content {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rail {
+  width: 48px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+.chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
+  color: var(--muted);
+  position: relative;
   flex: none;
-  width: var(--nan-gutter);
-  height: var(--nan-gutter);
 }
 
-.nan-dot::after {
-  content: '';
-  width: var(--d);
-  height: var(--d);
-  border-radius: 50%;
-  background: var(--c);
-  box-shadow: 0 0 0 3px var(--background);
-  transition:
-    background-color 200ms ease,
-    box-shadow 200ms ease;
+.chip:hover {
+  background: var(--raised);
+  color: var(--ink);
 }
 
-.nan-dot[data-shape='ring']::after {
-  background: var(--background);
-  box-shadow:
-    inset 0 0 0 1.5px var(--c),
-    0 0 0 3px var(--background);
-}
-.nan-dot[data-shape='pip'] {
-  --d: 0.25rem;
-  --c: color-mix(in oklch, var(--muted-foreground) 45%, var(--background));
-}
-.nan-dot[data-shape='diamond'] {
-  --d: 0.375rem;
-}
-.nan-dot[data-shape='diamond']::after {
-  border-radius: 1px;
-  transform: rotate(45deg);
+.chip[data-role="active"] {
+  background: var(--raised);
+  color: var(--ink);
 }
 
-/* 状态（须在形状规则之后，同优先级后者胜） */
-.nan-dot[data-state='running'] {
-  --c: var(--live);
-}
-.nan-dot[data-state='failed'] {
-  --c: var(--destructive);
+.chip[data-role="idle"] {
+  opacity: 0.72;
 }
 
-/* 进行中：呼吸光晕。::before 绝对定位在 ::after 之下 */
-.nan-dot[data-state='running']::before {
-  content: '';
+.chip-badge {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: var(--d);
-  height: var(--d);
-  margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2);
-  border-radius: 50%;
+  top: 2px;
+  right: 2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
   background: var(--live);
-  animation: nan-breathe 2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  color: var(--canvas);
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
 }
 
-@keyframes nan-breathe {
-  0% {
-    transform: scale(1);
-    opacity: 0.45;
-  }
-  100% {
-    transform: scale(3);
+.monogram {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.asset-icon {
+  object-fit: contain;
+}
+
+/* -- window ------------------------------------------------------------ */
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.pane-head {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.pane[data-status="working"] .pane-head {
+  border-bottom-color: var(--live);
+}
+
+.pane-title {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.5;
+  flex: none;
+}
+
+.dot[data-status="working"] {
+  background: var(--live);
+  opacity: 1;
+}
+
+.dot[data-status="paused"] {
+  background: var(--warn);
+  opacity: 1;
+}
+
+/* Exit is end of lifecycle, not an error: hollow ring; red is reserved for real failures */
+.dot[data-status="exited"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--muted);
+  opacity: 0.8;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+  min-width: 0;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+}
+
+.crumb-sep {
+  margin: 0 3px;
+  opacity: 0.5;
+}
+
+.crumb-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.crumb-btn:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.crumb-btn[data-current="true"] {
+  color: var(--ink);
+}
+
+.pane-close {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  border-radius: 4px;
+  color: var(--muted);
+  flex: none;
+}
+
+.pane-close:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.workspace-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace-empty span {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* -- agent timeline ---------------------------------------------------- */
+
+.agent-surface {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.service-surface {
+  height: 100%;
+  background: var(--surface);
+}
+
+.service-surface iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface);
+}
+
+.stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 48px 72px;
+}
+
+.stream-empty {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/*
+ * No round boundary: the timeline is one continuous flow, and every
+ * block is separated by the same single gap.
+ */
+.round {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.round-error {
+  margin: 0 0 12px;
+  color: var(--error);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.round-error .mark {
+  opacity: 0.7;
+}
+
+.text-part {
+  line-height: 1.62;
+}
+
+.text-part.streaming > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 3px;
+  background: var(--live);
+  vertical-align: -2px;
+  animation: caret 1s steps(2) infinite;
+}
+
+@keyframes caret {
+  50% {
     opacity: 0;
   }
 }
 
-/* 暂停已被后端确认：任何残留的「进行中」都不再发光，也不再是 live 色 */
-[data-paused='true'] .nan-dot[data-state='running'] {
-  --c: color-mix(in oklch, var(--muted-foreground) 70%, var(--background));
+.text-part p {
+  margin: 0 0 12px;
 }
-[data-paused='true'] .nan-dot[data-state='running']::before {
+
+.text-part ul,
+.text-part ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.text-part li {
+  margin: 2px 0;
+}
+
+.text-part h1,
+.text-part h2,
+.text-part h3 {
+  font-size: 15px;
+  margin: 16px 0 6px;
+}
+
+.text-part a {
+  color: var(--live);
+}
+
+/* Long runs (URLs, hashes, unbroken text) must be breakable, otherwise they overflow the container */
+.text-part,
+.input-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.text-part code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--raised);
+  padding: 1px 4px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.text-part pre {
+  background: var(--raised);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.text-part pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.text-part blockquote {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+
+.text-part table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.text-part th,
+.text-part td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+/* User message: a right-aligned block that hugs its content; no border, no label */
+
+.input-part {
+  width: fit-content;
+  max-width: 72%;
+  margin: 0 0 12px auto;
+  padding: 8px 12px;
+  background: var(--raised);
+  border-radius: 10px;
+}
+
+/* Send queue above the composer: messages sent while the round is still running wait here and join the stream when the round ends */
+.composer-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.queued-msg {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.queued-mark {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.queued-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.input-text {
+  white-space: pre-wrap;
+}
+
+/* Verb lines use the same line-style folding as collapsed rounds: no border, full-row hit area, caret indicator */
+
+.verb-part {
+  margin: 0 0 12px;
+}
+
+.verb-part summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -2px -8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.verb-part summary:hover {
+  background: var(--raised);
+}
+
+.verb-part summary:active {
+  opacity: 0.8;
+}
+
+.verb-part summary::-webkit-details-marker {
   display: none;
 }
 
-/* ── 展开 / 详情 ────────────────────────────────────────────────── */
+.verb-part .caret {
+  display: inline-block;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
 
-/* grid-rows 0fr→1fr；收起时 visibility:hidden 让内容退出 Tab 序与读屏 */
-.nan-collapse {
-  display: grid;
-  grid-template-rows: 0fr;
-  visibility: hidden;
-  transition:
-    grid-template-rows 240ms cubic-bezier(0.32, 0.72, 0, 1),
-    visibility 0s 240ms;
+.verb-part[open] .caret {
+  transform: rotate(90deg);
 }
-.nan-collapse[data-open='true'] {
-  grid-template-rows: 1fr;
-  visibility: visible;
-  transition-delay: 0s;
+
+.verb-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
 }
-.nan-collapse > div {
-  min-height: 0;
+
+.verb-args {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
 }
 
-.nan-detail-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.25rem 0 0.5rem calc(var(--nan-gutter) + var(--nan-gap));
+.verb-state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: lowercase;
 }
-/* 动作组的子行与摘要行共用脊线，不再缩进 */
-.nan-detail-body[data-flush] {
+
+.verb-state[data-kind="running"] {
+  color: var(--live);
+}
+
+.verb-state[data-kind="failed"] {
+  color: var(--error);
+}
+
+.verb-duration {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.verb-body {
+  margin: 0 0 8px 14px;
   padding: 0;
-  gap: 0;
-}
-
-.nan-entry {
-  display: grid;
-  grid-template-columns: 5rem minmax(0, 1fr);
-  column-gap: 0.75rem;
-  align-items: baseline;
-  font-size: 0.75rem;
-  line-height: 1.6;
-}
-.nan-entry-label {
-  color: var(--muted-foreground);
-}
-.nan-entry-value {
-  color: color-mix(in oklch, var(--foreground) 85%, var(--background));
-  overflow-wrap: anywhere;
-}
-.nan-entry[data-tone='error'] .nan-entry-label,
-.nan-entry[data-tone='error'] .nan-entry-value {
-  color: var(--destructive);
-}
-
-/* 长文本：一条左线代替底色盒子；过长则内部滚动 */
-.nan-entry-text {
-  max-height: 16rem;
-  margin: 0.125rem 0;
-  padding: 0.125rem 0 0.125rem 0.75rem;
-  border-left: 2px solid var(--border);
-  overflow: auto;
-  font-size: 0.75rem;
-  line-height: 1.65;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: color-mix(in oklch, var(--foreground) 80%, var(--background));
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+  color: var(--muted);
 }
 
-/* 失败信息：收起时也直接可见，最多两行 */
-.nan-inline-error {
-  padding: 0 0 0.25rem calc(var(--nan-gutter) + var(--nan-gap));
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--destructive);
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+/* Trailing block spacing is left to verb-part itself, so 8 + 12 does not stack into 20 */
+.verb-body:last-child {
+  margin-bottom: 0;
 }
 
-/* ------------------------------------------------------------------
-   step 流的节奏（thread.aui.tsx 的消息容器）
-   一个 assistant 消息 = 一个 step；连续的 step 读起来是一条流，
-   所以 step 之间只留小间距，而用户插话前后留出更大的呼吸。
-   ------------------------------------------------------------------ */
-
-.nan-stream {
-  display: flex;
-  flex-direction: column;
-}
-.nan-stream > * + * {
-  margin-top: 1.25rem;
-}
-.nan-stream > [data-role='assistant'] + [data-role='assistant'] {
-  margin-top: 0.5rem;
+.verb-body.error {
+  color: var(--error);
 }
 
-/* ------------------------------------------------------------------
-   暂停按钮（composer 操作行）
-   running：安静的文字按钮；pending：同款但带转圈；
-   paused：实心——系统停下了，下一步动作在你。
-   ------------------------------------------------------------------ */
+.verb-body.detail {
+  color: var(--ink);
+  opacity: 0.8;
+}
 
-.nan-pause {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  height: 2rem;
-  padding: 0 0.75rem 0 0.625rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  font-size: 0.8125rem;
-  line-height: 1;
-  color: var(--muted-foreground);
+/* Drill-down is a plain text link, sharing the language of the line-style folding */
+
+.drill {
+  display: block;
+  margin: 4px 0 8px 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--live);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
   cursor: pointer;
   transition:
-    color 150ms ease,
-    background-color 150ms ease,
-    border-color 150ms ease;
-}
-.nan-pause:hover {
-  color: var(--foreground);
-  background: color-mix(in oklch, var(--muted) 70%, transparent);
-}
-.nan-pause:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--ring) 80%, transparent);
-  outline-offset: 2px;
-}
-.nan-pause[data-state='pending'] {
-  color: var(--foreground);
-  border-color: var(--border);
-}
-.nan-pause[data-state='paused'] {
-  color: var(--primary-foreground);
-  background: var(--primary);
-}
-.nan-pause[data-state='paused']:hover {
-  background: color-mix(in oklch, var(--primary) 88%, var(--background));
+    color 0.12s ease,
+    text-decoration-color 0.12s ease;
 }
 
-/* ------------------------------------------------------------------
-   减少动效
-   ------------------------------------------------------------------ */
+.drill:hover {
+  text-decoration-color: currentColor;
+}
 
-@media (prefers-reduced-motion: reduce) {
-  .nan-dot[data-state='running']::before {
-    animation: none;
-    opacity: 0.25;
-    transform: scale(1.8);
+/* -- footer ---------------------------------------------------------- */
+
+.foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 16px 4px;
+  border-top: 1px solid var(--border);
+  background: var(--canvas);
+}
+
+.composer {
+  width: 100%;
+  max-width: 1120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 10px 6px;
+}
+
+.composer:focus-within {
+  border-color: var(--muted);
+}
+
+.composer-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  padding: 2px 2px 6px;
+}
+
+.composer-input::placeholder {
+  color: var(--muted);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.composer-bar .spacer {
+  flex: 1;
+}
+
+.composer-bar .target {
+  font-family: var(--font-mono);
+  color: var(--live);
+}
+
+.composer-bar .hint {
+  opacity: 0.7;
+}
+
+.send {
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: 11px;
+}
+
+.send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.statusline {
+  width: 100%;
+  max-width: 1120px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.statusline .sep {
+  opacity: 0.5;
+}
+
+.statusline .paused {
+  color: var(--warn);
+}
+
+.conn {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.5;
+}
+
+.conn[data-conn="connecting"] {
+  background: var(--warn);
+  opacity: 1;
+}
+
+.conn[data-conn="closed"] {
+  background: var(--error);
+  opacity: 1;
+}
+
+.theme-btn {
+  text-transform: lowercase;
+}
+
+/* -- code highlighting (minimal set) --------------------------------- */
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-addition {
+  color: var(--live);
+}
+
+.hljs-number,
+.hljs-literal {
+  color: var(--warn);
+}
+
+.hljs-title,
+.hljs-function .hljs-title {
+  font-weight: 600;
+}
+
+/* -- narrow viewport ------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .stream {
+    padding: 18px 24px 60px;
   }
-  .nan-collapse,
-  .nan-chevron,
-  .nan-title,
-  .nan-pause {
-    transition: none;
-  }
 }
-
-@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
-
-@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

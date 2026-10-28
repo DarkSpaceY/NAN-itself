@@ -1,120 +1,96 @@
 # Get started
 
-This quick start takes you from a fresh clone to a working local agent:
-install the framework, point it at an LLM, start it, and have a first
-conversation.
+## Prerequisites
 
-You need a Unix-like shell with `git`, `uv` and Node.js (`npm`).
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/)
+- An LLM endpoint: any OpenAI-compatible API or the Anthropic API
+  (a local llama.cpp/vLLM server works -- see `llm.base_url` in
+  the configuration reference)
+- macOS or Linux. Windows is supported through
+  [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
+  only: the sandbox (bubblewrap) and the shell-first runtime have
+  no native Windows equivalent. See the note in the README.
 
-## 1. Clone the repository
+## Install
 
-```bash
-git clone https://github.com/DarkSpaceY/NAN-itself.git
-cd NAN-itself
+One-liner (macOS or Linux; installs uv if missing, clones to
+`~/nan`, syncs dependencies, builds the web UI, override the
+location with `NAN_HOME`):
+
+    curl -fsSL https://raw.githubusercontent.com/DarkSpaceY/NAN-itself/main/scripts/install.sh | sh
+
+Or install manually. Sync the python dependencies:
+
+    uv sync
+
+Build the web UI:
+
+    cd frontend && npm install && npm run build
+
+## Configure
+
+All configuration lives in one file: `config/nan.yaml`. It is
+git-ignored (it holds your key), so start from the template:
+
+    cp config/nan.yaml.example config/nan.yaml
+
+The minimum you must fill in is the active model:
+
+    llm:
+      provider: openai          # "openai" | "anthropic"
+      base_url: ""              # empty = provider default endpoint
+      api_key: ""
+      model: ""
+
+The persona file (`nan/persona.md` by default) must exist -- the
+core refuses to start without it. Edit it to define who the agent
+is; it is re-read every turn and it is a core file: the agent
+cannot rewrite it.
+
+## Run
+
+    uv run nan                  # or: uv run python -m nan.app
+
+What starts:
+
+- the agent loop (root agent; event-driven by default, or
+  self-rotating with `agent.autonomous_interval > 0`)
+- the gateway web UI on `http://127.0.0.1:8765` (serving
+  `frontend/dist`; without `frontend/dist/index.html` only `/ws` and
+  `/surfaces` are served, not the UI; the browser opens once the
+  socket is up)
+- the injection registry on `127.0.0.1:8901`
+- the autostart scripts, if enabled and present: `builtin/autostart.sh`
+  (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
+  sandboxed); the core stops what they start when it exits
+
+```mermaid
+flowchart LR
+    subgraph PROC["core process"]
+        ROOT["root agent<br/>(turn loop)"]
+        GW["gateway<br/>:8765"]
+        HUB["injection registry<br/>:8901"]
+        AUTO["autostart scripts"]
+    end
+    BROWSER["browser"] <-->|"HTTP + WebSocket"| GW
+    GW -->|"user input"| ROOT
+    ROOT -->|"events (sink)"| GW
+    SVC["services"] -->|"register / heartbeat"| HUB
+    HUB -->|"turn contributions"| ROOT
+    ROOT -->|"shell"| SBX["sandboxed commands"]
+    AUTO -.->|"launched once at boot"| SVC
+    style PROC fill:transparent,stroke:#2563eb,stroke-width:2px
 ```
 
-## 2. Install the framework
+Open the gateway URL and talk to the agent. Input goes to the
+root agent's inbox; its replies and subagent output stream into
+the UI.
 
-NAN-itself is managed with [uv](https://docs.astral.sh/uv/). `uv sync`
-installs the framework and the dev group; `--all-extras` adds what the
-builtin plugins need — the perception stack behind the audio, voice and
-vision modules:
+## First tools
 
-```bash
-uv sync --all-extras
-```
-
-## 3. Point it at an LLM
-
-NAN-itself talks only to an LLM endpoint you configure — everything else
-runs locally. Open `config/settings.yaml` and set the `llm` block:
-
-```yaml
-llm:
-  provider: openai          # client protocol; openai-compatible endpoints work
-  api_key: xxx              # your key (local servers accept any placeholder)
-  model: qwen3.5:4b-mlx     # the model identifier
-  base_url: http://127.0.0.1:11434/v1
-  timeout: 600
-  max_retries: 2
-```
-
-Two common setups:
-
-- **A local server** (Ollama, LM Studio, vLLM): keep `provider: openai`,
-  set `base_url` to the server's `/v1` endpoint, set `model` to the model
-  you have pulled, and any placeholder `api_key` works.
-- **A hosted OpenAI-compatible provider**: set `base_url` to the
-  provider's endpoint, `api_key` to your real key, and `model` to the
-  model name.
-
-If a field does not match a model you actually have, the first turn will
-fail — check `model` and `base_url` here before moving on.
-
-## 4. Build the web UI
-
-The gateway serves the web UI as static files from `frontend/app/dist`,
-so build it once:
-
-```bash
-cd frontend/app
-npm install
-npm run build
-cd ../..
-```
-
-If Node.js is not available to you, `frontend/app/README.md` describes
-running the UI as a Vite dev server instead.
-
-## 5. Start the agent
-
-```bash
-uv run nan-itself
-```
-
-The process starts the tool providers, the modules and skills, then the
-agent loop and the HTTP gateway. Log lines about providers loading and
-modules starting should appear, and NAN-itself opens your browser at
-`http://127.0.0.1:8765/`. If it does not, open that URL yourself.
-
-On the first run the perception modules (audio, vision, voice) try to
-provision their model weights. A module whose weights are missing comes
-up loudly failed and keeps retrying with backoff; this is expected and
-does not stop the agent. The modules needed for this quick start —
-`system` and `inbox` — need no weights.
-
-## 6. Have your first conversation
-
-In the web UI composer, type a message and send it:
-
-> Hello! Who are you?
-
-The message enters through the gateway and lands in the `inbox` module;
-the agent reads it on its next turn and streams a reply back to the UI.
-The reply appears in the conversation.
-
-## 7. Try ambient context
-
-Now ask something the agent could only answer from ambient perception:
-
-> What time is it for me right now, and which app is in the foreground?
-
-The `system` module samples your machine every few seconds and publishes
-facts — local time, idle time, the foreground app, CPU and memory. At the
-start of every turn the agent asks each running module for its ambient
-context (`ask()`), so the `system` module's facts are part of what the
-model sees. A correct answer here means a module is contributing ambient
-context to the turn, not just echoing your message.
-
-## Next steps
-
-- [Develop NAN-itself](../for-contributors/develop.md) — set up, test and
-  follow the developer conventions.
-- [Add a tool](../for-plugin-authors/add-a-tool.md)
-- [Add a module](../for-plugin-authors/add-a-module.md)
-- [Add a skill](../for-plugin-authors/add-a-skill.md)
-
-For the design behind what you just ran, see
-[../for-contributors/architecture.md](../for-contributors/architecture.md)
-and
-[../for-contributors/principles.md](../for-contributors/principles.md).
+The agent's only verb for reaching the world is `shell`. Tools
+and skills are plain files under `builtin/` (read-only) and
+`workspace/` (agent-writable); the agent invokes them with
+ordinary shell commands inside the execution sandbox. Drop a
+script into `workspace/` and it is immediately usable -- there is
+nothing to register, reload or configure.

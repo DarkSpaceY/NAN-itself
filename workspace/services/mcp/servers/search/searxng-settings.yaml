@@ -1,0 +1,20 @@
+# SearXNG CLI settings for the 'search' MCP server.
+#
+# Injected via SEARXNG_CLI_SETTINGS on every searxng-cli invocation.
+# Only keys that differ from the embedded SearXNG defaults are listed
+# here (use_default_settings merge).
+use_default_settings: true
+
+outgoing:
+  # Upstream engines may be unreachable without a proxy; edit here.
+  # No proxy is assumed: an uncommented one silently breaks search on
+  # machines that do not run that proxy.
+  request_timeout: 10.0
+  max_request_timeout: 20.0
+  # proxies:
+  #   all://:
+  #     - http://127.0.0.1:33210
+
+valkey:
+  # One process per search: the in-memory cache is enough.
+  url: false

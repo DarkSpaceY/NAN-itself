@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>record</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="bar">
+    <span class="wordmark">record</span>
+    <span class="stats" id="stats"></span>
+    <span class="spacer"></span>
+    <label class="search">
+      <input id="filter" type="search" placeholder="filter loaded rows" autocomplete="off" spellcheck="false">
+    </label>
+    <button id="latest" class="ghost" title="Jump to the newest turns">latest</button>
+    <button id="fit" class="ghost" title="Show everything the archive holds">all</button>
+    <button id="refresh" class="ghost icon" title="Reload">⟳</button>
+  </header>
+
+  <section class="instrument">
+    <div class="band">
+      <span class="cap">archive</span>
+      <div class="strip" id="overview" title="drag to move the window · click to jump · double-click for the whole archive">
+        <svg class="hist" id="hist-all" preserveAspectRatio="none" aria-hidden="true"><path id="bars-all" d=""></path></svg>
+        <div class="window-mark" id="winmark"></div>
+      </div>
+    </div>
+    <div class="band">
+      <span class="cap">window</span>
+      <div class="strip" id="focus" title="drag the cursor · scroll to zoom the window">
+        <svg class="hist" id="hist-win" preserveAspectRatio="none" aria-hidden="true"><path id="bars-win" d=""></path></svg>
+        <div class="ticks" id="ticks"></div>
+        <div class="cursor" id="cursor"><b></b></div>
+      </div>
+    </div>
+    <div class="range-line">
+      <span id="range-from">—</span>
+      <span class="range-span" id="range-span"></span>
+      <span id="range-to">—</span>
+    </div>
+  </section>
+
+  <main>
+    <section class="ledger">
+      <div class="ledger-head">
+        <span class="c-gut"></span>
+        <span class="c-time">time</span>
+        <span class="c-agent">agent</span>
+        <span class="c-sum">turn</span>
+        <span class="c-meta">tokens · took</span>
+      </div>
+      <div class="scroll" id="scroll">
+        <div class="rows" id="rows"></div>
+      </div>
+      <div class="foot" id="foot"></div>
+    </section>
+
+    <aside class="drawer" id="drawer" hidden></aside>
+  </main>
+
+</div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
