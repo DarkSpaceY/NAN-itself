@@ -332,15 +332,13 @@ class MCPService:
 
     # -- prompt contribution ------------------------------------------------
 
-    def contribution(self, turn: dict[str, Any] | None) -> str:
+    def contribution(self, turn: dict[str, Any]) -> str:
         """
         The tool table is not re-sent every turn: the CLI is the
         interface and its --help carries the same information. The
         pointer is injected when the context that held it is gone.
         """
-        state = (turn or {}).get("state")
-
-        if state not in ("start", "context_cleared"):
+        if turn.get("origin") not in ("first", "context_cleared"):
             return ""
 
         return (
@@ -375,11 +373,11 @@ def build_app(service: MCPService) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan)
 
-    # ---------- injection endpoint ----------
+    # ---------- inject endpoint ----------
 
     @app.post("/turn")
     async def turn(body: dict[str, Any]) -> dict[str, str]:
-        return {"text": service.contribution(body.get("turn"))}
+        return {"text": service.contribution(body)}
 
     # ---------- tool API ----------
 

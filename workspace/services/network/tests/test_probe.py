@@ -380,7 +380,7 @@ def test_turn_contract_roundtrip():
     app = network_mod.build_app(service)
 
     with TestClient(app) as client:  # lifespan starts/ends inside
-        response = client.post("/turn", json={"turn": {}})
+        response = client.post("/turn", json={})
 
         assert response.status_code == 200
 

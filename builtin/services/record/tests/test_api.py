@@ -1,6 +1,6 @@
 """
-API tests: the injection endpoint always answers {"text": ""} and
-things never reach the prompt; the read API serves pages and the
+API tests: the archive endpoint acknowledges and stores, nothing
+ever reaches the prompt; the read API serves pages and the
 timeline out of the same store.
 """
 
@@ -17,7 +17,7 @@ def _turn(agent_id: str, started_at: float):
         "agent_id": agent_id,
         "parent_id": None,
         "depth": 0,
-        "state": "running",
+        "origin": "normal",
         "persona": None,
         "inbox": [],
         "injections": [],
@@ -36,6 +36,7 @@ def _turn(agent_id: str, started_at: float):
         "rendered": [{"role": "user", "content": "x"}],
         "started_at": started_at,
         "ended_at": started_at + 0.5,
+        "death": None,
     }
 
 
@@ -64,21 +65,16 @@ def _settle(service, count: int, timeout: float = 3.0) -> None:
     raise AssertionError("turn never landed")
 
 
-def test_turn_endpoint_is_silent_and_archives(tmp_path):
+def test_turn_endpoint_archives(tmp_path):
     service, client = _service(tmp_path)
 
     try:
         base = time.time()
 
-        body = {"turn": None, "prev_turn": _turn("a1", base)}
-
-        reply = client.post("/turn", json=body)
+        reply = client.post("/turn", json=_turn("a1", base))
 
         assert reply.status_code == 200
-        assert reply.json() == {"text": ""}
-
-        # The fresh arrival carries no reply yet; it must not archive.
-        client.post("/turn", json={"turn": {"agent_id": "a1", "started_at": base + 9}, "prev_turn": None})
+        assert reply.json() == {"ok": "true"}
 
         _settle(service, 1)
 

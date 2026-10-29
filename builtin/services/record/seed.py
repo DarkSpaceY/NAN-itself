@@ -262,7 +262,9 @@ def turn_payload(rng, agent, parent, depth, ts, uniq, persona=None):
         "agent_id": agent,
         "parent_id": parent,
         "depth": depth,
-        "state": rng.choices(["end", "running", "start"], [0.7, 0.25, 0.05])[0],
+        "origin": rng.choices(
+            ["first", "normal", "context_cleared"], [0.05, 0.92, 0.03]
+        )[0],
         "persona": persona,
         "inbox": inbox,
         "injections": injections,
@@ -281,6 +283,7 @@ def turn_payload(rng, agent, parent, depth, ts, uniq, persona=None):
             "finish_reason": "stop",
             "retries": rng.choices([0, 1, 2], [0.88, 0.09, 0.03])[0],
         },
+        "death": None,
         "rendered": rendered,
         "started_at": ts + uniq * 1e-6,
         "ended_at": ts + dur,
@@ -394,7 +397,7 @@ def main():
     sent = 0
     with httpx.Client(timeout=10.0) as client:
         for payload in payloads:
-            response = client.post(f"{args.url}/turn", json={"prev_turn": payload})
+            response = client.post(f"{args.url}/turn", json=payload)
             response.raise_for_status()
             sent += 1
             if sent % 1_000 == 0:

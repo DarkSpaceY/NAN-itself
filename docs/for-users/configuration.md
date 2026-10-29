@@ -53,7 +53,7 @@ The registry the external prompt-contributor services talk to.
 |-----|---------|---------|
 | `host` | `127.0.0.1` | Registry listen address |
 | `port` | `8901` | Registry port |
-| `timeout` | `2.0` | Per-service, per-turn collection timeout |
+| `timeout` | `2.0` | Per-service, per-turn delivery timeout |
 | `heartbeat_ttl` | `15.0` | A service silent longer than this is evicted from the live set |
 
 ## gateway

@@ -39,7 +39,7 @@ queue in the inbox and drain at the next turn boundary.
 
 ```mermaid
 flowchart LR
-    A["drain inbox"] --> B["collect injections<br/>(all live services, concurrent)"]
+    A["drain inbox"] --> B["collect injections<br/>(live inject services, concurrent)"]
     B --> C["one model call"]
     C --> D["run verbs positionally"]
     D --> E["freeze rendered messages"]
@@ -148,24 +148,31 @@ sequenceDiagram
     participant H as Injection hub
     participant A as Agent turn
 
-    S->>H: POST /register {service_id, endpoint}
+    S->>H: POST /register {service_id, endpoint, mode}
     loop heartbeat interval
         S->>H: POST /heartbeat {service_id}
     end
-    A->>H: collect(turn)
-    par concurrent, per live service
-        H->>S: POST endpoint {"turn": {...}, "prev_turn": {...}}
+    A->>H: inject(turn)
+    par concurrent, per live inject service
+        H->>S: POST endpoint <fresh turn>
         S-->>H: {"text": "<str>"} (plain text => ok=false)
     end
     H-->>A: Injection(ok, started_at, ended_at)
     note over A: contributions and failures<br/>both land on the turn record
+    A->>H: archive(turn), when the turn ends
+    par concurrent, per live archive service
+        H->>S: POST endpoint <complete turn>
+        S-->>H: 2xx, acknowledgement only
+    end
 ```
 
 Services are independent processes registered with the hub
-(see for-service-authors/injection-service.md). Before every
-prompt assembly the hub POSTs the new Turn to every live service
-concurrently; contributions, failures and timeouts all land on
-the turn record.
+(see for-service-authors/injection-service.md). Each entry
+declares a mode: `inject` entries receive the fresh Turn before
+every prompt assembly and their text lands on the turn record;
+`archive` entries receive the complete Turn once it ends and
+their reply is only an acknowledgement. Both modes feed the
+service online/offline delta.
 
 ## Events
 

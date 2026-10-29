@@ -170,21 +170,25 @@ async def test_finish_verb_scope(tmp_path: Path, no_sink: None) -> None:
 
 
 class RecordingHub:
-    """Injection stand-in: records collections."""
+    """Injection stand-in: records injections and archives."""
 
     def __init__(self) -> None:
-        self.collects: list[tuple[Any, Any]] = []
+        self.injects: list[Any] = []
+        self.archives: list[Any] = []
 
-    async def collect(self, turn: Any, *, prev_turn: Any = None) -> tuple[tuple, list]:
-        self.collects.append((turn, prev_turn))
+    async def inject(self, turn: Any) -> tuple[tuple, list]:
+        self.injects.append(turn)
 
         return (), []
+
+    async def archive(self, turn: Any) -> None:
+        self.archives.append(turn)
 
     def forget(self, agent_id: str) -> None:
         pass
 
 
-async def test_turn_states_and_exit_delivery(tmp_path: Path, no_sink: None) -> None:
+async def test_turn_origins_and_archive(tmp_path: Path, no_sink: None) -> None:
     hub = RecordingHub()
 
     agent = make_agent(
@@ -196,38 +200,31 @@ async def test_turn_states_and_exit_delivery(tmp_path: Path, no_sink: None) -> N
 
     agent.injections = hub
 
-    # 1. first turn: start (run_turn direct calls bypass the loop,
-    #    so the loop's post-turn cycles increment is mimicked)
+    # 1. first turn: origin=first (run_turn direct calls bypass the
+    #    loop, so the loop's post-turn cycles increment is mimicked)
     t1 = await agent.run_turn()
-    assert t1.state == "start"
-    assert hub.collects[0][1] is None
+    assert t1.origin == "first"
 
     agent.cycles += 1
 
     # 2. history over the 1-char limit cleared wholesale -> next
     #    turn opens a new context epoch
     t2 = await agent.run_turn()
-    assert t2.state == "context_cleared"
-    assert hub.collects[1][1] is t1
+    assert t2.origin == "context_cleared"
 
-    # 3. exit delivery: the same collect call, with no arriving
-    #    turn; the last turn complete rides prev_turn, marked end
+    # 3. every turn that ended is archived once, in order; the exit
+    #    itself delivers nothing
+    assert hub.archives == [t1, t2]
+
     agent.request_death("test")
 
     await agent._teardown()
 
-    assert len(hub.collects) == 3
-
-    exit_turn, exit_prev = hub.collects[2]
-
-    assert exit_turn is None
-    assert exit_prev.state == "end"
-    assert exit_prev.agent_id == t2.agent_id
-    assert exit_prev.reply is not None
-    assert exit_prev.rendered is not None
+    assert hub.archives == [t1, t2]
+    assert len(hub.injects) == 2
 
 
-async def test_running_state_without_clear(tmp_path: Path, no_sink: None) -> None:
+async def test_normal_origin_without_clear(tmp_path: Path, no_sink: None) -> None:
     hub = RecordingHub()
 
     agent = make_agent(
@@ -244,15 +241,12 @@ async def test_running_state_without_clear(tmp_path: Path, no_sink: None) -> Non
 
     t2 = await agent.run_turn()
 
-    assert (t1.state, t2.state) == ("start", "running")
+    assert (t1.origin, t2.origin) == ("first", "normal")
 
     agent.request_death("test")
 
     with contextlib.suppress(Exception):
         await agent._teardown()
 
-    exit_turn, exit_prev = hub.collects[-1]
-
-    assert exit_turn is None
-    assert exit_prev.state == "end"
-    assert exit_prev.agent_id == t2.agent_id
+    assert hub.archives == [t1, t2]
+    assert len(hub.injects) == 2

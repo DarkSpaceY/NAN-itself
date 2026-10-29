@@ -2,7 +2,7 @@
 The turn engine: one turn, in phases.
 
 The Agent prepares the arrival shape (a fresh Turn skeleton:
-identity, inbox, deltas, state, persona marker) and hands it
+identity, inbox, deltas, origin, persona marker) and hands it
 over; the engine runs the pipeline -- collect service
 contributions, one model call, run verbs positionally, freeze
 the rendered messages -- and returns the complete Turn.
@@ -34,8 +34,8 @@ from .verbs import tool_definitions
 if TYPE_CHECKING:
     from nan.llm import LLMProvider
 
-# Hub-side collection: payload in, (contributions, service deltas) out.
-CollectFn = Callable[..., Awaitable[tuple[tuple[Injection, ...], list[DeltaEvent]]]]
+# Hub-side injection: payload in, (contributions, service deltas) out.
+InjectFn = Callable[..., Awaitable[tuple[tuple[Injection, ...], list[DeltaEvent]]]]
 
 # Verb execution: one call in, its string result out.
 ExecuteFn = Callable[[ToolCall], Awaitable[str]]
@@ -66,12 +66,11 @@ class TurnEngine:
         *,
         persona: str,
         history: Sequence[Message],
-        prev_turn: Turn | None,
-        collect: CollectFn,
+        inject: InjectFn,
         execute: ExecuteFn,
         retries: int,
     ) -> Turn:
-        turn = await self._collect(turn, prev_turn=prev_turn, collect=collect)
+        turn = await self._inject(turn, inject=inject)
 
         turn = await self._think(turn, persona=persona, history=history, retries=retries)
 
@@ -83,14 +82,13 @@ class TurnEngine:
     # Phases
     # ------------------------------------------------------------------
 
-    async def _collect(
+    async def _inject(
         self,
         turn: Turn,
         *,
-        prev_turn: Turn | None,
-        collect: CollectFn,
+        inject: InjectFn,
     ) -> Turn:
-        contributions, service_deltas = await collect(turn, prev_turn=prev_turn)
+        contributions, service_deltas = await inject(turn)
 
         sink.emit(
             "injections_collected",

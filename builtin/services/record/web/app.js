@@ -562,7 +562,7 @@ function layoutLanes() {
 
     const count = meta ? meta.count : row.seq + 1;
     const closes = row.seq >= count - 1;
-    const dead = closes && (!meta || meta.last_state === "end");
+    const dead = closes && (!meta || meta.last_death);
     const col = entry.col;
 
     if (closes) open.splice(open.indexOf(entry), 1);
@@ -620,14 +620,14 @@ function laneSvg(lane) {
 }
 
 // The row's own outcome, kept tiny: the ledger is a log, so only the
-// unusual states earn a mark and the ordinary run of turns stays
-// silent.
+// unusual characteristics earn a mark and the ordinary run of turns
+// stays silent.
 function stateMark(row) {
   if (row.errors) return `<span class="mk err" title="${row.errors} failed injection(s)">✕</span>`;
   if (row.retries) return `<span class="mk warn" title="${row.retries} retries">↻${row.retries}</span>`;
-  if (row.state === "end") return `<span class="mk dim" title="agent exited">○</span>`;
-  if (row.state === "context_cleared") return `<span class="mk dim" title="context cleared">↻</span>`;
-  if (row.state === "start") return `<span class="mk faint" title="started">◦</span>`;
+  if (row.death) return `<span class="mk dim" title="agent exited: ${esc(row.death)}">○</span>`;
+  if (row.origin === "context_cleared") return `<span class="mk dim" title="context cleared">↻</span>`;
+  if (row.origin === "first") return `<span class="mk faint" title="first turn">◦</span>`;
   return `<span class="mk"></span>`;
 }
 
@@ -1294,7 +1294,7 @@ function renderDrawer() {
     ["agent", turn.agent_id],
     ["parent", turn.parent_id || "—"],
     ["depth", String(turn.depth ?? 0)],
-    ["state", turn.state || "—"],
+    ["origin", turn.origin || "—"],
     ["started", clock(turn.started_at)],
     ["took", dur((turn.ended_at || turn.started_at) - turn.started_at)],
     ["model", turn.llm ? turn.llm.model : "—"],

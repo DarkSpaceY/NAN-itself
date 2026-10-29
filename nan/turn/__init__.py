@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .model import (
+    Death,
     DeltaEvent,
     InboxKind,
     InboxMessage,
@@ -10,11 +11,12 @@ from .model import (
     LLMCall,
     ToolResult,
     Turn,
-    TurnState,
+    TurnOrigin,
 )
 from .render import freeze_turn, render_turn
 
 __all__ = [
+    "Death",
     "DeltaEvent",
     "Injection",
     "InboxKind",
@@ -22,7 +24,7 @@ __all__ = [
     "LLMCall",
     "ToolResult",
     "Turn",
-    "TurnState",
+    "TurnOrigin",
     "freeze_turn",
     "render_turn",
 ]

@@ -27,7 +27,7 @@ import asyncio
 import contextlib
 import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -39,11 +39,12 @@ from nan.config import settings
 from nan.events import sink
 from nan.llm import Message
 from nan.turn import (
+    Death,
     DeltaEvent,
     InboxKind,
     InboxMessage,
     Turn,
-    TurnState,
+    TurnOrigin,
 )
 
 if TYPE_CHECKING:
@@ -51,18 +52,6 @@ if TYPE_CHECKING:
     from nan.agent.sandbox import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
-
-
-@dataclass(frozen=True)
-class Death:
-    """
-    The one exit record: why this agent stopped, and the finish
-    report when the model ended it itself (None for external
-    deaths). The first record wins; see Agent._begin_death.
-    """
-
-    reason: str
-    report: str | None = None
 
 
 class Agent:
@@ -432,11 +421,11 @@ class Agent:
         self._delta_events = []
 
         if self.cycles == 0:
-            state: TurnState = "start"
+            origin: TurnOrigin = "first"
         elif self._cleared:
-            state = "context_cleared"
+            origin = "context_cleared"
         else:
-            state = "running"
+            origin = "normal"
 
         # The flag is consumed by this turn; a rollback puts it
         # back, so the next turn still reports the context epoch.
@@ -450,7 +439,7 @@ class Agent:
             depth=self.depth,
             inbox=tuple(drained),
             delta=tuple(pending_deltas),
-            state=state,
+            origin=origin,
             persona=persona_marker,
         )
 
@@ -469,8 +458,7 @@ class Agent:
                 skeleton,
                 persona=persona,
                 history=self._messages,
-                prev_turn=self.last_turn,
-                collect=self.injections.collect,
+                inject=self.injections.inject,
                 execute=self._run_call,
                 retries=retries,
             )
@@ -496,6 +484,9 @@ class Agent:
             raise
 
         # -- apply: the engine returned whole, commit the state -----
+        if self._death is not None:
+            turn = replace(turn, death=self._death)
+
         self.last_turn = turn
 
         assert turn.rendered is not None
@@ -516,6 +507,10 @@ class Agent:
                 "history_chars": sum(len(m.content or "") for m in self._messages),
             },
         )
+
+        # The archive sees every turn that ended, in the order it
+        # ended. Delivery failure is logged there and dropped.
+        await self.injections.archive(turn)
 
         return turn
 
@@ -661,15 +656,6 @@ class Agent:
                 self.parent.note_delta("subagent", f"-{self.agent_id} died: {death.reason}")
 
             self.parent._children.pop(self.agent_id, None)
-
-        # Final delivery: the last turn's complete shape, marked
-        # state=end, rides the slot a next turn's prev_turn would
-        # have carried -- the same collect call as every boundary,
-        # with no arriving turn. The first turn has no prev_turn;
-        # the exit call has no turn.
-        if self.last_turn is not None:
-            with contextlib.suppress(Exception):
-                await self.injections.collect(None, prev_turn=replace(self.last_turn, state="end"))
 
         self.injections.forget(self.agent_id)
 

@@ -29,12 +29,11 @@ def test_config_parses_the_shipped_file():
 def test_contribution_returns_at_context_starts():
     service = MCPService(load_config())
 
-    pointer = service.contribution({"state": "start"})
+    pointer = service.contribution({"origin": "first"})
 
     assert "mcp.sh" in pointer
-    assert service.contribution({"state": "context_cleared"}) == pointer
-    assert service.contribution({"state": "running"}) == ""
-    assert service.contribution(None) == ""
+    assert service.contribution({"origin": "context_cleared"}) == pointer
+    assert service.contribution({"origin": "normal"}) == ""
 
 
 def test_http_surface_without_servers():

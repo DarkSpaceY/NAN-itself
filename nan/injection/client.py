@@ -1,8 +1,11 @@
 """
-The per-turn collector: POST the turn payload to every live
-service concurrently, normalize every outcome onto the record.
+Delivery to local services, in two shapes.
 
-A failed service is recorded as an Injection with ok=False.
+Injection services receive the fresh turn and answer with prompt
+text; archive services receive the completed turn and only
+acknowledge it. Injection outcomes land on the turn record;
+archive failures are logged and dropped, because the archive is
+an observer and never fails a turn.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import httpx
+from loguru import logger
 
 from nan.config import settings
 from nan.turn import Injection, Turn
@@ -38,12 +42,10 @@ class InjectionClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def collect(
+    async def inject(
         self,
-        turn: Turn | None,
+        turn: Turn,
         services: Sequence[ServiceEntry],
-        *,
-        prev_turn: Turn | None = None,
     ) -> tuple[Injection, ...]:
         """
         Concurrently ask every given service for this turn's
@@ -53,10 +55,7 @@ class InjectionClient:
         if not services:
             return ()
 
-        payload = {
-            "turn": (turn.to_fresh_json() if turn is not None else None),
-            "prev_turn": (prev_turn.to_json() if prev_turn is not None else None),
-        }
+        payload = turn.to_fresh_json()
 
         async def ask(entry: ServiceEntry) -> Injection:
             started = time.time()
@@ -91,3 +90,29 @@ class InjectionClient:
         results = await asyncio.gather(*(ask(entry) for entry in services))
 
         return tuple(r for r in results if r.ok is False or r.text)
+
+    async def archive(self, turn: Turn, sinks: Sequence[ServiceEntry]) -> None:
+        """
+        Post the completed turn to every archive service at once.
+        A failed delivery is logged once and dropped.
+        """
+        if not sinks:
+            return
+
+        payload = turn.to_json()
+
+        async def send(entry: ServiceEntry) -> None:
+            try:
+                response = await self._client.post(entry.endpoint, json=payload)
+
+                response.raise_for_status()
+
+            except Exception as exc:
+                logger.warning(
+                    "Archive delivery to {} failed: {}: {}",
+                    entry.service_id,
+                    type(exc).__name__,
+                    exc,
+                )
+
+        await asyncio.gather(*(send(entry) for entry in sinks))

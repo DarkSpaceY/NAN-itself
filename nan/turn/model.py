@@ -11,7 +11,7 @@ its own rendered messages); history lives in the Turn list.
                finish reports) / injections (per-turn service
                contributions, errors included)
     flow       reply / calls / results, written back as the
-               turn completes
+               turn completes; `death` when this turn ended the agent
     frozen     rendered -- the turn's message run, frozen after the
                first render (byte-stable for prefix caching)
 """
@@ -26,7 +26,22 @@ from nan.llm import Message, ToolCall, Usage
 
 InboxKind = Literal["user", "parentagent", "subagent", "unknown"]
 
-TurnState = Literal["start", "running", "context_cleared", "end"]
+# Why a turn began: the first of an agent's life, an ordinary
+# turn, or the turn right after the context was cleared.
+TurnOrigin = Literal["first", "normal", "context_cleared"]
+
+
+@dataclass(frozen=True)
+class Death:
+    """
+    The one exit record: why the agent stopped, and the finish
+    report when the model ended it itself (None for external
+    deaths). A turn that ends an agent carries it; the first
+    record wins.
+    """
+
+    reason: str
+    report: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +141,7 @@ class Turn:
     injections: tuple[Injection, ...] = ()
     delta: tuple[DeltaEvent, ...] = ()  # grouped into <delta><section> at render
 
-    state: TurnState = "running"
+    origin: TurnOrigin = "normal"
 
     # The new persona text when it changed before this turn: the
     # epoch marker for the system prompt. Null when unchanged.
@@ -137,6 +152,10 @@ class Turn:
     results: tuple[ToolResult, ...] = ()
 
     llm: LLMCall | None = None
+
+    # Set when this turn ended the agent, in which case the agent
+    # does not begin another one.
+    death: Death | None = None
 
     rendered: tuple[Message, ...] | None = None
 
@@ -153,7 +172,7 @@ class Turn:
             "agent_id": self.agent_id,
             "parent_id": self.parent_id,
             "depth": self.depth,
-            "state": self.state,
+            "origin": self.origin,
             "persona": self.persona,
             "inbox": [
                 {
@@ -200,6 +219,11 @@ class Turn:
                 if self.llm is not None
                 else None
             ),
+            "death": (
+                {"reason": self.death.reason, "report": self.death.report}
+                if self.death is not None
+                else None
+            ),
             "rendered": (
                 [m.model_dump(mode="json") for m in self.rendered]
                 if self.rendered is not None
@@ -212,15 +236,15 @@ class Turn:
     def to_fresh_json(self) -> dict[str, Any]:
         """
         The static arrival shape: exactly the fields known when a
-        turn is delivered to services (before the model call).
-        reply / calls / results / llm / ended_at / rendered are
-        absent from the shape.
+        turn is delivered to injection services (before the model
+        call). reply / calls / results / llm / death / ended_at /
+        rendered are absent from the shape.
         """
         return {
             "agent_id": self.agent_id,
             "parent_id": self.parent_id,
             "depth": self.depth,
-            "state": self.state,
+            "origin": self.origin,
             "persona": self.persona,
             "inbox": [
                 {

@@ -106,7 +106,7 @@ class AgentMeta:
     count: int = 0
     first: float | None = None
     last: float | None = None
-    last_state: str = "running"
+    last_death: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -116,7 +116,7 @@ class AgentMeta:
             "count": self.count,
             "first": self.first,
             "last": self.last,
-            "last_state": self.last_state,
+            "last_death": self.last_death,
         }
 
     @classmethod
@@ -128,18 +128,15 @@ class AgentMeta:
             count=int(raw.get("count") or 0),
             first=raw.get("first"),
             last=raw.get("last"),
-            last_state=str(raw.get("last_state") or "running"),
+            last_death=raw.get("last_death"),
         )
 
 
 @dataclass
 class _AgentCursor:
-    """Per-agent write cursor; duplicates can only be the last turn."""
+    """Per-agent write cursor."""
 
     seq: int = 0
-    last_started_at: float | None = None
-    last_seq: int = 0
-    last_size: int = 0
     meta: AgentMeta = field(default_factory=lambda: AgentMeta(agent_id=""))
 
 
@@ -185,6 +182,8 @@ def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
 
     injections = payload.get("injections") or ()
 
+    death = payload.get("death") if isinstance(payload.get("death"), dict) else {}
+
     verbs_start = min((r.get("started_at") for r in results), default=None)
 
     verbs_end = max((r.get("ended_at") for r in results), default=None)
@@ -194,7 +193,7 @@ def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
         "seq": seq,
         "started_at": payload.get("started_at"),
         "ended_at": payload.get("ended_at"),
-        "state": payload.get("state"),
+        "origin": payload.get("origin"),
         "depth": payload.get("depth", 0),
         "parent_id": payload.get("parent_id"),
         "persona": payload.get("persona") is not None,
@@ -210,6 +209,7 @@ def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
         "retries": llm.get("retries") or 0,
         "tokens": int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0),
         "errors": sum(1 for i in injections if isinstance(i, dict) and i.get("ok") is False),
+        "death": death.get("reason"),
         "summary": headline(payload),
     }
 
@@ -300,20 +300,7 @@ class TurnStore:
 
                 meta = AgentMeta.from_json(raw)
 
-                cursor = _AgentCursor(
-                    seq=meta.count,
-                    last_started_at=meta.last,
-                    last_seq=meta.count - 1 if meta.count else 0,
-                    meta=meta,
-                )
-
-                # The rewrite path subtracts the previous compressed
-                # size; recover it, or an exit-turn rewrite after a
-                # restart would add the new size on top of the old.
-                if meta.count:
-                    previous = self._db.get(_turn_key(meta.agent_id, meta.count - 1))
-
-                    cursor.last_size = len(previous) if previous is not None else 0
+                cursor = _AgentCursor(seq=meta.count, meta=meta)
 
                 self._cursors[meta.agent_id] = cursor
 
@@ -524,36 +511,21 @@ class TurnStore:
 
                     self._cursors[agent_id] = cursor
 
-                # A repeat can only be this agent's previous turn (the
-                # exit call re-sends the last turn marked state=end);
-                # rewrite it in place so the end marker survives.
-                if cursor.last_started_at == started_at:
-                    seq = cursor.last_seq
+                seq = cursor.seq
 
-                    self._turns -= 1
+                cursor.seq += 1
 
-                    self._total_bytes -= cursor.last_size + KEY_OVERHEAD
-                else:
-                    seq = cursor.seq
+                # The arrival is what the histogram counts and what
+                # bounds the time axis.
+                stamp = float(started_at)
 
-                    cursor.seq += 1
+                self._put_rolls(write, self._bump(stamp, 1))
 
-                    cursor.last_started_at = started_at
+                self._first = stamp if self._first is None else min(self._first, stamp)
 
-                    cursor.last_seq = seq
+                self._last = stamp if self._last is None else max(self._last, stamp)
 
-                    # A real arrival: it is what the histogram counts
-                    # and what bounds the time axis. The rewrite above
-                    # is the same turn, so it moves nothing.
-                    stamp = float(started_at)
-
-                    self._put_rolls(write, self._bump(stamp, 1))
-
-                    self._first = stamp if self._first is None else min(self._first, stamp)
-
-                    self._last = stamp if self._last is None else max(self._last, stamp)
-
-                payload = {**payload, "seq": seq, "state": payload.get("state") or "running"}
+                payload = {**payload, "seq": seq, "origin": payload.get("origin") or "normal"}
 
                 data = self._compressor.compress(
                     json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
@@ -580,8 +552,6 @@ class TurnStore:
 
                 self._total_bytes += len(data) + KEY_OVERHEAD
 
-                cursor.last_size = len(data)
-
                 self._turns += 1
 
                 meta = cursor.meta
@@ -598,7 +568,10 @@ class TurnStore:
 
                 meta.last = float(started_at)
 
-                meta.last_state = str(payload.get("state") or "running")
+                death = payload.get("death")
+
+                if isinstance(death, dict):
+                    meta.last_death = str(death.get("reason") or "") or None
 
                 touched[agent_id] = meta
 
@@ -841,7 +814,6 @@ class TurnStore:
             "ended_at": ended_at,
             "llm_started_at": llm_start or None,
             "llm_ended_at": llm_end or None,
-            "state": "running",
             "depth": 0,
             "parent_id": None,
             "tokens": 0,

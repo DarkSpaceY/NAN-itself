@@ -2,18 +2,18 @@
 Injection: the out-of-process prompt-contributor protocol.
 
 Services are independent local processes. A service registers
-itself with the core over HTTP ({service_id, endpoint}), then
-heartbeats. Before every prompt assembly the core POSTs a
-self-contained payload to every live service concurrently:
-{turn, prev_turn} -- this turn in its fresh shape (the static
-pre-model-call fields), the previous turn complete with its
-frozen rendered run. The slots roll symmetrically: the first
-turn of an agent arrives with prev_turn=null; when an agent
-exits, one final payload arrives with turn=null and the last
-turn complete as prev_turn, marked state=end. The exit is the
-same collect call with no arriving turn. Both keys are always
-present, null when empty. Failures are recorded in the Turn,
-which is a complete runtime log.
+itself with the core over HTTP ({service_id, endpoint, mode}),
+then heartbeats. Two modes exist:
+
+    inject    the turn arrives fresh before every prompt assembly;
+              the service answers with prompt text
+    archive   each turn arrives complete when it ends; the reply
+              is an acknowledgement and is never recorded
+
+Both deliveries carry one turn as a flat JSON body.
+Both modes appear in the per-agent service delta.
+Failures of injection are recorded in the Turn, which is a
+complete runtime log.
 
 The hub routes turns to endpoints and labels what came back.
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import FastAPI
@@ -36,26 +36,29 @@ from nan.utils.loopback import entry_allowed, is_loopback_url
 
 from .client import InjectionClient
 
+ServiceMode = Literal["inject", "archive"]
+
 
 @dataclass
 class ServiceEntry:
     service_id: str
     endpoint: str
+    mode: ServiceMode
     last_seen: float
 
 
 class InjectionHub:
     """
     Registry (register / heartbeat / TTL eviction) + per-agent
-    service-delta tracking + the per-turn concurrent collection.
-    The HTTP server runs on its own port; collect() is called by
-    every agent at every turn boundary.
+    service-delta tracking + the two delivery channels. The HTTP
+    server runs on its own port; inject() is called at every turn
+    boundary, archive() once the turn ends.
     """
 
     def __init__(self) -> None:
         self._services: dict[str, ServiceEntry] = {}
 
-        # agent_id -> live service ids seen at its last collection
+        # agent_id -> live service ids seen at its last turn boundary
         self._last_reported: dict[str, set[str]] = {}
 
         self._client = InjectionClient()
@@ -105,8 +108,13 @@ class InjectionHub:
 
             endpoint = str(body.get("endpoint") or "").strip()
 
+            mode_raw = str(body.get("mode") or "inject").strip()
+
             if not service_id or not endpoint:
                 return {"status": "rejected", "reason": "service_id and endpoint required"}
+
+            if mode_raw not in ("inject", "archive"):
+                return {"status": "rejected", "reason": "mode must be inject or archive"}
 
             if not is_loopback_url(endpoint):
                 logger.warning(
@@ -117,11 +125,16 @@ class InjectionHub:
 
                 return {"status": "rejected", "reason": "endpoint must be loopback"}
 
+            mode: ServiceMode = "archive" if mode_raw == "archive" else "inject"
+
             self._services[service_id] = ServiceEntry(
-                service_id=service_id, endpoint=endpoint, last_seen=time.time()
+                service_id=service_id,
+                endpoint=endpoint,
+                mode=mode,
+                last_seen=time.time(),
             )
 
-            logger.info("Injection service registered: {} -> {}", service_id, endpoint)
+            logger.info("{} service registered: {} -> {}", mode, service_id, endpoint)
 
             return {"status": "registered"}
 
@@ -155,6 +168,7 @@ class InjectionHub:
                     {
                         "service_id": e.service_id,
                         "endpoint": e.endpoint,
+                        "mode": e.mode,
                         "last_seen": e.last_seen,
                     }
                     for e in self._services.values()
@@ -231,40 +245,29 @@ class InjectionHub:
 
         return [e for e in self._services.values() if now - e.last_seen <= self.heartbeat_ttl]
 
-    async def collect(
-        self,
-        turn: Turn | None,
-        *,
-        prev_turn: Turn | None = None,
-    ) -> tuple[tuple[Injection, ...], list[DeltaEvent]]:
+    async def inject(self, turn: Turn) -> tuple[tuple[Injection, ...], list[DeltaEvent]]:
         """
-        Deliver to every live service at once, all concurrently.
-        One call serves every boundary: a turn boundary passes
-        the arriving turn; the exit passes None, with the last
-        turn as prev_turn. The payload carries this turn fresh
-        plus the previous turn complete; every outcome lands on
-        the record: contributions as ok=True, failures as
-        ok=False. Returns (contributions, service_events): delta
-        events for services that went online/offline since THIS
-        agent's previous collection (tracked per agent, empty
-        when nothing changed).
+        Deliver the fresh turn to every live inject service at once.
+        Returns (contributions, service_events): the delta covers
+        services of either mode and is taken from the same snapshot,
+        so a service reported online is a service that received this
+        turn. Tracked per agent, empty when nothing changed.
         """
         live = self._live_services()
 
-        live_ids = {e.service_id for e in live}
+        events = self._service_delta(turn.agent_id, {e.service_id for e in live})
 
-        agent_id = (
-            turn.agent_id if turn is not None else (prev_turn.agent_id if prev_turn else None)
-        )
-
-        events = self._service_delta(agent_id, live_ids) if agent_id is not None else []
-
-        if not live:
-            return (), events
-
-        contributions = await self._client.collect(turn, live, prev_turn=prev_turn)
+        contributions = await self._client.inject(turn, [e for e in live if e.mode == "inject"])
 
         return contributions, events
+
+    async def archive(self, turn: Turn) -> None:
+        """
+        Deliver the completed turn to every live archive service.
+        Nothing comes back: these services record, they do not
+        contribute to a prompt.
+        """
+        await self._client.archive(turn, [e for e in self._live_services() if e.mode == "archive"])
 
     def _service_delta(self, agent_id: str, live_ids: set[str]) -> list[DeltaEvent]:
         """

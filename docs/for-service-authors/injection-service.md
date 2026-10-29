@@ -13,20 +13,24 @@ sequenceDiagram
     participant H as Injection hub
     participant A as Agent turn
 
-    S->>H: POST /register {service_id, endpoint}
+    S->>H: POST /register {service_id, endpoint, mode}
     H-->>S: {"status": "registered"}
 
     loop every few seconds (well under heartbeat_ttl)
         S->>H: POST /heartbeat {service_id}
-        H-->>S: {"status": "ok"}
+        H-->>H: {"status": "ok"}
     end
 
-    A->>H: collect(turn, prev_turn)
-    par all live services, concurrently
-        H->>S: POST your endpoint {turn, prev_turn}
+    A->>H: inject(turn)
+    par every live inject service, concurrently
+        H->>S: POST endpoint <fresh turn>
         S-->>H: {"text": "..."}
     end
     H-->>A: Injection(ok=true/false, started_at, ended_at)
+
+    Note over H,S: when the turn ends<br/>archive mode only
+        H->>S: POST endpoint <complete turn>
+        S-->>H: 2xx
 
     opt clean shutdown
         S->>H: POST /unregister {service_id}
@@ -36,13 +40,23 @@ sequenceDiagram
 1. **Register** -- on startup, POST to the hub:
 
        POST http://127.0.0.1:8901/register
-       {"service_id": "weather", "endpoint": "http://127.0.0.1:9001/turn"}
+       {"service_id": "weather", "endpoint": "http://127.0.0.1:9001/turn",
+        "mode": "inject"}
 
    `service_id` is your identity in the observation stream;
-   `endpoint` is the URL the hub will call every turn. It must be
-   loopback (`127.0.0.0/8`, `::1`, `localhost`): any other host
-   is rejected at registration, so turn payloads never leave the
-   machine.
+   `endpoint` is the URL the hub will call. It must be loopback
+   (`127.0.0.0/8`, `::1`, `localhost`): any other host is rejected
+   at registration, so turn payloads never leave the machine.
+
+   `mode` decides which delivery you receive and defaults to
+   `inject`:
+
+   - `inject` -- the fresh turn before every prompt assembly; your
+     reply is prompt text, recorded as an `Injection`.
+   - `archive` -- the complete turn once it ends; your reply is only
+     an acknowledgement and is never recorded. This is the mode for
+     services that record rather than contribute (see `record`).
+     A process may hold both modes as two `service_id`s.
 
 2. **Heartbeat** -- POST periodically (keep the interval well
    under `injection.heartbeat_ttl`, default 15 s):
@@ -54,20 +68,23 @@ sequenceDiagram
    turns; the entry is not deleted, and a heartbeat brings it
    back (no re-registration needed).
 
-3. **Serve turns** -- before every prompt assembly the hub POSTs
-   the turn payload to your endpoint, concurrently across all
-   live services. The reply protocol has exactly one shape: a
-   JSON object `{"text": "..."}` (empty text = no contribution).
-   Anything else -- plain text, a different object, a non-2xx
-   status -- is recorded as a failed delivery (`ok=false`), so
-   the agent still runs without your text.
+3. **Serve turns** -- an `inject` service receives the fresh turn
+   before every prompt assembly, concurrently across all live
+   services. Its reply has exactly one shape: a JSON object
+   `{"text": "..."}` (empty text = no contribution). Anything else
+   -- plain text, a different object, a non-2xx status -- is
+   recorded as a failed delivery (`ok=false`), so the agent still
+   runs without your text.
+
+   An `archive` service receives the complete turn once it ends;
+   any 2xx is enough, and the body is ignored.
 
 4. **Unregister** (optional) -- `POST /unregister` with your
    `service_id` for a clean shutdown; otherwise the hub just
    stops routing turns to you after the TTL.
 
 Introspection: `GET /services` returns
-`{"services": [{"service_id", "endpoint", "last_seen"}]}` for
+`{"services": [{"service_id", "endpoint", "mode", "last_seen"}]}` for
 all registered entries; it is not filtered by the TTL.
 
 ## Optional: your own panel
@@ -107,33 +124,29 @@ request.
 
 ## The turn JSON
 
-Every turn request carries the same body, two symmetric slots:
+One delivery body is one turn, flat -- never a slot that can be
+empty:
 
-    {"turn": {...} | null, "prev_turn": {...} | null}
+    { ...turn fields... }
 
-- `turn` is the arriving turn in its **fresh shape**: exactly the
+- `inject` services receive it in its **fresh shape**: exactly the
   fields known before the model call.
-- `prev_turn` is the previous turn **complete**: the fresh fields
-  plus `reply`, `calls`, `results`, `llm`, `rendered` and
-  `ended_at`.
-- The slots roll: each delivery's `prev_turn` completes the turn
-  the previous delivery announced as `turn`. Every turn therefore
-  reaches you twice, once arriving and once completed. The first
-  turn of an agent arrives with `prev_turn: null`.
-- Both keys are always present, null when empty, so every body
-  parses the same way and a service that keeps `prev_turn`
-  reconstructs the whole agent life from it alone.
-- Death is the one delivery with no arriving turn: the core makes
-  the same call with `turn: null` and the last turn complete as
-  `prev_turn`, whose `state` is `end`.
+- `archive` services receive it **complete**, when the turn ends:
+  the fresh fields plus `injections`, `reply`, `calls`, `results`,
+  `llm`, `death`, `rendered` and `ended_at`.
+- An agent that stops simply stops: there is no exit delivery.
+  The last completed turn is the last thing an archive sees, and a
+  turn cut short by death never reaches it at all.
+- Both modes appear in the `delta` section, so the model still
+  learns that an archive service is online.
 
-### Arriving turn (fresh shape)
+### Fresh turn
 
     {
       "agent_id":   "root",        # who is assembling a prompt
       "parent_id":  null,          # null for the root agent
       "depth":      0,
-      "state":      "start",       # start | running |
+      "origin":     "first",       # first | normal |
                                    # context_cleared
       "persona":    null,          # new persona text when it changed
                                    # before this turn, else null
@@ -153,7 +166,7 @@ Every turn request carries the same body, two symmetric slots:
 
     {
       "agent_id": "root", "parent_id": null, "depth": 0,
-      "state": "running", "persona": null,
+      "origin": "normal", "persona": null,
       "inbox": [...], "delta": [...],
       "injections": [              # this turn's own contributions,
         {"service_id": "weather",  # recorded after delivery
@@ -171,6 +184,8 @@ Every turn request carries the same body, two symmetric slots:
                   "usage": {"prompt_tokens": 0, "completion_tokens": 0},
                   "finish_reason": "stop", "retries": 0},
       "rendered": [{"role": "system", "content": "..."}],
+      "death":    null,           # {"reason", "report"} when this
+                                  # turn ended the agent, else null
       "started_at": 1760000000.0, "ended_at": 1760000000.9
     }
 
@@ -178,35 +193,42 @@ Every turn request carries the same body, two symmetric slots:
 message run this turn contributed to the prompt, in the same
 `Message` shape the provider receives.
 
-### Fields shared by both shapes
+### Fields
 
-`state` marks the agent's lifecycle at delivery time: `start`
-(first turn of an agent), `running`, `context_cleared` (the
-first turn after the rendered history was cleared wholesale --
-rendered sequences do not cross this boundary), and `end` (the
-final delivery, which appears as `prev_turn.state`).
+`origin` says why the turn began: `first` (the agent's first turn),
+`normal`, or `context_cleared` (the first turn after the rendered
+history was cleared wholesale -- rendered sequences do not cross
+this boundary). It says nothing about whether the turn ended;
+`ended_at` and the delivery channel do.
+
+`death` appears only on a completed turn and only when that turn
+ended the agent: `reason` is the exit reason, `report` the finish
+report when the model ended it itself (null for external deaths).
+A turn cut short before it completes is never delivered, so an
+archive can see an agent stop only through the turn that ended it.
 
 `persona` is the epoch marker for the system prompt: the new
 persona text on the one turn where the file content changed
 before assembly, null on every other turn. A service that keys
 state per persona epoch can see exactly where it started.
 
-The `injections` array is empty on arrival: this turn's own
-contributions are collected after delivery. Each entry (seen in
-`prev_turn`) is `{service_id, text, ok, started_at, ended_at}`
-(`ok=false`: the error text). Your own previous reply therefore
-comes back in `prev_turn.injections`, not in the arriving
-`turn.injections` -- use it to keep state across turns (you are
-stateless to the core; persistence is your business, typically a
-file under your own directory).
+The `injections` array is empty in the fresh shape: this turn's own
+contributions are collected after delivery. The completed turn
+carries them, `{service_id, text, ok, started_at, ended_at}`
+(`ok=false`: the error text). So your reply comes back to you in
+the archive copy of the same turn, not on a later turn -- if you
+need your own past answers while assembling, keep them yourself
+(you are stateless to the core; persistence is your business,
+typically a file under your own directory).
 
 ```mermaid
 flowchart LR
     subgraph CORE["core"]
         T["Turn n<br/>inbox / injections / delta"]
     end
-    T -->|"POST on every turn"| S["your service"]
-    S -->|"previous reply comes back<br/>in prev_turn.injections"| T
+    T -->|"fresh turn, every turn"| S["your service"]
+    S -->|"prompt text"| T
+    T -->|"complete turn, once it ends"| S
     S -->|"on turn request"| F["your own state file"]
     F -->|"reload before answering"| S
     style CORE fill:transparent,stroke:#2563eb,stroke-width:2px
@@ -216,7 +238,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    R["turn collects services"] --> OK{"service replies<br/>within timeout?"}
+    R["turn delivers to inject services"] --> OK{"service replies<br/>within timeout?"}
     OK -->|"yes, non-empty"| C["Injection(ok=true)<br/>text rides the prompt"]
     OK -->|"yes, empty"| N["dropped from the record"]
     OK -->|"no / error / timeout"| E["Injection(ok=false)<br/>error text on the record"]

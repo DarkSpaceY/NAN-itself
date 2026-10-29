@@ -1,7 +1,7 @@
 """
-Store tests: seq assignment, exit-turn rewrite, paging, the
+Store tests: seq assignment, the death marker, paging, the
 histogram rollups and the ledger pager, retention. No network, no
-real agent -- payloads are the shape the collector sends.
+real agent -- payloads are the shape the archive channel sends.
 """
 
 from __future__ import annotations
@@ -12,13 +12,20 @@ import time
 from store import TurnStore
 
 
-def _turn(agent_id: str, started_at: float, *, state: str = "running", llm: bool = True):
-    """A completed turn payload as `prev_turn` delivers it."""
+def _turn(
+    agent_id: str,
+    started_at: float,
+    *,
+    origin: str = "normal",
+    death: dict | None = None,
+    llm: bool = True,
+):
+    """A completed turn payload as the archive channel delivers it."""
     return {
         "agent_id": agent_id,
         "parent_id": None,
         "depth": 0,
-        "state": state,
+        "origin": origin,
         "persona": None,
         "inbox": [{"kind": "user", "source": "user", "text": "hi", "event": "send"}],
         "injections": [],
@@ -41,6 +48,7 @@ def _turn(agent_id: str, started_at: float, *, state: str = "running", llm: bool
         "rendered": [{"role": "user", "content": "hi"}],
         "started_at": started_at,
         "ended_at": started_at + 1.0,
+        "death": death,
     }
 
 
@@ -64,7 +72,7 @@ def _store(tmp_path, **kwargs) -> TurnStore:
     return store
 
 
-def test_sequence_paging_and_rewrite(tmp_path):
+def test_sequence_and_paging(tmp_path):
     store = _store(tmp_path)
 
     try:
@@ -84,11 +92,6 @@ def test_sequence_paging_and_rewrite(tmp_path):
 
         assert [t["seq"] for t in older["turns"]] == [2, 1, 0]
         assert older["next_before"] is None
-
-        # The exit call re-sends the last turn marked state=end.
-        store.ingest(_turn("a1", base + 4, state="end"))
-
-        _wait(store, lambda: store.turn("a1", 4)["state"] == "end")
 
         assert store.stats()["turns"] == 5
         assert [t["seq"] for t in store.turns("a1")["turns"]] == [4, 3, 2, 1, 0]
@@ -286,41 +289,30 @@ def test_payload_roundtrip_is_self_contained(tmp_path):
         store.stop()
 
 
-def test_exit_rewrite_after_reopen_keeps_bytes(tmp_path):
+def test_death_survives_reopen(tmp_path):
     base = time.time()
 
     first = _store(tmp_path)
 
     try:
-        first.ingest(_turn("a1", base))
+        first.ingest(_turn("a1", base, death={"reason": "finished", "report": "done"}))
 
         _wait(first, lambda: first.stats()["turns"] == 1)
 
     finally:
         first.stop()
 
-    seen: list[object] = []
-
-    again = TurnStore(
-        tmp_path / "db",
-        batch_size=64,
-        batch_interval=0.01,
-        notify=lambda rows: seen.append(rows),
-    )
-
-    again.start()
+    again = _store(tmp_path)
 
     try:
-        before = again.stats()["bytes"]
+        meta = again.agents()[0]
 
-        # The same payload with the same started_at is the exit rewrite
-        # in place; the byte total must not grow by a whole turn.
-        again.ingest(_turn("a1", base))
+        assert meta["agent_id"] == "a1"
+        assert meta["last_death"] == "finished"
 
-        _wait(again, lambda: seen)
+        row = again.turns("a1")["turns"][0]
 
-        assert again.stats()["turns"] == 1
-        assert again.stats()["bytes"] == before
+        assert row["death"] == {"reason": "finished", "report": "done"}
 
     finally:
         again.stop()

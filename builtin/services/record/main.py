@@ -1,12 +1,10 @@
 """
 Record service: the turn archive, outside the prompt.
 
-An injection service in form only -- it registers with the hub,
-heartbeats, and answers every turn request, but its reply is
-always empty text (dropped by the collector, so it never reaches
-the prompt). Its real job is the payload: every collect carries
-`prev_turn` complete -- reply, calls, results, metering, rendered
-messages -- exactly once per turn. That is appended to a local
+It registers with the hub in `archive` mode, heartbeats, and
+receives each complete turn once that turn ends -- reply, calls,
+results, metering, rendered messages, and the death record when
+the turn ended the agent. Every delivery is appended to a local
 RocksDB store and served back as a trace UI.
 
 Nothing flows from the archive to the agent, by design: record
@@ -164,6 +162,7 @@ class RecordService:
             {
                 "service_id": self.config.service_id,
                 "endpoint": f"http://{self.config.host}:{self.config.port}/turn",
+                "mode": "archive",
             },
         )
 
@@ -207,16 +206,10 @@ class RecordService:
 
     def ingest(self, body: dict[str, Any]) -> None:
         """
-        Only completed turns are archived. The fresh `turn` is a
-        subset of what `prev_turn` will carry one boundary later, so
-        recording it would duplicate every turn.
+        The archive channel only ever delivers a turn that ended,
+        as a flat body.
         """
-        prev = body.get("prev_turn")
-
-        if not isinstance(prev, dict) or prev.get("ended_at") is None:
-            return
-
-        self.store.ingest(prev)
+        self.store.ingest(body)
 
 
 def build_app(service: RecordService) -> FastAPI:
@@ -272,12 +265,12 @@ def build_app(service: RecordService) -> FastAPI:
 
         return response
 
-    # ---------- injection endpoint ----------
+    # ---------- archive endpoint ----------
     @app.post("/turn")
     async def turn(body: dict[str, Any]) -> dict[str, str]:
         service.ingest(body)
 
-        return {"text": ""}
+        return {"ok": "true"}
 
     # ---------- API ----------
     @app.get("/api/agents")

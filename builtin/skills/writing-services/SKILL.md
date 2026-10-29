@@ -29,21 +29,27 @@ The core never links service code; the only contract is HTTP.
 1. On startup, POST to the hub (default `http://127.0.0.1:8901`):
 
    ```json
-   POST /register  {"service_id": "<name>", "endpoint": "http://127.0.0.1:<port>/turn"}
+   POST /register  {"service_id": "<name>", "endpoint": "http://127.0.0.1:<port>/turn",
+                    "mode": "inject"}
    ```
+
+   `mode` is `inject` (default) or `archive` (see step 3).
 
 2. Heartbeat `POST /heartbeat {"service_id": "<name>"}` more often
    than every 15 s. After `injection.heartbeat_ttl` (15 s) a stale
    service stops receiving turns; the entry itself is not deleted.
    A dead heartbeat simply means the next turn runs without you —
    never blocks anything.
-3. Before every prompt assembly the core POSTs
-   `{"turn": <fresh turn>, "prev_turn": <complete turn | null>}` to
-   your `/turn`; `prev_turn` includes `rendered`. You have **2
-   seconds**. Reply with a JSON object `{"text": "<str>"}` — that
-   text rides the turn as an Injection; plain text or any other
-   shape is a failed delivery (`ok=False`). Any non-2xx, timeout, or
-   crash is recorded on the Turn, not fatal.
+3. Serve the shape your `mode` asks for. An `inject` service
+   receives the fresh turn — a flat JSON object — before every
+   prompt assembly and has **2 seconds** to reply
+   `{"text": "<str>"}`; that text rides the turn as an Injection,
+   and plain text or any other shape is a failed delivery
+   (`ok=False`). An `archive` service receives the complete turn
+   (adds `rendered`, `reply`, `calls`, `results`, `llm`, `death`,
+   `ended_at`) once the turn ends; any 2xx is enough. A non-2xx,
+   timeout, or crash is recorded on the Turn for `inject` and
+   logged then dropped for `archive` — never fatal.
 4. On shutdown `POST /unregister`. Use a FastAPI lifespan to do
    register → run → unregister so the sequence always holds.
 
