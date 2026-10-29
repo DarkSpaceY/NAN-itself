@@ -265,3 +265,43 @@ flowchart TD
 - Everything you contribute is prompt text for the model: keep it
   compact, factual and stable across turns -- it rides the
   context of every turn it appears in.
+
+## The service kit
+
+`lib/nan-service-kit` (`nan_service_kit`) holds the shell every
+service shares: reading config, registering and heartbeating,
+logging, and the doubles its tests use. A service depends on it as
+a path dependency:
+
+    nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
+
+What it owns, so you do not write it again:
+
+- **Config** -- subclass `ServiceConfig` with your own keys, then
+  `read_config(YourConfig, Path(__file__).parent / "config.yaml")`.
+  Defaults are filled by the kit: `service_id` from the directory
+  name, `hub_url` from `NAN_INJECTION_PORT` (falling back to 8901),
+  `gateway_url` 8765, `mode` `inject`. The file wins wherever it
+  says something. `config.home` and `config.logs_dir` are bound to
+  the directory the config was read from: logs go under `logs/`, and
+  state is whatever you name under `home`.
+- **Lifecycle** -- `async with HubLink(config):` registers, heartbeats
+  every 5 s, re-registers when the hub answers `{"status": "unknown"}`
+  (it forgot you after a restart), re-posts your panel when
+  `config.surface` is set, and unregisters on exit. Every post is
+  best effort: an absent hub costs a warning line, never a failed
+  request.
+- **Logging** -- `setup_logging(config)` sends loguru to
+  `logs/<service_id>.log` (10 MB, 3 kept). The boot scripts capture
+  only what is printed before that, in `logs/<name>.boot.log`, so
+  neither file has two writers.
+- **Tests** -- `StubHub` replaces the hub and gateway with a
+  recorder; `assert_registered`, `assert_turn_text`,
+  `assert_turn_ack` state the contract once:
+
+      assert_registered(stub, config)      # what you register, in one shape
+      assert_turn_text(client, "hello")   # {"text": <str>} and nothing else
+
+  `system`, `network`, `mcp` and `record` each keep a
+  `tests/test_contract.py` built exactly this way; copy it.
+

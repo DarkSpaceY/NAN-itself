@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
-    "pyyaml>=6.0.2",
+    "nan-service-kit",
     "rocksdict>=0.3.25",
     "uvicorn>=0.30.0",
     "zstandard>=0.23.0",
@@ -15,6 +15,9 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 
 [dependency-groups]
 dev = ["pytest>=8.3.0", "httpx>=0.28.1"]

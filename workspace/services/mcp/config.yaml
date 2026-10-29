@@ -6,12 +6,14 @@
 #   name     unique id used by the CLI and the API
 #   command  executable (npx / uvx / ...)
 #   args     command arguments; "{workspace}" expands to the
-#            workspace root, "{service_data}" to this service's data
+#            workspace root, "{service_cache}" to this service's cache
 #            dir, "{service_dir}" to this service's directory
 #   env      optional extra environment variables for the server process
 #   cwd      optional working directory
 
-hub_url: http://127.0.0.1:8901
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
+# at launch, 8901 otherwise).
+
 service_id: mcp
 host: 127.0.0.1
 port: 9005
@@ -34,7 +36,7 @@ servers:
     command: npx
     args: ["--yes", "@playwright/mcp@0.0.79", "--headless"]
     env:
-      PLAYWRIGHT_BROWSERS_PATH: "{service_data}/pw-browsers"
+      PLAYWRIGHT_BROWSERS_PATH: "{service_cache}/playwright"
 
   - name: prolog
     command: npx

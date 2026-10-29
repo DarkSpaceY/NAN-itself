@@ -43,13 +43,11 @@ def _turn(agent_id: str, started_at: float):
 def _service(tmp_path) -> tuple[record.RecordService, TestClient]:
     config = record.load_config()
 
-    config.data_dir = tmp_path / "db"
-
     config.batch_interval = 0.01
 
     config.batch_size = 16
 
-    service = record.RecordService(config)
+    service = record.RecordService(config, store_dir=tmp_path / "turns")
 
     service.store.start()
 

@@ -21,6 +21,7 @@ Run:  uv run main.py   (from this directory, after `uv sync`)
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import json
 import os
@@ -36,12 +37,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psutil
 import uvicorn
-import yaml
 from fastapi import FastAPI
 from loguru import logger
+from nan_service_kit import HubLink, ServiceConfig, read_config, setup_logging
 
 try:
     import mss
@@ -860,57 +860,48 @@ def render_facts(
 # ============================================================================
 
 
-class Config:
-    """Typed view of config.yaml; unknown keys are ignored."""
+class Config(ServiceConfig):
+    """The system keys: thresholds and cadences for the probe."""
 
-    def __init__(self, raw: dict[str, Any]) -> None:
-        self.hub_url: str = str(raw.get("hub_url", "http://127.0.0.1:8901")).rstrip("/")
+    poll_interval: float = 5.0
 
-        self.service_id: str = str(raw.get("service_id", "system"))
+    disk_threshold: float = 90.0
 
-        self.host: str = str(raw.get("host", "127.0.0.1"))
+    disk_announce_every: float = 600.0
 
-        self.port: int = int(raw.get("port", 9001))
+    runaway_cpu: float = 90.0
 
-        self.poll_interval: float = float(raw.get("poll_interval", 5.0))
+    runaway_samples: int = 3
 
-        self.disk_threshold: float = float(raw.get("disk_threshold", 90.0))
+    idle_reset_after: float = 300.0
 
-        self.disk_announce_every: float = float(raw.get("disk_announce_every", 600.0))
+    assertions_every: float = 30.0
 
-        self.runaway_cpu: float = float(raw.get("runaway_cpu", 90.0))
+    top_cpu_threshold: float = 20.0
 
-        self.runaway_samples: int = int(raw.get("runaway_samples", 3))
+    top_procs_max: int = 3
 
-        self.idle_reset_after: float = float(raw.get("idle_reset_after", 300.0))
+    events_max: int = 8
 
-        self.assertions_every: float = float(raw.get("assertions_every", 30.0))
+    events_render_limit: int = 3
 
-        self.top_cpu_threshold: float = float(raw.get("top_cpu_threshold", 20.0))
-
-        self.top_procs_max: int = int(raw.get("top_procs_max", 3))
-
-        self.events_max: int = int(raw.get("events_max", 8))
-
-        self.events_render_limit: int = int(raw.get("events_render_limit", 3))
-
-        self.focus_title_cap: int = int(raw.get("focus_title_cap", 80))
+    focus_title_cap: int = 80
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-    return Config(raw)
+    return read_config(Config, path)
 
 
 class SystemService:
     """
-    Owns the probe, the latest sample and its rendered text, and
-    the hub lifecycle (register / heartbeat / unregister).
+    Owns the probe, the latest sample and its rendered text, and the
+    link that keeps this process registered with the hub.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, *, link: HubLink | None = None) -> None:
         self.config = config
+
+        self.link = link or HubLink(config)
 
         self.probe = SystemProbe(
             lock_fn=screen_locked,
@@ -934,8 +925,6 @@ class SystemService:
         self._rendered: str | None = None
 
         self._executor = ThreadPoolExecutor(max_workers=1)
-
-        self._client = httpx.Client(timeout=5.0)
 
     # -- sampling ------------------------------------------------------
 
@@ -965,33 +954,6 @@ class SystemService:
 
             await asyncio.sleep(self.config.poll_interval)
 
-    # -- hub lifecycle ---------------------------------------------------
-
-    def _post(self, path: str, body: dict[str, Any]) -> None:
-        try:
-            self._client.post(f"{self.config.hub_url}{path}", json=body)
-
-        except Exception:
-            logger.warning("hub {} unreachable", path)
-
-    async def _heartbeat_loop(self) -> None:
-        while True:
-            self._post("/heartbeat", {"service_id": self.config.service_id})
-
-            await asyncio.sleep(5.0)
-
-    def register(self) -> None:
-        self._post(
-            "/register",
-            {
-                "service_id": self.config.service_id,
-                "endpoint": f"http://{self.config.host}:{self.config.port}/turn",
-            },
-        )
-
-    def unregister(self) -> None:
-        self._post("/unregister", {"service_id": self.config.service_id})
-
     # -- turn answering --------------------------------------------------
 
     def contribution(self) -> str | None:
@@ -1001,26 +963,24 @@ class SystemService:
 def build_app(service: SystemService) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        service.register()
+        async with service.link:
+            sampler = asyncio.create_task(service._sample_loop(), name="system-sample")
 
-        sampler = asyncio.create_task(service._sample_loop(), name="system-sample")
+            logger.info(
+                "system service up on {}:{} (hub {})",
+                service.config.host,
+                service.config.port,
+                service.config.hub_url,
+            )
 
-        beater = asyncio.create_task(service._heartbeat_loop(), name="system-heartbeat")
+            try:
+                yield
 
-        logger.info(
-            "system service up on {}:{} (hub {})",
-            service.config.host,
-            service.config.port,
-            service.config.hub_url,
-        )
+            finally:
+                sampler.cancel()
 
-        yield
-
-        sampler.cancel()
-
-        beater.cancel()
-
-        service.unregister()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sampler
 
     app = FastAPI(lifespan=lifespan)
 
@@ -1036,12 +996,7 @@ def build_app(service: SystemService) -> FastAPI:
 def main() -> None:
     config = load_config()
 
-    logger.add(
-        HERE / "system.log",
-        rotation="5 MB",
-        retention=2,
-        level="INFO",
-    )
+    setup_logging(config)
 
     service = SystemService(config)
 

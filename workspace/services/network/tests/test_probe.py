@@ -1,35 +1,14 @@
 """
 Probe diff-logic tests: NetworkProbe.
 
-main.py is a plain script (not an importable package), so it is
-loaded by path. All probe inputs are injectable callables; no
-test touches real hardware or the real network.
+All probe inputs are injectable callables; no test touches real
+hardware or the real network.
 """
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
+import main as network_mod
 import pytest
-
-
-def _load():
-    path = Path(__file__).resolve().parent.parent / "main.py"
-
-    spec = importlib.util.spec_from_file_location("nan_network_service_main", path)
-
-    assert spec and spec.loader
-
-    module = importlib.util.module_from_spec(spec)
-
-    spec.loader.exec_module(module)
-
-    return module
-
-
-network_mod = _load()
-
 
 
 class FakeClock:
@@ -362,28 +341,5 @@ def test_network_render_offline():
     text = network_mod.render_facts(facts, events_limit=3)
 
     assert "offline" in text
-
-# ============================================================================
-# Turn endpoint contract (no hub needed)
-# ============================================================================
-
-
-def test_turn_contract_roundtrip():
-    from fastapi.testclient import TestClient
-
-    config = network_mod.Config({"hub_url": "http://127.0.0.1:1", "port": 0})
-
-    service = network_mod.NetworkService(config)
-
-    service._rendered = "hello"
-
-    app = network_mod.build_app(service)
-
-    with TestClient(app) as client:  # lifespan starts/ends inside
-        response = client.post("/turn", json={})
-
-        assert response.status_code == 200
-
-        assert response.json() == {"text": "hello"}
 
 

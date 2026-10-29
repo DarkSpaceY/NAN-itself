@@ -1,8 +1,10 @@
 # Network service configuration. Loaded from this file's directory.
 # Every probe failure degrades to null; the service never dies
 # from a missing network.
+#
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
+# at launch, 8901 otherwise).
 
-hub_url: "http://127.0.0.1:8901"   # injection hub (register / heartbeat)
 service_id: "network"
 host: "127.0.0.1"
 port: 9002

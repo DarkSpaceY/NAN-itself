@@ -16,10 +16,13 @@ def test_config_parses_the_shipped_file():
 
     assert config.service_id == "mcp"
     assert config.port == 9005
-    assert any(spec.name == "search" for spec in config.servers)
+
+    specs = MCPService(config).specs
+
+    assert any(spec.name == "search" for spec in specs)
 
     # Placeholders are expanded before a server is launched.
-    for spec in config.servers:
+    for spec in specs:
         assert "{" not in spec.command
 
         for arg in spec.args:

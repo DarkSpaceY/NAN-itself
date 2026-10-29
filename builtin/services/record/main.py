@@ -16,7 +16,6 @@ Run:  uv run main.py   (from this directory, after `uv sync`)
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import time
 from collections.abc import AsyncIterator
@@ -24,14 +23,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import httpx
 import uvicorn
-import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
+from nan_service_kit import HubLink, Mode, ServiceConfig, read_config, setup_logging
 
 from store import TurnStore
 
@@ -41,60 +39,57 @@ DEFAULT_CONFIG_PATH = HERE / "config.yaml"
 
 WEB_DIR = HERE / "web"
 
+STORE_DIR = "turns"
 
-class Config:
-    """Typed view of config.yaml; unknown keys are ignored."""
 
-    def __init__(self, raw: dict[str, Any]) -> None:
-        self.hub_url: str = str(raw.get("hub_url", "http://127.0.0.1:8901")).rstrip("/")
+class Config(ServiceConfig):
+    """
+    The archive keys: what to keep, and how the UI pages through it.
+    """
 
-        self.gateway_url: str = str(raw.get("gateway_url", "http://127.0.0.1:8765")).rstrip("/")
+    mode: Mode = "archive"
 
-        self.service_id: str = str(raw.get("service_id", "record"))
+    max_bytes: int = 0
 
-        self.host: str = str(raw.get("host", "127.0.0.1"))
+    prune_to: float = 0.95
 
-        self.port: int = int(raw.get("port", 9003))
+    batch_size: int = 256
 
-        self.surface_every: float = float(raw.get("surface_every", 10.0))
+    batch_interval: float = 0.1
 
-        self.data_dir: Path = HERE / str(raw.get("data_dir", "data"))
+    queue_max: int = 10_000
 
-        self.max_bytes: int = int(raw.get("max_bytes", 0))
+    ledger_limit: int = 300
 
-        self.prune_to: float = float(raw.get("prune_to", 0.95))
-
-        self.batch_size: int = int(raw.get("batch_size", 256))
-
-        self.batch_interval: float = float(raw.get("batch_interval", 0.1))
-
-        self.queue_max: int = int(raw.get("queue_max", 10_000))
-
-        self.ledger_limit: int = int(raw.get("ledger_limit", 300))
-
-        self.activity_buckets: int = int(raw.get("activity_buckets", 1200))
+    activity_buckets: int = 1200
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-    return Config(raw)
+    return read_config(Config, path)
 
 
 class RecordService:
     """
-    Owns the store, the hub lifecycle and the surface heartbeat.
+    Owns the store, the hub lifecycle and the live fan-out.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        store_dir: Path | None = None,
+        link: HubLink | None = None,
+    ) -> None:
         self.config = config
+
+        self.link = link or HubLink(config)
 
         self._loop: asyncio.AbstractEventLoop | None = None
 
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
 
         self.store = TurnStore(
-            config.data_dir,
+            store_dir or config.home / STORE_DIR,
             max_bytes=config.max_bytes,
             prune_to=config.prune_to,
             batch_size=config.batch_size,
@@ -102,8 +97,6 @@ class RecordService:
             queue_max=config.queue_max,
             notify=self._publish,
         )
-
-        self._client = httpx.Client(timeout=5.0)
 
     # -- live fan-out ----------------------------------------------------
 
@@ -147,61 +140,6 @@ class RecordService:
         finally:
             self._subscribers.discard(subscriber)
 
-    # -- hub / gateway lifecycle -----------------------------------------
-
-    def _post(self, url: str, body: dict[str, Any]) -> None:
-        try:
-            self._client.post(url, json=body)
-
-        except Exception:
-            logger.warning("{} unreachable", url)
-
-    def register(self) -> None:
-        self._post(
-            f"{self.config.hub_url}/register",
-            {
-                "service_id": self.config.service_id,
-                "endpoint": f"http://{self.config.host}:{self.config.port}/turn",
-                "mode": "archive",
-            },
-        )
-
-    def register_surface(self) -> None:
-        self._post(
-            f"{self.config.gateway_url}/surfaces",
-            {
-                "service_id": self.config.service_id,
-                "url": f"http://{self.config.host}:{self.config.port}/",
-                "title": "Record",
-            },
-        )
-
-    async def _heartbeat_loop(self) -> None:
-        surface_at = 0.0
-
-        while True:
-            self._post(
-                f"{self.config.hub_url}/heartbeat", {"service_id": self.config.service_id}
-            )
-
-            now = time.monotonic()
-
-            if now >= surface_at:
-                surface_at = now + self.config.surface_every
-
-                self.register_surface()
-
-            await asyncio.sleep(5.0)
-
-    def unregister(self) -> None:
-        self._post(f"{self.config.hub_url}/unregister", {"service_id": self.config.service_id})
-
-        try:
-            self._client.delete(f"{self.config.gateway_url}/surfaces/{self.config.service_id}")
-
-        except Exception:
-            pass
-
     # -- turn endpoint ----------------------------------------------------
 
     def ingest(self, body: dict[str, Any]) -> None:
@@ -219,22 +157,15 @@ def build_app(service: RecordService) -> FastAPI:
 
         service.store.start()
 
-        service.register()
+        async with service.link:
+            logger.info(
+                "record archive up on {}:{} (store {})",
+                service.config.host,
+                service.config.port,
+                service.store.path,
+            )
 
-        beater = asyncio.create_task(service._heartbeat_loop(), name="record-heartbeat")
-
-        logger.info(
-            "record service up on {}:{} (store {})",
-            service.config.host,
-            service.config.port,
-            service.config.data_dir,
-        )
-
-        yield
-
-        beater.cancel()
-
-        service.unregister()
+            yield
 
         service.store.stop()
 
@@ -335,11 +266,8 @@ def build_app(service: RecordService) -> FastAPI:
 def main() -> None:
     config = load_config()
 
-    config.data_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(config)
 
-    # The log file is owned by the boot script that launches this
-    # process (stdout/stderr are redirected there); logging to the
-    # same path here would put two writers on one rotating file.
     service = RecordService(config)
 
     uvicorn.run(

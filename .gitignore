@@ -24,11 +24,14 @@ wheels/
 # committed template.
 config/nan.yaml
 
-# Runtime data
-data/
-# RocksDB renames a store to data.<reason>-<timestamp>/ when it fails to open.
-data.*/
+# Runtime directories (gitignored)
+logs/
+turns/
+cache/
+# RocksDB renames a store to turns.<reason>-<timestamp>/ when it fails to open.
+turns.*/
 *.log
+*.log.*
 workspace/*.pid
 
 # Model weights (large binaries, managed outside git)

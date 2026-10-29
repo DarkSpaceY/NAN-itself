@@ -20,20 +20,41 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export UV_CACHE_DIR="$HERE/.cache/uv"
 export PIP_CACHE_DIR="$HERE/.cache/pip"
 
+LOG="$HERE/autostart.log"
+
+note() {
+    echo "[autostart] $*" >> "$LOG"
+}
+
+note "boot at $(date)"
+
+# The launcher creates only logs/: <name>.boot.log holds what it
+# printed before loguru took over -- uv failures, import errors,
+# uvicorn's warnings -- and <service_id>.log is the log the service
+# itself rotates. Any state directory is the service's own choice.
 launch() {
     local dir="$1"
     local name
     name="$(basename "$dir")"
 
     [ -d "$dir" ] || {
-        echo "[builtin-autostart] missing service dir: $dir" >&2
+        note "missing service dir: $dir"
         return
     }
 
-    mkdir -p "$dir/data"
+    mkdir -p "$dir/logs"
 
-    uv run --project "$dir" python "$dir/main.py" \
-        >> "$dir/data/$name.log" 2>&1 &
+    local boot_log="$dir/logs/$name.boot.log"
+
+    # Only startup output lands here, but a crash loop can pile it up;
+    # keep one previous generation.
+    if [ -f "$boot_log" ] && [ "$(wc -c < "$boot_log")" -gt 1048576 ]; then
+        mv -f "$boot_log" "$boot_log.1"
+    fi
+
+    uv run --project "$dir" python "$dir/main.py" >> "$boot_log" 2>&1 &
+
+    note "launched $name (pid $!)"
 }
 
 # --- builtin components ------------------------------------------------

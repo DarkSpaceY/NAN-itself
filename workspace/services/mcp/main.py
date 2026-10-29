@@ -24,17 +24,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import httpx
 import uvicorn
-import yaml
 from fastapi import FastAPI
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 from loguru import logger
+from nan_service_kit import HubLink, ServiceConfig, read_config, setup_logging
 
 HERE = Path(__file__).resolve().parent
 
 DEFAULT_CONFIG_PATH = HERE / "config.yaml"
+
+CACHE_DIR = "cache"  # package-manager caches; regenerable, safe to delete
 
 
 class ServerSpec:
@@ -74,39 +75,20 @@ class ServerSpec:
         return json.dumps([self.command, self.args, self.cwd, self.env], sort_keys=True)
 
 
-class Config:
+class Config(ServiceConfig):
     """
-    Typed view of config.yaml; unknown keys are ignored.
+    The gateway keys: which servers to hold, and how long a call may run.
+    A server entry stays raw here; `MCPService` expands its placeholders
+    once the service's own directory is known.
     """
 
-    def __init__(self, raw: dict[str, Any]) -> None:
-        self.hub_url: str = str(raw.get("hub_url", "http://127.0.0.1:8901")).rstrip("/")
+    call_timeout: float = 120.0
 
-        self.service_id: str = str(raw.get("service_id", "mcp"))
-
-        self.host: str = str(raw.get("host", "127.0.0.1"))
-
-        self.port: int = int(raw.get("port", 9002))
-
-        self.call_timeout: float = float(raw.get("call_timeout", 120.0))
-
-        self.data_dir = HERE / "data"
-
-        placeholders = {
-            "workspace": os.environ.get("NAN_WORKSPACE", str(HERE.parents[1])),
-            "service_data": str(self.data_dir),
-            "service_dir": str(HERE),
-        }
-
-        self.servers: list[ServerSpec] = [
-            ServerSpec(entry, placeholders) for entry in raw.get("servers", [])
-        ]
+    servers: list[dict[str, Any]] = []
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-    return Config(raw)
+    return read_config(Config, path)
 
 
 class MCPServer:
@@ -127,12 +109,14 @@ class MCPServer:
         self._lock = asyncio.Lock()
 
     def _build_client(self) -> Client:
-        # Cache directories are redirected into the service's data
-        # dir: the launch sandbox only grants writes under workspace.
+        # Package-manager caches land in this service's own cache dir:
+        # the launch sandbox only grants writes under workspace.
+        cache = self.config.home / CACHE_DIR
+
         cache_env = {
-            "npm_config_cache": str(self.config.data_dir / "npm-cache"),
-            "UV_CACHE_DIR": str(self.config.data_dir / "uv-cache"),
-            "PLAYWRIGHT_BROWSERS_PATH": str(self.config.data_dir / "pw-browsers"),
+            "npm_config_cache": str(cache / "npm"),
+            "UV_CACHE_DIR": str(cache / "uv"),
+            "PLAYWRIGHT_BROWSERS_PATH": str(cache / "playwright"),
         }
 
         env = {**os.environ, **cache_env, **self.spec.env}
@@ -219,11 +203,17 @@ class MCPServer:
 
 class MCPService:
     """
-    Owns the config lifecycle, the running servers, the hub
-    registration and the prompt contribution.
+    Owns the running servers, the config watch, the hub link and the
+    prompt contribution.
     """
 
-    def __init__(self, config: Config, config_path: Path = DEFAULT_CONFIG_PATH) -> None:
+    def __init__(
+        self,
+        config: Config,
+        config_path: Path = DEFAULT_CONFIG_PATH,
+        *,
+        link: HubLink | None = None,
+    ) -> None:
         self.config = config
 
         self.config_path = config_path
@@ -234,12 +224,27 @@ class MCPService:
 
         self._lifecycle = asyncio.Lock()
 
-        self._http = httpx.Client(timeout=5.0)
+        self.link = link or HubLink(config)
+
+        self.specs = self._specs_for(config)
+
+    @staticmethod
+    def _specs_for(config: Config) -> list[ServerSpec]:
+        """
+        Expand each raw entry against this service's own paths.
+        """
+        placeholders = {
+            "workspace": os.environ.get("NAN_WORKSPACE", str(config.home.parents[1])),
+            "service_cache": str(config.home / CACHE_DIR),
+            "service_dir": str(config.home),
+        }
+
+        return [ServerSpec(entry, placeholders) for entry in config.servers]
 
     # -- server lifecycle -------------------------------------------------
 
     async def start_all(self) -> None:
-        for spec in self.config.servers:
+        for spec in self.specs:
             await self._ensure(spec)
 
     async def _ensure(self, spec: ServerSpec) -> None:
@@ -287,7 +292,9 @@ class MCPService:
 
             return
 
-        wanted = {spec.name: spec for spec in self.config.servers}
+        self.specs = self._specs_for(self.config)
+
+        wanted = {spec.name: spec for spec in self.specs}
 
         async with self._lifecycle:
             for name, server in list(self._running.items()):
@@ -296,39 +303,14 @@ class MCPService:
 
                     del self._running[name]
 
-        for spec in self.config.servers:
+        for spec in self.specs:
             await self._ensure(spec)
 
-    # -- hub lifecycle ------------------------------------------------------
-
-    def _post(self, url: str, body: dict[str, Any]) -> None:
-        try:
-            self._http.post(url, json=body)
-
-        except Exception:
-            logger.warning("{} unreachable", url)
-
-    def register(self) -> None:
-        self._post(
-            f"{self.config.hub_url}/register",
-            {
-                "service_id": self.config.service_id,
-                "endpoint": f"http://{self.config.host}:{self.config.port}/turn",
-            },
-        )
-
-    def unregister(self) -> None:
-        self._post(f"{self.config.hub_url}/unregister", {"service_id": self.config.service_id})
-
-    async def _heartbeat_loop(self) -> None:
+    async def _watch_config(self) -> None:
         while True:
-            self._post(
-                f"{self.config.hub_url}/heartbeat", {"service_id": self.config.service_id}
-            )
+            await asyncio.sleep(5.0)
 
             await self.reload_if_changed()
-
-            await asyncio.sleep(5.0)
 
     # -- prompt contribution ------------------------------------------------
 
@@ -350,26 +332,27 @@ class MCPService:
 def build_app(service: MCPService) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        service.register()
+        async with service.link:
+            # Servers start in the background: first-time npx/uvx
+            # downloads take minutes, the API must not wait for them.
+            starter = asyncio.create_task(service.start_all(), name="mcp-start")
 
-        # Servers start in the background: first-time npx/uvx
-        # downloads take minutes, the API must not wait for them.
-        starter = asyncio.create_task(service.start_all(), name="mcp-start")
+            watcher = asyncio.create_task(service._watch_config(), name="mcp-config")
 
-        beater = asyncio.create_task(service._heartbeat_loop(), name="mcp-heartbeat")
+            logger.info("mcp gateway up on {}:{}", service.config.host, service.config.port)
 
-        logger.info("mcp service up on {}:{}", service.config.host, service.config.port)
+            try:
+                yield
 
-        yield
+            finally:
+                for task in (watcher, starter):
+                    task.cancel()
 
-        beater.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
 
-        starter.cancel()
-
-        service.unregister()
-
-        for server in service._running.values():
-            await server.stop()
+                for server in service._running.values():
+                    await server.stop()
 
     app = FastAPI(lifespan=lifespan)
 
@@ -426,7 +409,7 @@ def build_app(service: MCPService) -> FastAPI:
 def main() -> None:
     config = load_config()
 
-    config.data_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(config)
 
     service = MCPService(config)
 

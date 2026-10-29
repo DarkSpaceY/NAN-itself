@@ -8,18 +8,21 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
-    "pyyaml>=6.0.2",
+    "nan-service-kit",
     "uvicorn>=0.30.0",
 ]
 
 [tool.uv]
 package = false
 
+[tool.uv.sources]
+nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
+
 [dependency-groups]
 dev = ["pytest>=8.3.0"]
 
 [tool.pytest.ini_options]
-# The service writes package-manager caches under data/ while it runs;
+# The service writes package-manager caches under cache/ while it runs;
 # without this, a test run against a live service collects the cached
 # third-party test suites as well.
 testpaths = ["tests"]

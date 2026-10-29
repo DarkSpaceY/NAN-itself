@@ -153,7 +153,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "loguru" },
-    { name = "pyyaml" },
+    { name = "nan-service-kit" },
     { name = "rocksdict" },
     { name = "uvicorn" },
     { name = "zstandard" },
@@ -170,7 +170,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "nan-service-kit", editable = "../../../lib/nan-service-kit" },
     { name = "rocksdict", specifier = ">=0.3.25" },
     { name = "uvicorn", specifier = ">=0.30.0" },
     { name = "zstandard", specifier = ">=0.23.0" },
@@ -181,6 +181,28 @@ dev = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=8.3.0" },
 ]
+
+[[package]]
+name = "nan-service-kit"
+version = "0.1.0"
+source = { editable = "../../../lib/nan-service-kit" }
+dependencies = [
+    { name = "httpx" },
+    { name = "loguru" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "pydantic", specifier = ">=2.11.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.0" }]
 
 [[package]]
 name = "opentelemetry-api"

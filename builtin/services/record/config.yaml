@@ -2,16 +2,20 @@
 #
 # The archive is best-effort: it observes completed turns, never
 # contributes to the prompt, and never fails a turn.
+#
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
+# at launch, 8901 otherwise); gateway_url defaults to 8765. Set either
+# here to pin it.
 
-hub_url: "http://127.0.0.1:8901"     # injection hub (register / heartbeat)
-gateway_url: "http://127.0.0.1:8765" # gateway (surface registration)
 service_id: "record"
 host: "127.0.0.1"
 port: 9003
+mode: "archive"                     # receives completed turns, never speaks
 
-surface_every: 10.0                 # seconds between surface heartbeats (gateway TTL 30s)
+surface:                            # the trace UI, served by this service
+  title: "Record"
+  every: 10.0                       # seconds between panel refreshes (gateway TTL 30s)
 
-data_dir: "data"                    # relative to this directory; gitignored
 max_bytes: 0                        # 0 = keep everything; set a byte cap to enable pruning
 prune_to: 0.95                      # retention deletes down to this fraction of max_bytes
 

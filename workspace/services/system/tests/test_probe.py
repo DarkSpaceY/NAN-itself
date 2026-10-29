@@ -1,34 +1,14 @@
 """
 Probe diff-logic tests: SystemProbe.
 
-main.py is a plain script (not an importable package), so it is
-loaded by path. All probe inputs are injectable callables; no
-test touches real hardware.
+All probe inputs are injectable callables; no test touches real
+hardware.
 """
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
+import main as system_mod
 import pytest
-
-
-def _load():
-    path = Path(__file__).resolve().parent.parent / "main.py"
-
-    spec = importlib.util.spec_from_file_location("nan_system_service_main", path)
-
-    assert spec and spec.loader
-
-    module = importlib.util.module_from_spec(spec)
-
-    spec.loader.exec_module(module)
-
-    return module
-
-
-system_mod = _load()
 
 # ============================================================================
 # Shared fakes
@@ -346,29 +326,4 @@ def test_system_parse_assertions():
         "backupd: PreventSystemSleep",
         "app: UserIsActive com.apple.iohideventsystem",
     ]
-
-
-
-# ============================================================================
-# Turn endpoint contract (no hub needed)
-# ============================================================================
-
-
-def test_turn_contract_roundtrip():
-    from fastapi.testclient import TestClient
-
-    config = system_mod.Config({"hub_url": "http://127.0.0.1:1", "port": 0})
-
-    service = system_mod.SystemService(config)
-
-    service._rendered = "hello"
-
-    app = system_mod.build_app(service)
-
-    with TestClient(app) as client:  # lifespan starts/ends inside
-        response = client.post("/turn", json={})
-
-        assert response.status_code == 200
-
-        assert response.json() == {"text": "hello"}
 

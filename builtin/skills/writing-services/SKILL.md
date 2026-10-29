@@ -21,8 +21,33 @@ The core never links service code; the only contract is HTTP.
 ├── config.yaml      # tunables, loaded once at startup (optional)
 ├── pyproject.toml   # its own dependencies + [dependency-groups] dev = ["pytest"]
 ├── uv.lock          # committed; CI runs with --frozen
+├── logs/            # created at boot: your logs (gitignored)
+├── ...              # state dirs you keep, named by you (gitignored)
 └── tests/           # its own tests; the core repo never tests service internals
 ```
+
+## The service kit
+
+`lib/nan-service-kit` (`nan_service_kit`) is the shared shell: config,
+hub registration, logging, and test doubles. Depend on it and skip the
+boilerplate — copy `workspace/services/system/main.py` as the template.
+
+```toml
+[tool.uv.sources]
+nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
+```
+
+- `read_config(YourConfig, HERE / "config.yaml")` — subclass
+  `ServiceConfig` for your keys. The kit fills `service_id` (the
+  directory name), `hub_url` (from `NAN_INJECTION_PORT`), `gateway_url`
+  and `mode`, and binds `config.home` / `config.logs_dir` to the
+  directory the config was read from. Keep state in directories you
+  name under `home`; the kit only owns `logs/`, which is disposable.
+- `async with HubLink(config):` in the lifespan — register, heartbeat,
+  re-register if the hub restarted, panel keepalive, unregister.
+- `setup_logging(config)` — `logs/<service_id>.log`, rotated.
+  Everything before it goes to `logs/<name>.boot.log` (the launcher's
+  capture), never to the same file.
 
 ## The protocol (nan/injection/hub.py is the source of truth)
 
@@ -51,7 +76,8 @@ The core never links service code; the only contract is HTTP.
    timeout, or crash is recorded on the Turn for `inject` and
    logged then dropped for `archive` — never fatal.
 4. On shutdown `POST /unregister`. Use a FastAPI lifespan to do
-   register → run → unregister so the sequence always holds.
+   register → run → unregister so the sequence always holds —
+   `async with HubLink(config)` is exactly that.
 
 ## Discipline
 
@@ -76,9 +102,10 @@ The core never links service code; the only contract is HTTP.
 Inject fakes — clock, probe functions, subprocess shims — so tests
 never touch real hardware or the real network. Cover the differential
 logic (each event fires exactly on transition) and the `/turn`
-contract (status code, JSON `{"text": ...}` body, empty-ok on no
-data). Run from the
-service directory:
+contract. For the contract itself, point the service's `HubLink` at
+`nan_service_kit.testing.StubHub` and assert `assert_registered` /
+`assert_turn_text` — see each shipped service's `tests/test_contract.py`.
+Run from the service directory:
 
 ```bash
 cd workspace/services/<name> && uv run --frozen pytest
@@ -87,13 +114,18 @@ cd workspace/services/<name> && uv run --frozen pytest
 ## Wiring into autostart
 
 `workspace/autostart.sh` is your boot script (you may write it; it
-runs inside the sandbox) — add a `launch_service` line for your
-service. The user's own script, `builtin/autostart.sh`, is
-off-limits (no write access); if present it runs outside the
-sandbox (the repo does not ship one). The core exports
-`NAN_WORKSPACE`, `NAN_CORE_HOME`, `NAN_INJECTION_PORT` and
-`NAN_CORE_PID` to launched services; logs go to
-`$NAN_WORKSPACE/<name>.log`.
+runs inside the sandbox) — add one line:
+
+```bash
+launch "$NAN_WORKSPACE/services/<name>"
+```
+
+`launch` creates `logs/`, rotates `logs/<name>.boot.log`, runs the
+service from its own directory and records the pid in
+`autostart.log`. The user's own script, `builtin/autostart.sh`, is
+off-limits (no write access) and does the same for builtin services.
+The core exports `NAN_WORKSPACE`, `NAN_CORE_HOME`,
+`NAN_INJECTION_PORT` and `NAN_CORE_PID` to launched services.
 
 ## Before finishing
 

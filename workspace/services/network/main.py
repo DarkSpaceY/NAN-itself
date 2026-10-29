@@ -38,9 +38,9 @@ from typing import Any
 import httpx
 import psutil
 import uvicorn
-import yaml
 from fastapi import FastAPI
 from loguru import logger
+from nan_service_kit import HubLink, ServiceConfig, read_config, setup_logging
 
 HERE = Path(__file__).resolve().parent
 
@@ -931,72 +931,56 @@ def _link_line(facts: dict[str, Any]) -> str:
 # ============================================================================
 
 
-class Config:
-    """Typed view of config.yaml; unknown keys are ignored."""
+class Config(ServiceConfig):
+    """The network keys: what to probe, and how often."""
 
-    def __init__(self, raw: dict[str, Any]) -> None:
-        self.hub_url: str = str(raw.get("hub_url", "http://127.0.0.1:8901")).rstrip("/")
+    probe_urls: list[str] = ["http://captive.apple.com", "https://www.baidu.com"]
 
-        self.service_id: str = str(raw.get("service_id", "network"))
+    dns_host: str = "www.apple.com"
 
-        self.host: str = str(raw.get("host", "127.0.0.1"))
+    arp_watch: bool = False
 
-        self.port: int = int(raw.get("port", 9002))
+    ip_urls: list[str] = ["https://api.ipify.org", "https://ip.3322.net"]
 
-        self.probe_urls: list[str] = list(
-            raw.get(
-                "probe_urls",
-                ["http://captive.apple.com", "https://www.baidu.com"],
-            ),
-        )
+    probe_timeout: float = 3.0
 
-        self.dns_host: str = str(raw.get("dns_host", "www.apple.com"))
+    online_every: float = 15.0
 
-        self.arp_watch: bool = bool(raw.get("arp_watch", False))
+    ip_every: float = 600.0
 
-        self.ip_urls: list[str] = list(
-            raw.get("ip_urls", ["https://api.ipify.org", "https://ip.3322.net"]),
-        )
+    conns_every: float = 15.0
 
-        self.probe_timeout: float = float(raw.get("probe_timeout", 3.0))
+    arp_every: float = 60.0
 
-        self.online_every: float = float(raw.get("online_every", 15.0))
+    offline_after: int = 2
 
-        self.ip_every: float = float(raw.get("ip_every", 600.0))
+    spike_ratio: float = 8.0
 
-        self.conns_every: float = float(raw.get("conns_every", 15.0))
+    spike_floor_bps: float = 1_000_000.0
 
-        self.arp_every: float = float(raw.get("arp_every", 60.0))
+    outbound_max: int = 512
 
-        self.offline_after: int = int(raw.get("offline_after", 2))
+    outbound_ttl: float = 3600.0
 
-        self.spike_ratio: float = float(raw.get("spike_ratio", 8.0))
+    events_max: int = 8
 
-        self.spike_floor_bps: float = float(raw.get("spike_floor_bps", 1_000_000.0))
-
-        self.outbound_max: int = int(raw.get("outbound_max", 512))
-
-        self.outbound_ttl: float = float(raw.get("outbound_ttl", 3600.0))
-
-        self.events_max: int = int(raw.get("events_max", 8))
-
-        self.events_render_limit: int = int(raw.get("events_render_limit", 3))
+    events_render_limit: int = 3
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
-    return Config(raw)
+    return read_config(Config, path)
 
 
 class NetworkService:
     """
-    Owns the probe, the latest sample and its rendered text, and
-    the hub lifecycle (register / heartbeat / unregister).
+    Owns the probe, the latest sample and its rendered text, and the
+    link that keeps this process registered with the hub.
     """
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, *, link: HubLink | None = None) -> None:
         self.config = config
+
+        self.link = link or HubLink(config)
 
         self.probe = NetworkProbe(
             probe_urls=config.probe_urls,
@@ -1021,8 +1005,6 @@ class NetworkService:
         self._rendered: str | None = None
 
         self._executor = ThreadPoolExecutor(max_workers=1)
-
-        self._client = httpx.Client(timeout=5.0)
 
     # -- sampling ------------------------------------------------------
 
@@ -1051,33 +1033,6 @@ class NetworkService:
 
             await asyncio.sleep(5.0)
 
-    # -- hub lifecycle ---------------------------------------------------
-
-    def _post(self, path: str, body: dict[str, Any]) -> None:
-        try:
-            self._client.post(f"{self.config.hub_url}{path}", json=body)
-
-        except Exception:
-            logger.warning("hub {} unreachable", path)
-
-    async def _heartbeat_loop(self) -> None:
-        while True:
-            self._post("/heartbeat", {"service_id": self.config.service_id})
-
-            await asyncio.sleep(5.0)
-
-    def register(self) -> None:
-        self._post(
-            "/register",
-            {
-                "service_id": self.config.service_id,
-                "endpoint": f"http://{self.config.host}:{self.config.port}/turn",
-            },
-        )
-
-    def unregister(self) -> None:
-        self._post("/unregister", {"service_id": self.config.service_id})
-
     # -- turn answering --------------------------------------------------
 
     def contribution(self) -> str | None:
@@ -1087,26 +1042,24 @@ class NetworkService:
 def build_app(service: NetworkService) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        service.register()
+        async with service.link:
+            sampler = asyncio.create_task(service._sample_loop(), name="network-sample")
 
-        sampler = asyncio.create_task(service._sample_loop(), name="network-sample")
+            logger.info(
+                "network service up on {}:{} (hub {})",
+                service.config.host,
+                service.config.port,
+                service.config.hub_url,
+            )
 
-        beater = asyncio.create_task(service._heartbeat_loop(), name="network-heartbeat")
+            try:
+                yield
 
-        logger.info(
-            "network service up on {}:{} (hub {})",
-            service.config.host,
-            service.config.port,
-            service.config.hub_url,
-        )
+            finally:
+                sampler.cancel()
 
-        yield
-
-        sampler.cancel()
-
-        beater.cancel()
-
-        service.unregister()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sampler
 
     app = FastAPI(lifespan=lifespan)
 
@@ -1122,12 +1075,7 @@ def build_app(service: NetworkService) -> FastAPI:
 def main() -> None:
     config = load_config()
 
-    logger.add(
-        HERE / "network.log",
-        rotation="5 MB",
-        retention=2,
-        level="INFO",
-    )
+    setup_logging(config)
 
     service = NetworkService(config)
 

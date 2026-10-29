@@ -1,0 +1,21 @@
+[project]
+name = "nan-service-kit"
+version = "0.1.0"
+description = "Shared shell for NAN services: config, hub lifecycle, logging, contract test doubles"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "pydantic>=2.11.0",
+    "pyyaml>=6.0.2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
