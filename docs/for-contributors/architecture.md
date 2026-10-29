@@ -1,7 +1,8 @@
 # Architecture
 
-One runtime package, `nan/`. Every module below is a real file
-in it; this document follows the actual layout.
+The core runtime lives in `nan/`; service processes share
+`lib/nan-service-kit`. The tree below shows the core modules and
+follows the actual layout.
 
     nan/
     ├── app.py            composition root
@@ -17,23 +18,29 @@ in it; this document follows the actual layout.
     │   ├── model.py      the Turn record
     │   └── render.py     frozen prompt rendering
     ├── llm/
-    │   ├── provider.py   the only module that talks to model APIs
+    │   ├── provider.py   the model API transport
     │   └── types.py      protocol vocabulary (DTOs)
     ├── injection/
     │   ├── hub.py        registry + per-turn collection
     │   └── client.py     the concurrent collector
+    ├── utils/
+    │   ├── loopback.py   entry guard primitives
+    │   └── autostart.py  boot scripts and process groups
     └── config/           pydantic-settings, YAML source
 
-Any domain may import the DTOs in `nan/llm/types.py`; only
-`nan/agent/engine.py` calls `LLMProvider`, the transport edge.
-The agent runtime does not branch on which provider is in use.
+Any domain may import the DTOs in `nan/llm/types.py`. The
+composition root constructs one `LLMProvider` (the transport edge),
+and the turn engine is the module that calls it. The agent runtime
+stays independent of which provider is in use.
 
 ## One agent, one task
 
 An Agent is a single asyncio task running turns in a loop. The
-loop paces itself with `autonomous_interval` (or waits for input
-when it is 0). Messages never interrupt an in-flight turn: they
-queue in the inbox and drain at the next turn boundary.
+loop paces itself with `autonomous_interval`: above zero, each turn
+is followed by a sleep of that length; at zero, the loop waits for
+inbox input, and a turn that called verbs runs again so the model can
+read the results. Messages queue in the inbox and drain at the next
+turn boundary.
 
 ## The turn
 
@@ -48,17 +55,19 @@ flowchart LR
 
 A turn is the unit of record. `Turn` holds the inbox drained
 into it, the injections collected, the delta lines, and the
-model's reply -- a complete runtime log with no separate trace
-facility. The rendered prompt is frozen on first render and
-never recomputed: history is add-only, so unchanged turns are
+model's reply -- the complete runtime log. The event stream
+exposes the same facts live, and the turn is where they persist.
+
+The rendered prompt is frozen on first render and later turns
+append to it. History is add-only, so unchanged turns stay
 byte-stable and cache-friendly for the model's prompt prefix.
-When the history exceeds `history_char_limit` it is cleared
-whole -- a reset, not a rewrite.
+When the history exceeds `history_char_limit`, the whole history
+is cleared and a new context epoch begins.
 
 ```mermaid
 flowchart LR
     T1["turn 1<br/>(frozen)"] --> T2["turn 2<br/>(frozen)"] --> T3["turn 3<br/>(frozen)"]
-    T3 -->|"history_char_limit exceeded"| R["history cleared whole<br/>(new base, not a rewrite)"]
+    T3 -->|"history_char_limit exceeded"| R["history cleared whole<br/>(new context epoch)"]
     R --> T4["turn 4<br/>(frozen)"]
 ```
 
@@ -73,17 +82,16 @@ flowchart TD
 ```
 
 Solid edges are handles (downward, full authority); dotted
-edges are the parent reference a child uses to talk upstream
-(no handle, so a child cannot kill its parent).
+edges are the parent reference a child uses to talk upstream,
+which carries no control right over the parent.
 
 A Handle is a cross-agent channel plus the control right over
 one agent:
 
-- bound to exactly one target and one implicit holder (the
-  spawner; there is no root handle -- the composition root
-  delivers user input by calling the root's `receive_up`
-  directly)
-- not transferable: the cascade-death graph is exactly the
+- bound to exactly one target and one holder, the spawner. The
+  composition root holds the root agent directly and feeds it
+  through `receive_up`; every child is reached through a handle
+- owned by its spawner, so the cascade-death graph follows the
   spawn tree
 - through it the holder may `send()` into the target's inbox
   and `kill()` the target; the target replies upstream through
@@ -108,9 +116,12 @@ flowchart TD
 ## Verbs
 
 The six cognitive actions: `spawn`, `sleep`, `shell`, `send`,
-`kill`, `finish` (root has no finish). Tools and skills are not
-verbs -- they are plain files the agent reaches through `shell`
-inside the sandbox.
+`kill`, `finish` (root has no finish). Tools and skills are plain
+files the agent reaches through `shell` inside the sandbox.
+
+Before a command is wrapped, it passes the `sandbox.deny` rules: a
+regex hit returns the rule's `reason` to the model as the shell
+result, and the command does not run.
 
 ## Observations
 
@@ -157,7 +168,7 @@ sequenceDiagram
         H->>S: POST endpoint <fresh turn>
         S-->>H: {"text": "<str>"} (plain text => ok=false)
     end
-    H-->>A: Injection(ok, started_at, ended_at)
+    H-->>A: one result per service<br/>(ok, timing, text length)
     note over A: contributions and failures<br/>both land on the turn record
     A->>H: archive(turn), when the turn ends
     par concurrent, per live archive service
@@ -171,27 +182,28 @@ Services are independent processes registered with the hub
 declares a mode: `inject` entries receive the fresh Turn before
 every prompt assembly and their text lands on the turn record;
 `archive` entries receive the complete Turn once it ends and
-their reply is only an acknowledgement. Both modes feed the
-service online/offline delta.
+their reply is an acknowledgement. Both modes feed the service
+online/offline delta.
 
 ## Events
 
 ```mermaid
 flowchart LR
     AG["agent code"] -->|"sink.emit(...)"| S["sink<br/>(process-wide singleton)"]
-    S -->|"fan-out"| GW["gateway subscribers"]
-    S -->|"no subscribers"| HR["bounded history ring<br/>(reconnect snapshots)"]
+    S -->|"live copy"| GW["gateway subscribers"]
+    S -->|"every event"| HR["bounded history ring<br/>(reconnect snapshots)"]
 ```
 
 `nan.events.sink` is a process-wide singleton (loguru-style):
-agent code only *emits* (`sink.emit`), the gateway subscribes on
-its own; with no subscribers events simply land in a bounded
-history ring for reconnect snapshots. Nothing is wired by
-reference.
+agent code emits through `sink.emit`, and the gateway subscribes
+on its own. Every event also enters a bounded history ring, which
+supplies the snapshot a client receives on reconnect. Modules
+receive the sink as an argument or import it directly.
 
 ## Gateway
 
 The gateway formats the event stream for the web UI and carries
-user input back to the root agent's inbox. It owns nothing about
-agent semantics. Loopback-only with a Host/Origin entry guard
-(see [SECURITY.md](../../SECURITY.md)).
+user input back to the root agent's inbox. It owns the surface table
+and the input dedup cache; agent semantics stay with the runtime.
+It binds loopback and checks Host/Origin on entry (see
+[SECURITY.md](../../SECURITY.md)).

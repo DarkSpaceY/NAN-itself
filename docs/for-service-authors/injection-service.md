@@ -1,9 +1,8 @@
 # Writing an injection service
 
 An injection service is an independent local process that
-contributes text to every prompt assembly. It is the replacement
-for the old in-process module system: no registry to import, no
-hot-reload contract -- just HTTP on loopback.
+contributes text to every prompt assembly. It registers over HTTP
+on loopback and receives turns at its own endpoint.
 
 ## Lifecycle
 
@@ -26,11 +25,12 @@ sequenceDiagram
         H->>S: POST endpoint <fresh turn>
         S-->>H: {"text": "..."}
     end
-    H-->>A: Injection(ok=true/false, started_at, ended_at)
+    H-->>A: one result per service<br/>(ok, timing, text length)
 
-    Note over H,S: when the turn ends<br/>archive mode only
+    opt turn ended, archive mode only
         H->>S: POST endpoint <complete turn>
         S-->>H: 2xx
+    end
 
     opt clean shutdown
         S->>H: POST /unregister {service_id}
@@ -46,16 +46,16 @@ sequenceDiagram
    `service_id` is your identity in the observation stream;
    `endpoint` is the URL the hub will call. It must be loopback
    (`127.0.0.0/8`, `::1`, `localhost`): any other host is rejected
-   at registration, so turn payloads never leave the machine.
+   at registration, so turn payloads stay on the machine.
 
    `mode` decides which delivery you receive and defaults to
    `inject`:
 
    - `inject` -- the fresh turn before every prompt assembly; your
      reply is prompt text, recorded as an `Injection`.
-   - `archive` -- the complete turn once it ends; your reply is only
-     an acknowledgement and is never recorded. This is the mode for
-     services whose work is recording, such as `record`.
+   - `archive` -- the complete turn once it ends; your reply is an
+     acknowledgement and the hub does not record it. This is the mode
+     for services whose work is recording, such as `record`.
      A process may hold both modes as two `service_id`s.
 
 2. **Heartbeat** -- POST periodically (keep the interval well
@@ -102,7 +102,7 @@ request.
 - `url` must be loopback, served by the service itself.
 - `icon` is optional; when present it must be a full loopback URL
   (e.g. `http://127.0.0.1:9001/icon.svg`). A relative path resolves
-  against the gateway, not your service, and 404s.
+  against the gateway and 404s.
 - An entry expires after `gateway.surface_ttl` (30 s) without a
   POST: the desktop removes the window. Re-posting also covers
   boot order and core restarts.
@@ -118,14 +118,13 @@ request.
   desktop sends it is the theme, as
   `{type: "nan:theme", theme: "light" | "dark"}` on load and on
   every switch. Panels with a dark palette listen for it; the rest
-  ignore it. A panel has no theme switch of its own: light / dark is
-  decided by the desktop, and by `prefers-color-scheme` only when the
-  page is opened outside it.
+  ignore it. A panel has no theme switch of its own: the desktop
+  decides light or dark, and a page opened outside it falls back to
+  `prefers-color-scheme`.
 
 ## The turn JSON
 
-One delivery body is one turn, flat -- never a slot that can be
-empty:
+A delivery body is one turn, flat:
 
     { ...turn fields... }
 
@@ -134,11 +133,11 @@ empty:
 - `archive` services receive it **complete**, when the turn ends:
   the fresh fields plus `injections`, `reply`, `calls`, `results`,
   `llm`, `death`, `rendered` and `ended_at`.
-- An agent that stops simply stops: there is no exit delivery.
-  The last completed turn is the last thing an archive sees, and a
-  turn cut short by death never reaches it at all.
-- Both modes appear in the `delta` section, so the model still
-  learns that an archive service is online.
+- When an agent stops, the archive receives the completed turns:
+  the last completed turn is the last thing it sees, and a turn
+  cut short by death does not reach it.
+- Both modes appear in the `delta` section, so the model learns
+  that an archive service is online.
 
 ### Fresh turn
 
@@ -201,11 +200,11 @@ history was cleared wholesale -- rendered sequences do not cross
 this boundary). It says nothing about whether the turn ended;
 `ended_at` and the delivery channel do.
 
-`death` appears only on a completed turn and only when that turn
-ended the agent: `reason` is the exit reason, `report` the finish
-report when the model ended it itself (null for external deaths).
-A turn cut short before it completes is never delivered, so an
-archive can see an agent stop only through the turn that ended it.
+A completed turn carries `death` when that turn ended the agent:
+`reason` is the exit reason, `report` the finish report when the
+model ended it itself (null for external deaths). A turn cut short
+before it completes is discarded, so the archive learns of a stop
+from the turn that ended it.
 
 `persona` is the epoch marker for the system prompt: the new
 persona text on the one turn where the file content changed
@@ -215,11 +214,11 @@ state per persona epoch can see exactly where it started.
 The `injections` array is empty in the fresh shape: this turn's own
 contributions are collected after delivery. The completed turn
 carries them, `{service_id, text, ok, started_at, ended_at}`
-(`ok=false`: the error text). So your reply comes back to you in
-the archive copy of the same turn, not on a later turn -- if you
-need your own past answers while assembling, keep them yourself
-(you are stateless to the core; persistence is your business,
-typically a file under your own directory).
+(`ok=false`: the error text). Your reply comes back in the archive
+copy of the same turn. If you need your own past answers while
+assembling, keep them yourself: you are stateless to the core, and
+persistence is your business, typically a file under your own
+directory.
 
 ```mermaid
 flowchart LR
@@ -252,7 +251,7 @@ flowchart TD
 - A failure or timeout becomes an `Injection` with `ok: false`
   and the error text, recorded in the turn -- the agent sees it.
 - An empty reply contributes nothing.
-- Services are never in the critical path of the turn: a dead
+- Services sit outside the critical path of the turn: a dead
   service costs one timeout, then leaves the live set.
 
 ## Ground rules
@@ -289,7 +288,7 @@ What it owns, so you do not write it again:
   every 5 s, re-registers when the hub answers `{"status": "unknown"}`
   (it forgot you after a restart), re-posts your panel when
   `config.surface` is set, and unregisters on exit. Every post is
-  best effort: an absent hub costs a warning line, never a failed
+  best effort: an absent hub costs a warning line, not a failed
   request.
 - **Logging** -- `setup_logging(config)` sends loguru to
   `logs/<service_id>.log` (10 MB, 3 kept). The boot scripts capture

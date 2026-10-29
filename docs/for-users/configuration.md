@@ -1,11 +1,12 @@
 # Configuration
 
-The single source is `config/nan.yaml`, loaded once into the
-process-wide `nan.config.settings` object. The file is git-ignored
-(it holds your key); `config/nan.yaml.example` is the committed
-template, and a fresh checkout starts by copying it.
-NAN reads only `config/nan.yaml`; the provider SDKs may still fall
-back to their env vars when `api_key`/`base_url` are empty.
+Configuration lives in `config/nan.yaml`, read at startup into the
+process-wide `nan.config.settings` object; restart the core after
+editing it. The file is git-ignored (it holds your key);
+`config/nan.yaml.example` is the committed template, and a fresh
+checkout starts by copying it. NAN itself reads this file; the
+provider SDKs may fall back to their own env vars when
+`api_key`/`base_url` are empty.
 
 ## llm
 
@@ -17,7 +18,7 @@ back to their env vars when `api_key`/`base_url` are empty.
 | `model` | `""` | Model name sent to the endpoint |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
 | `max_retries` | `2` | SDK-level retry count |
-| `proxy` | `""` | `""`: direct, ambient environment and system proxies are ignored. `"env"`: use them. Any other value: that proxy URL |
+| `proxy` | `""` | `""`: direct connection, ignoring environment proxies. `"env"`: inherit proxies from the environment. Any other value: that proxy URL |
 
 Example -- a local 27B model behind llama.cpp:
 
@@ -31,8 +32,8 @@ Example -- a local 27B model behind llama.cpp:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `autonomous_interval` | `0.0` | `>0`: the root agent self-rotates with this pacing (seconds); `<=0`: event-driven (turns happen when input arrives) |
-| `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history (a reset, not a rewrite) |
+| `autonomous_interval` | `0.0` | `>0`: each agent starts a fresh turn every N seconds; `<=0`: event-driven -- a turn starts on inbox input, and a turn that called verbs runs again so the model can read the results |
+| `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history and starts a new context epoch |
 | `shell_timeout` | `30.0` | `shell` verb execution timeout; the model cannot change it |
 | `shell_output_limit` | `20000` | `shell` verb output truncation size (head + tail kept, middle elided) |
 | `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Turn-failure retry ladder (seconds); a failed turn is retried whole after these delays |
@@ -44,7 +45,7 @@ Example -- a local 27B model behind llama.cpp:
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `required` | `false` | `true`: refuse to start when no sandbox tool exists; `false`: run unwrapped with a warning |
-| `deny` | `[]` | Command-level refusal list: `{pattern, reason}` entries checked before the OS sandbox wraps the command |
+| `deny` | `[]`; the template ships a set | Command-level refusal list: `{pattern, reason}` entries checked before the OS sandbox wraps the command |
 
 The rules come from `deny` in this file, and the example template starts
 with a set covering the common destructive shapes. Leave the key out and
@@ -57,7 +58,7 @@ sandbox remains the limit on what a command can touch.
 
 ## injection
 
-The registry the external prompt-contributor services talk to.
+The registry that external prompt-contributor services talk to.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -82,9 +83,9 @@ The registry the external prompt-contributor services talk to.
 | `enabled` | `true` | Run both boot scripts once: `builtin/autostart.sh` (user-owned, outside the sandbox) and `workspace/autostart.sh` (agent-writable, inside the sandbox) |
 
 Both scripts are launched once at boot. The core keeps each script's
-process group and stops it on exit, so the services started there do
-not outlive the core or hold their ports for the next boot. A failure
-in either script does not block the core.
+process group and stops it on exit, so the services started there
+stop with the core and release their ports for the next boot. A
+failure in either script does not block the core.
 
 ## Paths
 
@@ -92,13 +93,13 @@ Paths default to the `nan.config.Paths` values, carried by the same
 `settings` object every component reads; a `paths:` block in
 `config/nan.yaml` overrides them.
 
-| Constant | Value | Meaning |
+| Key | Value | Meaning |
 |-----|---------|---------|
 | `paths.workspace` | `<repo>/workspace` | The agents' writable territory |
 | `paths.builtin` | `<repo>/builtin` | Read-only resource root (tools/skills as plain files) |
-| `paths.package` | `nan/` | The package root (read-only to agents) |
-| `paths.persona` | `nan/persona.md` | The global persona, re-read every turn |
+| `paths.package` | `<repo>/nan` | The package root (read-only to agents) |
+| `paths.persona` | `<repo>/nan/persona.md` | The global persona, re-read every turn |
 | `paths.frontend` | `<repo>/frontend/dist` | The built desktop served by the gateway |
-| `paths.autostart` | `builtin/autostart.sh` | Boot script, owned by the user (unsandboxed) |
-| `paths.agent_autostart` | `workspace/autostart.sh` | Boot script, writable by agents (sandboxed) |
+| `paths.autostart` | `<repo>/builtin/autostart.sh` | Boot script, owned by the user (unsandboxed) |
+| `paths.agent_autostart` | `<repo>/workspace/autostart.sh` | Boot script, writable by agents (sandboxed) |
 | `paths.config` | `<repo>/config/nan.yaml` | This file |

@@ -6,16 +6,18 @@
 - An LLM endpoint: any OpenAI-compatible API or the Anthropic API
   (a local llama.cpp/vLLM server works -- see `llm.base_url` in
   the configuration reference)
-- macOS or Linux. Windows is supported through
-  [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
-  only: the sandbox (bubblewrap) and the shell-first runtime have
-  no native Windows equivalent. See the note in the README.
+- macOS or Linux. On Windows, run NAN inside
+  [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install),
+  where bubblewrap and the Unix shell the runtime builds on are
+  available. See the note in the README.
+- Node.js 18+ for the web UI (optional: the core starts and serves
+  `/ws` and `/surfaces` without it).
 
 ## Install
 
-One-liner (macOS or Linux; installs uv if missing, clones to
-`~/nan`, syncs dependencies, builds the web UI, override the
-location with `NAN_HOME`):
+One-liner for macOS or Linux: installs uv if missing, clones to
+`~/nan` (override with `NAN_HOME`), syncs dependencies, and builds
+the web UI:
 
     curl -fsSL https://raw.githubusercontent.com/DarkSpaceY/NAN-itself/main/scripts/install.sh | sh
 
@@ -42,10 +44,9 @@ The minimum you must fill in is the active model:
       api_key: ""
       model: ""
 
-The persona file (`nan/persona.md` by default) must exist -- the
-core refuses to start without it. Edit it to define who the agent
-is; it is re-read every turn and it is a core file: the agent
-cannot rewrite it.
+The persona file (`nan/persona.md` by default) is required at
+startup. Edit it to define who the agent is; it is re-read every
+turn, and the sandbox keeps the package read-only for the agent.
 
 ## Run
 
@@ -53,12 +54,13 @@ cannot rewrite it.
 
 What starts:
 
-- the agent loop (root agent; event-driven by default, or
-  self-rotating with `agent.autonomous_interval > 0`)
+- the agent loop (the root agent starts it; each agent runs
+  event-driven by default, or self-rotating with
+  `agent.autonomous_interval > 0`)
 - the gateway web UI on `http://127.0.0.1:8765` (serving
-  `frontend/dist`; without `frontend/dist/index.html` only `/ws` and
-  `/surfaces` are served, not the UI; the browser opens once the
-  socket is up)
+  `frontend/dist`; without `frontend/dist/index.html` the gateway
+  still serves `/ws` and `/surfaces`, and the browser opens once the
+  port accepts connections)
 - the injection registry on `127.0.0.1:8901`
 - the autostart scripts, if enabled and present: `builtin/autostart.sh`
   (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
@@ -88,9 +90,8 @@ the UI.
 
 ## First tools
 
-The agent's only verb for reaching the world is `shell`. Tools
-and skills are plain files under `builtin/` (read-only) and
-`workspace/` (agent-writable); the agent invokes them with
-ordinary shell commands inside the execution sandbox. Drop a
-script into `workspace/` and it is immediately usable -- there is
-nothing to register, reload or configure.
+The agent reaches the outside world through `shell`. Tools and
+skills are plain files under `builtin/` (read-only) and
+`workspace/` (agent-writable); the agent invokes them with ordinary
+shell commands inside the execution sandbox. A script dropped into
+`workspace/` is available to the next shell call.

@@ -18,7 +18,7 @@ above it. `TYPE_CHECKING` blocks are the one place a module may
 name a type from above.
 
     app.py               composition root
-    ├── gateway          HTTP + WS; reads the sink, owns no runtime state
+    ├── gateway          HTTP + WS; formats the stream, owns no agent state
     ├── injection        registry + per-turn collection
     └── agent            loop, turn engine, verbs, handles, sandbox
         ├── turn         the Turn record and prompt rendering
@@ -35,24 +35,23 @@ The layers, bottom up:
    reference is type-only. Any layer may import these.
 2. **Singletons.** `config` (reads `config/nan.yaml` at import)
    and `events` (builds the sink) are imported by every layer and
-   import nothing upward. They are the only modules carrying
-   import-time state.
+   import nothing upward. Both set up their state at import time.
 3. **Model layer.** `llm/provider.py` imports `config` and
-   `llm/types`, and is called only from `agent/engine.py` --
-   `app.py` is where it is constructed. `turn/` reads DTOs from
-   `llm`; `llm` never imports `turn`.
+   `llm/types`. `app.py` constructs it, and `agent/engine.py`
+   makes the calls. `turn/` reads DTOs from `llm`; the dependency
+   runs one way, so `llm` does not import `turn`.
 4. **Agent.** `agent/` imports `config`, `events`, `llm`, `turn`.
    It does not import `gateway`, `injection` or `app`: the
    injection hub arrives as a constructor argument and is named
    only under `TYPE_CHECKING`.
-5. **Injection.** `injection/` imports `config`, `turn`,
-   `utils/loopback`. It does not import `agent`, `gateway` or
-   `app`: delivery is an outbound HTTP call, never a call into
-   the agent loop.
-6. **Gateway.** Imports `config`, `events`, `utils/loopback` only.
-   It broadcasts what the sink carries and does not import the
-   agent runtime or the injection registry, which is what keeps
-   the web layer replaceable.
+5. **Injection.** `injection/` imports `config`, `turn` and
+   `utils/loopback`. Delivery leaves as an outbound HTTP call,
+   and the agent loop pulls results from the hub; the dependency
+   stays outside `agent/`, `gateway/` and `app`.
+6. **Gateway.** Imports `config`, `events` and `utils/loopback`.
+   It broadcasts what the sink carries and stays independent of
+   the agent runtime and the injection registry, which keeps the
+   web layer replaceable.
 7. **Composition root.** `app.py` is the only module that
    imports `agent`, `injection` and `gateway` together, and the
    only one that constructs `LLMProvider`, `Sandbox`, `Gateway`
@@ -63,9 +62,9 @@ Three rules cover the cases that do not fit the ladder:
 - **Type-only cycles** go inside `if TYPE_CHECKING:` with
   `from __future__ import annotations`. Current pairs:
   `handle` <-> `core`, `verbs` -> `core`,
-  `injection/client` -> `injection/hub`. A cycle that has to
-  exist at runtime means the ownership split is wrong, not that
-  the import should be deferred.
+  `injection/client` -> `injection/hub`. A cycle needed at
+  runtime points at the ownership boundary: redraw it rather than
+  defer the import.
 - **Intra-package loading order.** `agent/verbs/__init__.py`
   imports the six verb classes inside `_build_registry()`, after
   `Verb` and `VerbOutcome` exist. Verb modules import the
@@ -93,10 +92,10 @@ flowchart LR
     T3 -.->|"append only:<br/>existing bytes unchanged"| SOLID["stable prompt prefix<br/>= cache hit"]
 ```
 
-Rendered turns freeze on first render and never change. History
-grows by appending; when the char limit trips, it clears whole.
-Unchanged prefixes stay byte-stable, which is what makes prompt
-caching work. There is no in-place rewriting of history.
+Rendered turns freeze on first render; later turns append.
+History grows by appending, and when the char limit trips it
+clears whole and starts a new context epoch. Unchanged prefixes
+stay byte-stable, which is what makes prompt caching work.
 
 ## Core files vs agent territory
 
@@ -111,26 +110,24 @@ flowchart TB
     CORE -.->|"boots and governs"| A
 ```
 
-Three zones: the nan package (core code, persona -- the agent
-cannot write these), `builtin/` (read-only resources), and
-`workspace/` (the agent's writable territory, including its own
-boot script `workspace/autostart.sh`). The user's boot script
-lives in `builtin/` and runs outside the sandbox; the agent's
-one runs inside it.
+Three zones: the nan package (core code and persona, kept
+read-only to the agent) with `config/`, `builtin/` (read-only
+resources), and `workspace/` (the agent's writable territory,
+including its own boot script `workspace/autostart.sh`). The user's
+boot script lives in `builtin/` and runs outside the sandbox; the
+agent's one runs inside it.
 
 ## One path for everything important
 
 Death has one path (finish or kill, both through the same
 teardown). Configuration has one source (the YAML). Event flow
-has one singleton (sink). Duplicated paths drift; when two
-mechanisms could do a job, the codebase picks one and deletes
-the other.
+has one singleton (sink). Keeping one path per job avoids the
+drift that comes with parallel mechanisms.
 
 ## Loud failure
 
 A missing persona fails startup. A failed turn is retried on
 the backoff ladder and every failure is recorded. A sandbox
 missing its tooling warns loudly, or refuses to start when
-`sandbox.required` is true. Silence hides decay; the
-system is designed so that breakage is visible at the point it
+`sandbox.required` is true. Breakage surfaces at the point it
 happens.

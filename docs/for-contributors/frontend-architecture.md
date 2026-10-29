@@ -6,9 +6,9 @@ document is the other half -- how the renderer consuming that
 stream is laid out, which module owns which state, and which
 invariants hold the renderer together.
 
-The frontend has no build-time knowledge of the agent. It imports
-nothing from `nan/`, never infers a turn, and never stores a reply.
-Everything on screen arrived as an event.
+The frontend has no build-time knowledge of the agent: it imports
+nothing from `nan/`, and turns and replies exist only as events on
+the stream. Everything on screen arrived as an event.
 
 ## Layout
 
@@ -38,13 +38,14 @@ Everything on screen arrived as an event.
   `transport/`. It is reducers and lookups over plain objects, so
   `frontend/tests/` runs them under vitest with no DOM.
 - `transport/` imports `kernel/` (protocol + hub) and reports
-  connection state through `GlobalStore`. It never imports
+  connection state through `GlobalStore`; it does not import
   `shell/`.
-- `surfaces/` imports `kernel/` types and window shape. It knows
-  nothing of the transport, and nothing of the queue.
+- `surfaces/` imports `kernel/` types and takes everything else as
+  props: the window shape, the `Transport` interface for the
+  composer, and the theme. It holds no stream state of its own.
 - `shell/` imports `kernel/`, `surfaces/` and the `Transport`
-  interface. Together with `surfaces/`, it is one of the two
-  React layers.
+  interface, and passes them down. `shell/` and `surfaces/` are the
+  React layer; `kernel/` and `transport/` stay plain TypeScript.
 
 `main.tsx` wires the three in one direction: `GlobalStore` ->
 `Hub` -> transport, and `Shell` subscribing to both.
@@ -59,10 +60,9 @@ Everything on screen arrived as an event.
 | window order + active window | `queue` state held by `Shell` |
 | theme | `Shell`, persisted in `localStorage` |
 
-React holds copies of exactly two things: the window set and the
-theme toggle. The transcript is never mirrored into component
-state; components read the hub on the version counter that the hub
-bumps after each ingest.
+React state holds the window set, the queue, the drill-down target
+and the theme. The transcript stays in the hub; components read it
+through the version counter that the hub bumps after each ingest.
 
 ## Data flow
 
@@ -79,9 +79,9 @@ flowchart LR
     G --> R
 ```
 
-1. `transport/ws.ts` parses the frame, drops anything that is not
-   `hello` or an envelope, and handles `surface_added` /
-   `surface_removed` itself -- these are live state, not history.
+1. `transport/ws.ts` parses the frame and accepts `hello`, an
+   envelope, or a surface frame. It handles `surface_added` /
+   `surface_removed` itself; these are live state.
 2. `hello` updates boot / model / pause. A changed boot calls
    `hub.reset()`, voiding tree and timelines.
 3. Everything else enters `Hub.ingest`: tree and global state
@@ -91,23 +91,22 @@ flowchart LR
 
 ## Invariants
 
-- **Seq is the only cursor.** Events at or below the last applied
-  seq are dropped. `hello.seq` is not adopted as the cursor:
-  replay may contain lower seqs.
+- **Seq is the cursor.** Events at or below the last applied seq
+  are dropped. The cursor follows the events themselves;
+  `hello.seq` marks the connection point, and the replay may
+  contain lower seqs.
 - **Boot change voids history.** The tree, mappers and pending
   buffer are rebuilt from the replay that follows the new hello.
-- **Root identity is learned, never assumed.** The first
-  `agent_started` at depth 0 sets it; any event carrying depth 0
-  is a fallback when that event was evicted from the ring. Until
-  the root is known, events go into a 64-entry buffer and are
-  back-filled in order.
-- **`user_input` belongs to the root.** It carries no `agent_id`
-  by design, so it bypasses agent routing and is fed to the root
-  mapper.
-- **One content slot.** `queue.order` is the rail and never
-  reorders; registration appends and never steals the slot;
-  closing empties the workspace without destroying the window;
-  unregistering truly removes it.
+- **Root identity is learned.** The first `agent_started` at
+  depth 0 sets it; depth 0 on a later event is the fallback when
+  that event has left the ring. Until the root is known, events
+  go into a 64-entry buffer and are back-filled in order.
+- **`user_input` belongs to the root.** It carries no `agent_id`,
+  so it bypasses agent routing and is fed to the root mapper.
+- **One content slot.** `queue.order` is the rail: registration
+  appends, a new window does not take the active slot, closing
+  empties the workspace while keeping the window, and
+  unregistering removes it.
 - **Memory is bounded.** Exited agent nodes are capped at 512,
   exited timelines at 16, and the agent being viewed is pinned
   so its transcript survives its own exit.
@@ -126,8 +125,7 @@ breadcrumb has drilled into; the drill-down target lives in
 
 A service panel is an iframe with `sandbox="allow-scripts
 allow-forms"` and a permissions policy that denies camera,
-microphone, clipboard and fullscreen. Consequences, all
-intentional:
+microphone, clipboard and fullscreen. What follows from that:
 
 - The panel has an opaque origin. Its requests to the gateway
   carry `Origin: null`, which the gateway's entry guard rejects;
@@ -136,12 +134,12 @@ intentional:
   surface.
 - One message crosses the boundary: the desktop posts
   `{type: "nan:theme", theme}` to the panel on load and on every
-  switch. No tokens, no state, no other traffic.
-- The panel owns its palette; the message only selects one, and a
-  panel never switches theme on its own. Opened outside the desktop,
-  it falls back to `prefers-color-scheme`.
+  switch, carrying the theme name.
+- The panel owns its palette; the message selects one. Opened
+  outside the desktop, the panel falls back to
+  `prefers-color-scheme`.
 
-## Layout
+## Pane sizing
 
 Every pane hands its surface the size the pane actually has: the
 frame is 100% by 100% and nothing is scaled, so a surface lays out
@@ -154,7 +152,7 @@ in real CSS pixels and adapts with ordinary CSS. Only the chrome
     npm install
     npm run dev     # vite; proxies /ws to 127.0.0.1:8765
     npm run build   # tsc --noEmit && vite build -> dist/
-    npm test        # vitest over kernel, agents, queue, history
+    npm test        # vitest over the kernel and transport
 
 The dev proxy rewrites the `Origin` header to the gateway's own
 address, since the dev server's origin would otherwise fail the

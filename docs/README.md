@@ -24,12 +24,17 @@ injection, and the shell as the universal tool surface.
 
 ## Repository layout
 
-    nan/          the core package (the only runtime code)
-    builtin/      user-owned resources the agent reads but never
-                  writes: skills, services/, autostart.sh
-    config/       nan.yaml -- the single configuration source
-    frontend/     the gateway's web UI (built to frontend/dist)
-    workspace/    the agents' writable territory (services live in
-                  workspace/services/, one uv project each)
-    tests/        pytest suite
+    nan/          the core runtime package
+    lib/          nan-service-kit, the shared library services run on
+    builtin/      user-owned resources: skills, services/, autostart.sh
+    workspace/    agent-writable territory: services/, autostart.sh
+    config/       nan.yaml, the configuration file
+    frontend/     the desktop UI, built to frontend/dist
+    scripts/      install.sh
+    tests/        the core pytest suite
     docs/         this documentation
+    design/       design notes and the backlog
+    infraend/     notes for a separate inference backend
+    paper_search/ research experiments (idea generation, agent memory)
+    legacy/       archived prototypes
+    dist/         build output (`uv build`)

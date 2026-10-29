@@ -33,8 +33,7 @@ Capabilities are files, and NAN uses capabilities through the shell.
 
 Copy the config template -- the resulting `config/nan.yaml` is
 git-ignored because it holds your key -- then fill in the active model
-(the only config source; any OpenAI-compatible or Anthropic endpoint
-works):
+(any OpenAI-compatible or Anthropic endpoint works):
 
     cp config/nan.yaml.example config/nan.yaml
 
@@ -52,8 +51,8 @@ Run:
     uv run nan
 
 The web UI comes up on `http://127.0.0.1:8765` once
-`frontend/dist/index.html` exists; without it the gateway serves
-only `/ws` and `/surfaces`. Talk to the root agent; it can spawn
+`frontend/dist/index.html` exists; without it the gateway still
+serves `/ws` and `/surfaces`. Talk to the root agent; it can spawn
 subagents, run shell commands in its sandboxed workspace, and hold
 conversations across turns.
 
@@ -63,14 +62,14 @@ conversations across turns.
   <img src="docs/assets/architecture.png" alt="NAN-itself architecture: one agent core, spawned subagents, injection services, gateway and sandboxed shell" width="840">
 </p>
 
-- **One agent = one asyncio task.** Turns run continuously,
-  paced by configuration; messages queue at turn boundaries.
+- **One agent = one asyncio task.** A turn starts on inbox
+  input, on the configured interval, or again after a turn that
+  called verbs; messages queue at turn boundaries.
 - **Handles.** A spawned child is reached through a handle:
-  send messages in, kill it. Handles are held by spawners and
-  not transferable, so when an agent dies everything it holds
-  dies with it.
+  send messages in, kill it. A handle belongs to its spawner,
+  so when an agent dies everything it holds dies with it.
 - **Injection services.** Prompt contributions come from
-  independent local processes over a small HTTP protocol
+  independent local processes over a small HTTP protocol.
 - **Shell-first.** Tools and skills are plain files; the agent
   reaches them with shell commands inside the sandbox.
 - **The turn is the record.** Every turn keeps what it drained,
@@ -92,15 +91,20 @@ conversations across turns.
 
 ## Repository layout
 
-    nan/          the core package (the only runtime code)
-    builtin/      user-owned resources the agent reads but never
-                  writes: skills, services/, autostart.sh
-    config/       nan.yaml -- the single configuration source
-    frontend/     the gateway's web UI (built to frontend/dist)
-    workspace/    the agents' writable territory (services live in
-                  workspace/services/, one uv project each)
-    tests/        pytest suite
+    nan/          the core runtime package
+    lib/          nan-service-kit, the shared library services run on
+    builtin/      user-owned resources: skills, services/, autostart.sh
+    workspace/    agent-writable territory: services/, autostart.sh
+    config/       nan.yaml, the configuration file
+    frontend/     the desktop UI, built to frontend/dist
+    scripts/      install.sh
+    tests/        the core pytest suite
     docs/         this documentation
+    design/       design notes and the backlog
+    infraend/     notes for a separate inference backend
+    paper_search/ research experiments (idea generation, agent memory)
+    legacy/       archived prototypes
+    dist/         build output (`uv build`)
 
 ## License
 
