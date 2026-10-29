@@ -12,7 +12,7 @@ export type Connection = "connecting" | "open" | "closed";
 
 export interface GlobalState {
   connection: Connection;
-  /** Backend boot; a change means seq is no longer comparable and history must be rebuilt. */
+  /** Backend boot; a change makes seq incomparable and history must be rebuilt. */
   bootId: string | null;
   /** Highest applied seq, for replay deduplication. */
   lastSeq: number;

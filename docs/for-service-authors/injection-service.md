@@ -55,7 +55,7 @@ sequenceDiagram
      reply is prompt text, recorded as an `Injection`.
    - `archive` -- the complete turn once it ends; your reply is only
      an acknowledgement and is never recorded. This is the mode for
-     services that record rather than contribute (see `record`).
+     services whose work is recording, such as `record`.
      A process may hold both modes as two `service_id`s.
 
 2. **Heartbeat** -- POST periodically (keep the interval well
@@ -295,7 +295,7 @@ What it owns, so you do not write it again:
   `logs/<service_id>.log` (10 MB, 3 kept). The boot scripts capture
   only what is printed before that, in `logs/<name>.boot.log`, so
   neither file has two writers.
-- **Tests** -- `StubHub` replaces the hub and gateway with a
+- **Tests** -- `StubHub` stands in for the hub and gateway with a
   recorder; `assert_registered`, `assert_turn_text`,
   `assert_turn_ack` state the contract once:
 

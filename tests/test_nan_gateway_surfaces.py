@@ -109,7 +109,7 @@ async def test_surface_registration_broadcast_and_replay(no_sink: None) -> None:
 
 async def test_surface_update_replaces_without_removal(no_sink: None) -> None:
     """A different spec under the same service_id is an update: the
-    desktop swaps the window in place instead of losing it first."""
+    desktop swaps the window in place."""
     port = _free_port()
     settings.gateway.port = port
     gateway = Gateway()

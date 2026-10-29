@@ -89,7 +89,7 @@ class HubLink:
         """
         Announce this service's endpoint and mode. The hub refuses a
         non-loopback endpoint, so a rejection is a real misconfiguration
-        and worth an error rather than a warning.
+        and raises an error.
         """
         reply = await self._post(
             f"{self.config.hub_url}/register",

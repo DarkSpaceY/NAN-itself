@@ -489,8 +489,8 @@ function rebuild() {
     return;
   }
 
-  // A fresh window starts at its first turn; the cursor follows the
-  // ledger rather than pretending to have kept a position.
+  // A fresh window starts at its first turn: the cursor follows the
+  // ledger from there.
   if (state.at == null) state.at = state.rows[0].started_at;
 
   // Marked rows are drawn by rowHtml, so this has to happen before
@@ -774,9 +774,8 @@ function setWindow(from, to, { reload = true, carry = false } = {}) {
   if (reload) loadPage(true);
 }
 
-// Sliding the window must not change its size, so the travel is
-// clamped, not the two ends: running into the edge stops the window
-// instead of squeezing it.
+// Sliding the window keeps its size: the travel is clamped, so
+// running into the edge stops the window there.
 function shiftWindow(origin, shift, options) {
   const low = state.axis.from - origin.from;
   const high = state.axis.to - origin.to;
@@ -819,9 +818,8 @@ async function reloadAround(anchor) {
 // Scrolling by hand leaves the cursor alone; it is only re-anchored
 // once its row has actually gone off screen.
 
-// Positioned in pixels rather than percent so the rule stays inside
-// the strip: at ratio 0 a negative margin would put half of it under
-// the clip, which is how it disappeared before.
+// Positioned in pixels so the rule stays inside the strip: at ratio 0
+// a negative margin would put half of it under the clip.
 function placeCursor(time) {
   const strip = $("#focus");
   const cursor = $("#cursor");
@@ -832,9 +830,8 @@ function placeCursor(time) {
   const label = $("b", cursor);
   label.textContent = stamp(time);
 
-  // The label grew a year, so flip by its measured width rather than
-  // a fixed ratio: near the right end it would otherwise run off the
-  // strip and be clipped.
+  // The label grew a year, so flip by its measured width and keep it
+  // inside the strip near the right end.
   const room = (label.offsetWidth || 90) + 12;
   cursor.classList.toggle("flip", at * width > width - room);
 
@@ -938,8 +935,7 @@ function revealMark() {
   }
 }
 
-// Once the drag is over, the cursor sits on a real turn rather than
-// between two.
+// Once the drag is over, the cursor snaps to the nearest real turn.
 function snapCursor() {
   if (drag) return;
 
@@ -1110,14 +1106,14 @@ function bindFocus() {
       const anchor = item ? item.top - scroll.scrollTop : null;
 
       // The band and both histograms follow every event; the ledger
-      // waits for the hand to stop rather than reloading per event.
+      // reloads once the hand stops.
       setWindow(centre - next * at, centre + next * (1 - at), {
         reload: false,
         carry: true,
       });
 
-      // A page may still be in flight; the reset would be dropped by
-      // loadPage, so wait for it instead of losing the reload.
+      // A page may still be in flight; loadPage would drop the reset,
+      // so wait for it before reloading.
       clearTimeout(zoomTimer);
       zoomTimer = setTimeout(function later() {
         if (state.loading) {
@@ -1449,7 +1445,7 @@ async function advance() {
     state.win = { from, to: end };
 
     // The window slid, the content did not: the cursor keeps its
-    // place over the same rows instead of being clamped away.
+    // place over the same rows.
     if (state.at != null) state.at += shift;
 
     paintWindowMark();

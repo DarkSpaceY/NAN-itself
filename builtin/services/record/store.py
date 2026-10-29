@@ -18,9 +18,8 @@ retention walk. Values are compressed on the way in, so
 disk bound.
 
 R holds hour / day / week rollups: a histogram over a year is a few
-hundred key reads instead of a scan of every turn. Minute
-resolution never needs a rollup -- a window that fine is small
-enough to walk X directly.
+hundred key reads. Minute resolution works directly on X: a window
+that fine is small enough to walk.
 
 Writes are queued and batched off the request path: the HTTP
 endpoint must answer inside the injection timeout, so it only
@@ -62,7 +61,7 @@ ROLL_KEPT: tuple[tuple[str, int], ...] = (("h", 3600), ("d", 86400), ("w", 60480
 # "m" is the sentinel for "walk the time index".
 ROLL_SCAN: tuple[tuple[str, int], ...] = (("m", 60),) + ROLL_KEPT
 
-# A window this short is drawn as individual turns instead of bars.
+# A window this short is drawn as individual turns.
 TURN_UNIT_SPAN = 3600.0
 TURN_UNIT_LIMIT = 2000
 

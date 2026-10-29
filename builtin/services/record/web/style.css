@@ -6,11 +6,10 @@
  * so it carries the tokens itself; the theme is the desktop's, and
  * outside it the OS preference.
  *
- * Composition, not chrome: a warm canvas holds two soft cards -- the
+ * Pure composition: a warm canvas holds two soft cards -- the
  * time instrument on top, the ledger below. Inside the ledger the
  * turn's own line is the loudest thing on the row and everything
- * measured about it is quiet, so it reads as a log of what happened
- * rather than a spreadsheet of columns.
+ * measured about it is quiet, so it reads as a log of what happened.
  */
 
 :root {
@@ -597,8 +596,8 @@ main {
   min-width: 0;
 }
 
-/* The number is the identity; "turn" is only its unit, so it is set
- * small and quiet, like a column heading rather than part of a name. */
+/* The number is the identity; "turn" is its unit, so it is set
+ * small and quiet, like a column heading. */
 .d-head .d-kicker {
   font: 500 9px var(--font-mono);
   text-transform: uppercase;

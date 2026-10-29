@@ -123,6 +123,9 @@ def test_live_config_and_committed_template_agree() -> None:
     loaded = yaml.safe_load(template.read_text(encoding="utf-8"))
     assert loaded["llm"]["api_key"] == ""
     assert loaded["gateway"]["port"] == settings.gateway.port
+    assert loaded["sandbox"]["deny"] == [
+        {"pattern": rule.pattern, "reason": rule.reason} for rule in settings.sandbox.deny
+    ]
 
 
 def test_environment_variables_are_not_a_source(

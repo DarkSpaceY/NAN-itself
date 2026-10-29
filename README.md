@@ -22,13 +22,12 @@ Capabilities are files, and NAN uses capabilities through the shell.
 ## Quick start
 
 > **Windows users**: install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)
-> and run NAN inside it. NAN is not natively compatible with Windows:
-> it executes the agent's shell commands inside an OS-level sandbox
-> (sandbox-exec on macOS, bubblewrap on Linux), and Windows has no
-> equivalent process-isolation mechanism; the rest of the runtime
-> (bash boot scripts, POSIX paths, the shell-first tooling) builds
-> on that same Unix foundation. Inside WSL2 everything works as on
-> Linux.
+> and run NAN inside it. NAN targets macOS and Linux: it executes
+> the agent's shell commands inside an OS-level sandbox (sandbox-exec
+> on macOS, bubblewrap on Linux), and the rest of the runtime (bash
+> boot scripts, POSIX paths, the shell-first tooling) builds on that
+> same Unix foundation. WSL2 supplies that isolation on Windows;
+> inside it everything works as on Linux.
 
     uv sync
 

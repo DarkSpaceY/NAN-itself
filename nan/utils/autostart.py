@@ -79,11 +79,11 @@ class Autostart:
 
     async def _launch(self, script: Path, *, wrapped: bool) -> None:
         try:
-            # The script runs normally and the shell then sleeps
-            # instead of exiting: a boot script returns in
+            # The script runs normally and the shell then sleeps to
+            # keep the group anchored: a boot script returns in
             # milliseconds while the services it started live on, and
-            # the group has to stay anchored to a live process for as
-            # long as they do (see ANCHOR_SECONDS).
+            # the group needs a live process for as long as they do
+            # (see ANCHOR_SECONDS).
             command = f"bash {shlex.quote(str(script))}; sleep {ANCHOR_SECONDS}"
 
             if wrapped:

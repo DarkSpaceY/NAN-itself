@@ -27,6 +27,22 @@ agent:
 
 sandbox:
   required: false           # true: refuse to start when no sandbox tool exists
+  # Command-level deny list, checked before the OS sandbox wraps the
+  deny:
+    - pattern: '\brm\s+(?:-[^\s]+\s+)*(?:/|~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|[;&|])'
+      reason: 'recursive delete of the root or home directory'
+    - pattern: '\brm\s+(?:-[^\s]+\s+)*(?:\.|\./|\*|\$PWD|\$\{PWD\}|\$\(pwd\)|`pwd`)(?=\s|$|[;&|])'
+      reason: 'recursive delete of the workspace root itself'
+    - pattern: '\bdd\b[^;&|\n]*\bof=\s*/dev/(?:r?disk|sd[a-z]|nvme|hd[a-z]|mmcblk)'
+      reason: 'writing a raw disk device with dd'
+    - pattern: '\b(?:mkfs(?:\.[a-z0-9]+)?|newfs(?:_[a-z0-9]+)?)\b'
+      reason: 'formatting a filesystem'
+    - pattern: '\b(?:curl|wget)\b[^|;&\n]*\|\s*(?:sudo\s+)?(?:ba|z|k|fi)?sh\b'
+      reason: 'piping a download straight into a shell'
+    - pattern: '(?:^|[\n;&|]\s*|\b(?:then|do|else)\s+)(?:sudo|doas)\b'
+      reason: 'privilege escalation is not available to agent commands'
+    - pattern: '([A-Za-z0-9_:.-]+)\s*\(\s*\)\s*\{[^}]*\1[^}]*\|[^}]*\1[^}]*&[^}]*\}\s*;?\s*\1'
+      reason: 'fork bomb'
 
 injection:
   host: 127.0.0.1

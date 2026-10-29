@@ -24,7 +24,7 @@ the core test suite never touches them. Each carries its own
     cd workspace/services/<name> && uv run --frozen pytest
 
 CI runs every service suite with `--frozen` (a stale `uv.lock`
-fails the build instead of silently resolving).
+fails the build, so dependency resolution stays pinned).
 
 ## Lint and format
 
@@ -39,8 +39,8 @@ Line length 100; isort-style import order enforced by ruff.
 
 ## Conventions (For AI Agents)
 
-- Comments describe what the code does, not what it used to do;
-  no changelog or task-marker comments.
+- Comments and docs describe what the code does today; no changelog,
+  task markers, or references to earlier behaviour.
 - Docstrings state behavior contracts. Absolute marketing voice
   ("never", "always" as defense of a design) is avoided; state
   the actual mechanism.

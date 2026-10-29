@@ -5,7 +5,7 @@ The UI gateway subscribes; agent code emits without blocking.
 Every emitted event carries a monotonic seq and a wall
 timestamp. A bounded history ring supports reconnect snapshots;
 streaming deltas are coalesced into one entry per stream there,
-so the ring holds turns rather than tokens.
+so the ring holds turns.
 
 The sink is the process-wide singleton (loguru-style):
 producers call `sink.emit(...)`; consumers call `sink.subscribe()`.

@@ -69,7 +69,7 @@ def test_entry_guard() -> None:
     # a missing Host never passes
     assert not entry_allowed({}, 8765)
 
-    # malformed ports are rejected, not raised (a ValueError in
-    # the handler would be a 500 instead of a 403)
+    # malformed ports are rejected; a ValueError in the handler
+    # would surface as a 500
     assert not entry_allowed({"host": "127.0.0.1:notaport"}, 8765)
     assert not entry_allowed({**headers, "origin": "http://127.0.0.1:notaport"}, 8765)

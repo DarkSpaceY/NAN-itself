@@ -65,8 +65,17 @@ class AgentSettings(BaseModel):
     max_children: int = 5
 
 
+class DenyRule(BaseModel):
+    """One command-level refusal rule: a regex and why it refuses."""
+
+    pattern: str
+    reason: str
+
+
 class SandboxSettings(BaseModel):
     required: bool = False
+    # Rules come from config; an absent `deny` means no rules.
+    deny: list[DenyRule] = Field(default_factory=list)
 
 
 class InjectionSettings(BaseModel):

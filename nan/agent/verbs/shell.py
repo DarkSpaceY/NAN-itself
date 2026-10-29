@@ -56,6 +56,16 @@ class ShellVerb(Verb):
         if not isinstance(command, str) or not command.strip():
             return VerbOutcome("shell requires a non-empty 'command'.")
 
+        # Command-level deny list: a hit is reported back as the
+        # verb result so the model can rewrite the command.
+        refused = agent.sandbox.check(command)
+
+        if refused is not None:
+            return VerbOutcome(
+                f"Refused by sandbox rule: {refused}. The command was not executed; rewrite it.",
+                {"refused": True, "reason": refused},
+            )
+
         timeout = settings.agent.shell_timeout
 
         # Execution-level sandbox: the command the model wrote is

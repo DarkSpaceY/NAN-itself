@@ -18,6 +18,13 @@ Two autostart scripts exist, with different authority:
                             within the same write scope as its
                             shell commands.
 
+A command-level deny list runs before wrapping: each rule is a
+regex over the raw command text, and a hit refuses the command
+and returns its reason. The rules live under ``sandbox.deny``
+and guard against command semantics the OS sandbox cannot see;
+quoting, variable indirection, eval and base64 can walk around
+them, and the OS sandbox stays the limit.
+
 If no sandbox tool exists on the host, ``sandbox.required``
 decides: true -- refuse to start; false -- degrade to an
 unwrapped command with a warning, once.
@@ -25,6 +32,7 @@ unwrapped command with a warning, once.
 
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 import sys
@@ -54,6 +62,7 @@ class Sandbox:
     def __init__(self) -> None:
         self._tool: Literal["sandbox-exec", "bwrap"] | None = self._detect_tool()
         self._warned = False
+        self._rules = _compile_deny_rules()
 
         if self.required and self._tool is None:
             raise SandboxUnavailableError(
@@ -99,6 +108,21 @@ class Sandbox:
         return self._tool is not None
 
     # ------------------------------------------------------------------
+    # Deny rules
+    # ------------------------------------------------------------------
+
+    def check(self, command: str) -> str | None:
+        """
+        The reason this command is refused, or None when it may
+        run. Matching is case-sensitive and over the raw text.
+        """
+        for pattern, reason in self._rules:
+            if pattern.search(command):
+                return reason
+
+        return None
+
+    # ------------------------------------------------------------------
     # Wrapping
     # ------------------------------------------------------------------
 
@@ -133,6 +157,28 @@ class Sandbox:
             package_dir=self.package_dir,
             builtin_dir=self.builtin_dir,
         )
+
+
+# ----------------------------------------------------------------------
+# Deny rule compilation
+# ----------------------------------------------------------------------
+
+
+def _compile_deny_rules() -> list[tuple[re.Pattern[str], str]]:
+    """
+    Compile settings.sandbox.deny once. A broken pattern is a
+    config error and stops startup.
+    """
+    compiled: list[tuple[re.Pattern[str], str]] = []
+
+    for index, rule in enumerate(settings.sandbox.deny):
+        try:
+            compiled.append((re.compile(rule.pattern), rule.reason))
+
+        except re.error as exc:
+            raise ValueError(f"sandbox.deny[{index}] invalid regex: {exc}") from exc
+
+    return compiled
 
 
 # ----------------------------------------------------------------------

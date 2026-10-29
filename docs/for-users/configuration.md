@@ -43,7 +43,17 @@ Example -- a local 27B model behind llama.cpp:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `required` | `false` | `true`: refuse to start when no sandbox tool exists (instead of degrading) |
+| `required` | `false` | `true`: refuse to start when no sandbox tool exists; `false`: run unwrapped with a warning |
+| `deny` | `[]` | Command-level refusal list: `{pattern, reason}` entries checked before the OS sandbox wraps the command |
+
+The rules come from `deny` in this file, and the example template starts
+with a set covering the common destructive shapes. Leave the key out and
+no rule is checked. Patterns are Python regexes searched in the raw command
+text, case-sensitively. A hit is returned to the model as the `shell`
+result together with the rule's `reason`, and the command does not run.
+Treat the list as a guard against obvious destructive shapes: quoting,
+variable indirection, `eval` and base64 can walk around it, and the OS
+sandbox remains the limit on what a command can touch.
 
 ## injection
 

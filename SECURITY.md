@@ -3,9 +3,9 @@
 ## Reporting
 
 Report vulnerabilities privately via
-[GitHub Security Advisories](https://github.com/DarkSpaceY/NAN-itself/security/advisories/new)
-rather than a public issue. Please include a reproduction and the
-affected paths. You can expect an initial response within a week.
+[GitHub Security Advisories](https://github.com/DarkSpaceY/NAN-itself/security/advisories/new).
+Please include a reproduction and the affected paths. You can expect
+an initial response within a week.
 
 ## Trust model
 
