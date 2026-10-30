@@ -106,6 +106,29 @@ conversations across turns.
     docs/         this documentation
     dist/         build output (`uv build`)
 
+## Roadmap
+
+The project grows in three stages, and it sits between the first two.
+
+- **Self-extending.** The agent gains capabilities by writing
+  files into `workspace/`: a script, a skill, a service. A dropped
+  script is available to its next shell call, and a service it
+  starts is online without a restart. The sandbox keeps `nan/` and
+  `builtin/` read-only so that extension lands in territory the
+  agent owns.
+- **Continuously autonomous.** The agent keeps taking turns when
+  nobody types: `autonomous_interval` sets the pace, a turn that
+  called verbs can continue, spawned children run in parallel, and
+  pause / resume is available. The work ahead is continuity and
+  governance — state and wake-ups that survive a restart, limits on
+  what a long-running agent consumes, and a recovery path after a
+  failed process.
+- **Self-evolving.** The runtime becomes something the agent can
+  revise: its own modules, its configuration, the prompt contract
+  it runs on. That stage asks for the read-only boundary around
+  `nan/` to be reconsidered, together with a way to verify a change
+  before it takes effect.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
