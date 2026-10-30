@@ -19,6 +19,10 @@ Capabilities are files, and NAN uses capabilities through the shell.
 
 > **NAN-itself is in early development.** Interfaces may change without notice.
 
+<p align="center">
+  <img src="docs/assets/desktop.png" alt="The desktop UI: a request to the root agent, shell calls that list and read the verb modules, and a spawn that hands half the reading to a subagent" width="860">
+</p>
+
 ## Quick start
 
 > **Windows users**: install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)

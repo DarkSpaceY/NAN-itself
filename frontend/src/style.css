@@ -20,6 +20,7 @@
     ui-sans-serif, -apple-system, "SF Pro Text", "Helvetica Neue", Inter,
     system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+  --measure: 100%;
 }
 
 /* Dark theme layers spaced evenly by perceptual lightness (L*): 3 / 9 / 18 / 27.
@@ -379,7 +380,7 @@ button {
  * block is separated by the same single gap.
  */
 .round {
-  max-width: 760px;
+  max-width: var(--measure);
   margin: 0 auto;
 }
 
@@ -685,7 +686,7 @@ button {
 
 .composer {
   width: 100%;
-  max-width: 1120px;
+  max-width: var(--measure);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -748,7 +749,7 @@ button {
 
 .statusline {
   width: 100%;
-  max-width: 1120px;
+  max-width: var(--measure);
   height: 16px;
   display: flex;
   align-items: center;
