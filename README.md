@@ -108,26 +108,26 @@ conversations across turns.
 
 ## Roadmap
 
-The project grows in three stages, and it sits between the first two.
+The project grows through three stages, and it sits between the
+first two.
 
-- **Self-extending.** The agent gains capabilities by writing
-  files into `workspace/`: a script, a skill, a service. A dropped
-  script is available to its next shell call, and a service it
-  starts is online without a restart. The sandbox keeps `nan/` and
-  `builtin/` read-only so that extension lands in territory the
-  agent owns.
-- **Continuously autonomous.** The agent keeps taking turns when
-  nobody types: `autonomous_interval` sets the pace, a turn that
-  called verbs can continue, spawned children run in parallel, and
-  pause / resume is available. The work ahead is continuity and
-  governance — state and wake-ups that survive a restart, limits on
-  what a long-running agent consumes, and a recovery path after a
-  failed process.
-- **Self-evolving.** The runtime becomes something the agent can
-  revise: its own modules, its configuration, the prompt contract
-  it runs on. That stage asks for the read-only boundary around
-  `nan/` to be reconsidered, together with a way to verify a change
-  before it takes effect.
+- **Self-extending — the agent extends its own runtime
+  boundary.** It gains capability by writing into `workspace/`: a
+  script, a skill, a service. The addition joins the running system
+  without a code change or a restart, and `nan/` and `builtin/`
+  stay read-only while the runtime surface grows.
+- **Continuously autonomous — the agent runs continuously, keeps
+  state, memory and runtime capability over time, and explores
+  strategies for itself.** The loop already takes turns on an
+  interval, continues after a turn that called verbs, runs spawned
+  children in parallel, and pauses / resumes on request. The stage
+  still needs persistence — state, memory and runtime capability
+  that outlive a process — and long-horizon exploration the agent
+  directs itself.
+- **Self-evolving — the agent iterates on its own runtime through
+  comparative experiments and numeric observation.** It runs trials,
+  reads the numbers, compares outcomes, and revises the runtime from
+  what they show.
 
 ## License
 
