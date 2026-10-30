@@ -104,10 +104,6 @@ conversations across turns.
     scripts/      install.sh
     tests/        the core pytest suite
     docs/         this documentation
-    design/       design notes and the backlog
-    infraend/     notes for a separate inference backend
-    paper_search/ research experiments (idea generation, agent memory)
-    legacy/       archived prototypes
     dist/         build output (`uv build`)
 
 ## License
