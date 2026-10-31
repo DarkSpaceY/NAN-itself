@@ -675,6 +675,35 @@ main {
   word-break: break-word;
 }
 
+/* Reasoning: replayed prompt material, so it stays collapsed and
+ * speaks in the same mono voice as the raw tab. */
+.think { margin-bottom: 8px; }
+
+.think summary {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  cursor: pointer;
+  list-style: none;
+  font: 9.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.think summary::-webkit-details-marker { display: none; }
+
+.think-chars { color: color-mix(in srgb, var(--muted) 70%, transparent); }
+
+.think-body {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  font: 11.5px/1.6 var(--font-mono);
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Tool calls read as small objects of their own: a verb on a raised
  * card, the object beside it, both on one line. Wrapping, never
  * scrolling sideways, and the full text stays in the title. */

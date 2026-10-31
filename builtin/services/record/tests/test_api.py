@@ -63,6 +63,33 @@ def _settle(service, count: int, timeout: float = 3.0) -> None:
     raise AssertionError("turn never landed")
 
 
+def test_turn_endpoint_keeps_thinking(tmp_path):
+    service, client = _service(tmp_path)
+
+    try:
+        base = time.time()
+
+        payload = _turn("a1", base)
+
+        payload["thinking"] = [{"type": "text", "text": "reason", "signature": None}]
+
+        payload["rendered"] = [
+            {"role": "assistant", "content": "ok", "thinking": payload["thinking"]}
+        ]
+
+        client.post("/turn", json=payload)
+
+        _settle(service, 1)
+
+        one = client.get("/api/turns/a1/0").json()
+
+        assert one["thinking"] == payload["thinking"]
+        assert one["rendered"][0]["thinking"] == payload["thinking"]
+
+    finally:
+        service.store.stop()
+
+
 def test_turn_endpoint_archives(tmp_path):
     service, client = _service(tmp_path)
 

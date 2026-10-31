@@ -1302,6 +1302,7 @@ function renderDrawer() {
     ["injections", String((turn.injections || []).length)],
     ["delta", String((turn.delta || []).length)],
     ["calls", String((turn.calls || []).length)],
+    ["thinking", String((turn.thinking || []).reduce((n, block) => n + (block.text || "").length, 0))],
   ];
 
   const head =
@@ -1345,6 +1346,11 @@ function renderDrawer() {
     body = rendered.length
       ? rendered
           .map((message) => {
+            const thinkText = (message.thinking || [])
+              .filter((block) => block && block.text)
+              .map((block) => block.text)
+              .join("\n\n");
+
             const calls = (message.tool_calls || []).map((call) => {
               const name = call.name || (call.function && call.function.name) || "call";
               const args = call.arguments ?? call.args ?? (call.function && call.function.arguments);
@@ -1360,6 +1366,10 @@ function renderDrawer() {
 
             return (
               `<div class="msg"><div class="msg-role">${esc(String(message.role || "").toUpperCase())}</div>` +
+              (thinkText
+                ? `<details class="think"><summary>thinking<span class="think-chars">${thinkText.length}</span></summary>` +
+                  `<div class="think-body">${esc(thinkText)}</div></details>`
+                : "") +
               (message.content ? `<div class="msg-body">${esc(message.content)}</div>` : "") +
               (calls ? `<div class="calls">${calls}</div>` : "") +
               `</div>`

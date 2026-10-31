@@ -2,10 +2,10 @@
 Record service: the turn archive, outside the prompt.
 
 It registers with the hub in `archive` mode, heartbeats, and
-receives each complete turn once that turn ends -- reply, calls,
-results, metering, rendered messages, and the death record when
-the turn ended the agent. Every delivery is appended to a local
-RocksDB store and served back as a trace UI.
+receives each complete turn once that turn ends -- reply, its
+reasoning blocks, calls, results, metering, rendered messages, and
+the death record when the turn ended the agent. Every delivery is
+appended to a local RocksDB store and served back as a trace UI.
 
 Nothing flows from the archive to the agent, by design: record
 observes, it does not speak.
@@ -19,7 +19,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from nan_service_kit import HubLink, Mode, ServiceConfig, read_config, setup_logging
-
 from store import TurnStore
 
 HERE = Path(__file__).resolve().parent
@@ -112,11 +111,8 @@ class RecordService:
     def _broadcast(self, summaries: list[dict[str, Any]]) -> None:
         for subscriber in list(self._subscribers):
             for summary in summaries:
-                try:
+                with suppress(asyncio.QueueFull):
                     subscriber.put_nowait(summary)
-
-                except asyncio.QueueFull:
-                    pass
 
     async def _stream(self) -> AsyncIterator[str]:
         subscriber: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)

@@ -81,8 +81,13 @@ def _roll_key(unit: str, index: int) -> bytes:
 def _time_key(started_at: float, agent_id: str, seq: int) -> bytes:
     # >d keeps float order for positive timestamps, which is all
     # wall-clock time produces here.
-    return TIME_PREFIX + struct.pack(">d", started_at) + SEP + agent_id.encode() + SEP + (
-        struct.pack(">Q", seq)
+    return (
+        TIME_PREFIX
+        + struct.pack(">d", started_at)
+        + SEP
+        + agent_id.encode()
+        + SEP
+        + (struct.pack(">Q", seq))
     )
 
 
@@ -154,7 +159,9 @@ def headline(payload: dict[str, Any]) -> str:
     if line:
         return line
 
-    names = [c.get("name") for c in payload.get("calls") or () if isinstance(c, dict) and c.get("name")]
+    names = [
+        c.get("name") for c in payload.get("calls") or () if isinstance(c, dict) and c.get("name")
+    ]
 
     if names:
         return ", ".join(str(name) for name in names)
@@ -183,6 +190,14 @@ def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
 
     death = payload.get("death") if isinstance(payload.get("death"), dict) else {}
 
+    # Visible reasoning only: signatures and encrypted payloads are
+    # replayed material, not text the ledger should count.
+    thinking_chars = sum(
+        len(block.get("text") or "")
+        for block in payload.get("thinking") or ()
+        if isinstance(block, dict)
+    )
+
     verbs_start = min((r.get("started_at") for r in results), default=None)
 
     verbs_end = max((r.get("ended_at") for r in results), default=None)
@@ -201,6 +216,7 @@ def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
         "delta": len(payload.get("delta") or ()),
         "calls": len(payload.get("calls") or ()),
         "reply_chars": len(payload.get("reply") or ""),
+        "thinking_chars": thinking_chars,
         "llm_started_at": llm.get("started_at"),
         "llm_ended_at": llm.get("ended_at"),
         "verbs_started_at": verbs_start,
@@ -330,7 +346,9 @@ class TurnStore:
                     if not key.startswith(prefix):
                         break
 
-                    self._roll[unit][struct.unpack(">Q", key[len(prefix) :])[0]] = int(value.decode())
+                    self._roll[unit][struct.unpack(">Q", key[len(prefix) :])[0]] = int(
+                        value.decode()
+                    )
 
             if self._turns and not self._roll["h"]:
                 # Written before rollups existed, or rebuilt from a
@@ -657,7 +675,9 @@ class TurnStore:
 
         self._db.write(write)
 
-        logger.info("record retention pruned {} turns, {:.2f} GB left", deleted, self._total_bytes / 1e9)
+        logger.info(
+            "record retention pruned {} turns, {:.2f} GB left", deleted, self._total_bytes / 1e9
+        )
 
     def _water_start(self) -> bytes:
         if self._watermark is None:
@@ -787,7 +807,7 @@ class TurnStore:
                 if len(keys) >= limit:
                     break
 
-            rows = [self._ledger_row(key, span) for key, span in zip(keys, spans)]
+            rows = [self._ledger_row(key, span) for key, span in zip(keys, spans, strict=True)]
 
             return {
                 "rows": rows,
@@ -820,6 +840,7 @@ class TurnStore:
             "retries": 0,
             "calls": 0,
             "reply_chars": 0,
+            "thinking_chars": 0,
             "summary": "",
         }
 

@@ -100,6 +100,47 @@ def test_sequence_and_paging(tmp_path):
         store.stop()
 
 
+def test_thinking_is_stored_and_summarized(tmp_path):
+    """Reasoning rides along with the archived turn, and the ledger
+    row counts only its visible text."""
+    store = _store(tmp_path)
+
+    try:
+        base = time.time()
+
+        payload = _turn("a1", base)
+
+        payload["thinking"] = [
+            {
+                "type": "text",
+                "text": "reason first",
+                "signature": "sig",
+                "data": None,
+                "format": None,
+            }
+        ]
+
+        payload["rendered"] = [
+            {"role": "assistant", "content": "hello", "thinking": payload["thinking"]}
+        ]
+
+        store.ingest(payload)
+
+        _wait(store, lambda: store.stats()["turns"] == 1)
+
+        stored = store.turn("a1", 0)
+
+        assert stored["thinking"] == payload["thinking"]
+        assert stored["rendered"][0]["thinking"] == payload["thinking"]
+
+        rows = store.ledger(start=base - 1, end=base + 60)["rows"]
+
+        assert rows[0]["thinking_chars"] == len("reason first")
+
+    finally:
+        store.stop()
+
+
 def test_agents_meta_and_ledger(tmp_path):
     store = _store(tmp_path)
 
@@ -140,9 +181,7 @@ def test_agents_meta_and_ledger(tmp_path):
         # A page that ends before the limit still hands back a
         # cursor; the client knows it is done from the row count.
         assert page["cursor"] is not None
-        assert store.ledger(
-            start=base - 1, end=base + 10, cursor=page["cursor"]
-        )["rows"] == []
+        assert store.ledger(start=base - 1, end=base + 10, cursor=page["cursor"])["rows"] == []
 
     finally:
         store.stop()
@@ -368,4 +407,3 @@ def test_activity_clips_to_the_archive(tmp_path):
 
     finally:
         store.stop()
-
