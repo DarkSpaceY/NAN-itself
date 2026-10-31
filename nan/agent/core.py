@@ -504,7 +504,7 @@ class Agent:
                 "latency_s": (turn.llm.ended_at - turn.llm.started_at if turn.llm else 0.0),
                 "retries": (turn.llm.retries if turn.llm else 0),
                 "calls": len(turn.calls),
-                "history_chars": sum(len(m.content or "") for m in self._messages),
+                "history_chars": self._history_chars(),
             },
         )
 
@@ -682,8 +682,16 @@ class Agent:
             except asyncio.QueueEmpty:
                 return drained
 
+    def _history_chars(self) -> int:
+        """History size, including replayed reasoning (visible and encrypted)."""
+        return sum(
+            len(message.content or "")
+            + sum(len(block.text) + len(block.data or "") for block in message.thinking)
+            for message in self._messages
+        )
+
     def _clear_history_over_limit(self) -> None:
-        chars = sum(len(m.content or "") for m in self._messages)
+        chars = self._history_chars()
 
         if chars > settings.agent.history_char_limit:
             logger.info(

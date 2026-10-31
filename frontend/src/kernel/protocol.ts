@@ -105,6 +105,11 @@ export interface OutputDelta extends AgentIdentity {
   text: string;
 }
 
+/** Reasoning streamed before the answer; same envelope id pairing as output_*. */
+export interface ThinkingDelta extends AgentIdentity {
+  text: string;
+}
+
 export interface UserInput {
   text: string;
   mid?: string;
@@ -160,6 +165,9 @@ export const EVENT_TYPES = new Set([
   "output_delta",
   "output_done",
   "output_cancelled",
+  "thinking_started",
+  "thinking_delta",
+  "thinking_done",
   "user_input",
 ]);
 

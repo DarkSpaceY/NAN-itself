@@ -61,8 +61,12 @@ exposes the same facts live, and the turn is where they persist.
 The rendered prompt is frozen on first render and later turns
 append to it. History is add-only, so unchanged turns stay
 byte-stable and cache-friendly for the model's prompt prefix.
-When the history exceeds `history_char_limit`, the whole history
-is cleared and a new context epoch begins.
+Assistant messages carry the model's reasoning (thinking blocks,
+signatures included) so the adapter can replay it verbatim; the
+prefix cache stays valid and Anthropic/OpenRouter keep the
+signed reasoning across turns. When the history exceeds
+`history_char_limit`, the whole history is cleared and a new
+context epoch begins.
 
 ```mermaid
 flowchart LR

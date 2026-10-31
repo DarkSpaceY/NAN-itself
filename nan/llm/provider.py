@@ -16,11 +16,17 @@ from anthropic.types import (
     RawContentBlockStartEvent,
     RawContentBlockStopEvent,
     RawMessageDeltaEvent,
+    RedactedThinkingBlock,
+    SignatureDelta,
     TextDelta,
+    ThinkingDelta,
     ToolUseBlock,
 )
 from anthropic.types import (
     Message as AnthropicMessage,
+)
+from anthropic.types import (
+    ThinkingBlock as AnthropicThinkingBlock,
 )
 from anthropic.types.raw_message_delta_event import Delta as MessageDeltaDelta
 from loguru import logger
@@ -34,6 +40,7 @@ from .types import (
     LLMRequest,
     LLMStreamEvent,
     Message,
+    ThinkingBlock,
     ToolCall,
     Usage,
 )
@@ -219,6 +226,14 @@ class LLMProvider:
         usage = Usage()
         finish_reason: FinishReason = "unknown"
 
+        # Reasoning arrives incrementally either as plain text
+        # (reasoning_content / reasoning) or as structured
+        # reasoning_details entries. Structured details win because
+        # they carry the signature/encryption needed for replay.
+        thinking_text: list[str] = []
+        thinking_details: dict[int, ThinkingBlock] = {}
+        has_details = False
+
         async for chunk in stream:
             if chunk.usage is not None:
                 usage = Usage(
@@ -231,6 +246,27 @@ class LLMProvider:
 
             choice = chunk.choices[0]
             delta = choice.delta
+
+            if settings.llm.thinking:
+                details = getattr(delta, "reasoning_details", None)
+
+                if isinstance(details, list):
+                    for position, detail in enumerate(details):
+                        has_details = True
+
+                        text = self._merge_reasoning_detail(thinking_details, position, detail)
+
+                        if text:
+                            yield LLMStreamEvent(kind="thinking", thinking_text=text)
+
+                plain = getattr(delta, "reasoning_content", None) or getattr(
+                    delta, "reasoning", None
+                )
+
+                if isinstance(plain, str) and plain and not has_details:
+                    thinking_text.append(plain)
+
+                    yield LLMStreamEvent(kind="thinking", thinking_text=plain)
 
             if delta.content:
                 yield LLMStreamEvent(
@@ -275,10 +311,18 @@ class LLMProvider:
                 ),
             )
 
+        if thinking_details:
+            thinking = [thinking_details[index] for index in sorted(thinking_details)]
+        elif thinking_text:
+            thinking = [ThinkingBlock(text="".join(thinking_text))]
+        else:
+            thinking = []
+
         yield LLMStreamEvent(
             kind="done",
             usage=usage,
             finish_reason=finish_reason,
+            thinking=thinking or None,
         )
 
     @staticmethod
@@ -306,13 +350,27 @@ class LLMProvider:
             }
 
         if message.role == "assistant":
-            if not message.content and not message.tool_calls:
+            if not message.content and not message.tool_calls and not message.thinking:
                 return None
 
             result: dict[str, Any] = {
                 "role": "assistant",
                 "content": message.content,
             }
+
+            if message.thinking:
+                # Strict cache: replay reasoning byte-for-byte. Structured
+                # details (signature/encryption) must go back as
+                # reasoning_details; plain reasoning uses the legacy field.
+                if any(
+                    block.type == "encrypted" or block.signature or block.format
+                    for block in message.thinking
+                ):
+                    result["reasoning_details"] = [
+                        LLMProvider._openai_reasoning_detail(block) for block in message.thinking
+                    ]
+                else:
+                    result["reasoning_content"] = "".join(block.text for block in message.thinking)
 
             if message.tool_calls:
                 result["tool_calls"] = [
@@ -344,6 +402,78 @@ class LLMProvider:
 
         raise ValueError(f"Unsupported message role: {message.role}")
 
+    @staticmethod
+    def _openai_reasoning_detail(block: ThinkingBlock) -> dict[str, Any]:
+        """
+        Rebuild one reasoning_details entry from a stored block.
+        """
+        if block.type == "encrypted":
+            detail: dict[str, Any] = {
+                "type": "reasoning.encrypted",
+                "data": block.data or "",
+            }
+        else:
+            detail = {
+                "type": "reasoning.text",
+                "text": block.text,
+            }
+
+            if block.signature:
+                detail["signature"] = block.signature
+
+        if block.format:
+            detail["format"] = block.format
+
+        return detail
+
+    @staticmethod
+    def _merge_reasoning_detail(
+        blocks: dict[int, ThinkingBlock],
+        position: int,
+        raw: Any,
+    ) -> str | None:
+        """
+        Accumulate one streaming reasoning_details entry; returns the new
+        visible text, if any.
+        """
+        if not isinstance(raw, dict):
+            return None
+
+        index = raw.get("index")
+        key = index if isinstance(index, int) else position
+
+        block = blocks.setdefault(key, ThinkingBlock())
+
+        text: str | None = None
+
+        if raw.get("type") == "reasoning.encrypted":
+            block.type = "encrypted"
+
+            data = raw.get("data")
+
+            if isinstance(data, str) and data:
+                block.data = data
+        else:
+            block.type = "text"
+
+            chunk = raw.get("text")
+
+            if isinstance(chunk, str) and chunk:
+                block.text += chunk
+                text = chunk
+
+        signature = raw.get("signature")
+
+        if isinstance(signature, str) and signature:
+            block.signature = signature
+
+        detail_format = raw.get("format")
+
+        if isinstance(detail_format, str) and detail_format:
+            block.format = detail_format
+
+        return text
+
     # ==================================================================
     # Anthropic
     # ==================================================================
@@ -372,7 +502,20 @@ class LLMProvider:
             "messages": messages,
             "system": system_prompt,
             "temperature": request.temperature,
+            "max_tokens": settings.llm.max_tokens,
         }
+
+        if settings.llm.thinking and settings.llm.thinking_budget > 0:
+            # Native extended thinking requires temperature=1 and a
+            # budget smaller than max_tokens.
+            budget = min(settings.llm.thinking_budget, settings.llm.max_tokens - 1)
+
+            if budget > 0:
+                kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": budget,
+                }
+                kwargs["temperature"] = 1.0
 
         if tools:
             kwargs["tools"] = tools
@@ -384,6 +527,8 @@ class LLMProvider:
             current_tool_id: str | None = None
             current_tool_name: str | None = None
             current_tool_json = ""
+            current_thinking: ThinkingBlock | None = None
+            thinking_blocks: list[ThinkingBlock] = []
 
             async for event in stream:
                 match event:
@@ -393,6 +538,45 @@ class LLMProvider:
                         current_tool_id = tool_id
                         current_tool_name = tool_name
                         current_tool_json = ""
+
+                    case RawContentBlockStartEvent(content_block=RedactedThinkingBlock(data=data)):
+                        if settings.llm.thinking:
+                            thinking_blocks.append(
+                                ThinkingBlock(
+                                    type="encrypted",
+                                    data=data,
+                                    format="anthropic",
+                                )
+                            )
+
+                    case RawContentBlockStartEvent(
+                        content_block=AnthropicThinkingBlock(
+                            thinking=thinking,
+                            signature=signature,
+                        )
+                    ):
+                        if settings.llm.thinking:
+                            current_thinking = ThinkingBlock(
+                                text=thinking or "",
+                                signature=signature or None,
+                                format="anthropic",
+                            )
+
+                    case RawContentBlockDeltaEvent(delta=ThinkingDelta(thinking=thinking)):
+                        if settings.llm.thinking and thinking:
+                            if current_thinking is None:
+                                current_thinking = ThinkingBlock(format="anthropic")
+
+                            current_thinking.text += thinking
+
+                            yield LLMStreamEvent(kind="thinking", thinking_text=thinking)
+
+                    case RawContentBlockDeltaEvent(delta=SignatureDelta(signature=signature)):
+                        if settings.llm.thinking and signature:
+                            if current_thinking is None:
+                                current_thinking = ThinkingBlock(format="anthropic")
+
+                            current_thinking.signature = signature
 
                     case RawContentBlockDeltaEvent(delta=TextDelta(text=text)):
                         if text:
@@ -416,6 +600,10 @@ class LLMProvider:
                             current_tool_name = None
                             current_tool_json = ""
 
+                        if current_thinking is not None:
+                            thinking_blocks.append(current_thinking)
+                            current_thinking = None
+
                     case RawMessageDeltaEvent(delta=MessageDeltaDelta(stop_reason=stop_reason)):
                         finish_reason = (
                             self._normalize_anthropic_finish_reason(stop_reason)
@@ -433,6 +621,7 @@ class LLMProvider:
                             kind="done",
                             usage=self._usage_from_final_message(final_message),
                             finish_reason=finish_reason,
+                            thinking=thinking_blocks or None,
                         )
 
                         return
@@ -441,12 +630,16 @@ class LLMProvider:
             # message_delta (e.g. an aborted connection).
             final_message = await stream.get_final_message()
 
+            if current_thinking is not None:
+                thinking_blocks.append(current_thinking)
+
             yield LLMStreamEvent(
                 kind="done",
                 usage=self._usage_from_final_message(final_message),
                 finish_reason=self._normalize_anthropic_finish_reason(
                     final_message.stop_reason or "unknown"
                 ),
+                thinking=thinking_blocks or None,
             )
 
     @staticmethod
@@ -492,7 +685,24 @@ class LLMProvider:
             if message.role == "assistant":
                 blocks: list[dict[str, Any]] = []
 
-                if not message.content and not message.tool_calls:
+                for block in message.thinking:
+                    if block.type == "encrypted" and block.data:
+                        blocks.append(
+                            {
+                                "type": "redacted_thinking",
+                                "data": block.data,
+                            }
+                        )
+                    elif block.type == "text" and block.signature:
+                        blocks.append(
+                            {
+                                "type": "thinking",
+                                "thinking": block.text,
+                                "signature": block.signature,
+                            }
+                        )
+
+                if not message.content and not message.tool_calls and not blocks:
                     # Empty assistant placeholder (corrective-retry marker).
                     continue
 

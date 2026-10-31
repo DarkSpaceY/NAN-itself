@@ -46,6 +46,37 @@ describe("mapper", () => {
     expect(round.parts[0]).toMatchObject({ kind: "text", text: "outrun" });
   });
 
+  it("streams reasoning before the answer and closes it", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "turn_started", { ...base, turn_index: 1 }));
+    m.feed(env(2, "thinking_started", base, "k1"));
+    m.feed(env(3, "thinking_delta", { ...base, text: "think " }, "k1"));
+    m.feed(env(4, "thinking_delta", { ...base, text: "first" }, "k1"));
+    m.feed(env(5, "thinking_done", base, "k1"));
+    m.feed(env(6, "output_started", base, "o1"));
+    m.feed(env(7, "output_delta", { ...base, text: "answer" }, "o1"));
+    m.feed(env(8, "output_done", base, "o1"));
+
+    const round = m.getRounds()[0];
+    expect(kinds(round)).toEqual(["thinking", "text"]);
+    expect(round.parts[0]).toMatchObject({
+      kind: "thinking",
+      text: "think first",
+      streaming: false,
+    });
+    expect(round.parts[1]).toMatchObject({ kind: "text", text: "answer" });
+  });
+
+  it("merges thinking deltas whose thinking_started fell out of the replay window", () => {
+    const m = new Mapper("r0");
+    m.feed(env(3, "thinking_delta", { ...base, text: "rea" }, "k1"));
+    m.feed(env(4, "thinking_delta", { ...base, text: "son" }, "k1"));
+
+    const round = m.getRounds()[0];
+    expect(round.parts).toHaveLength(1);
+    expect(round.parts[0]).toMatchObject({ kind: "thinking", text: "reason" });
+  });
+
   it("does not mark a tool-driven stream as cancelled", () => {
     const m = new Mapper("r0");
     m.feed(env(1, "output_started", base, "o1"));

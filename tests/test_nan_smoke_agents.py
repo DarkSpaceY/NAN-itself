@@ -250,3 +250,26 @@ async def test_normal_origin_without_clear(tmp_path: Path, no_sink: None) -> Non
 
     assert hub.archives == [t1, t2]
     assert len(hub.injects) == 2
+
+
+async def test_thinking_enters_history_and_replay(tmp_path: Path, no_sink: None) -> None:
+    llm = FakeLLM()
+    llm.thinking = "REASONING_MARKER"
+
+    agent = make_agent(tmp_path=tmp_path, book=Book(), llm=llm)
+
+    t1 = await agent.run_turn()
+
+    # The turn records the reasoning, and the frozen render carries it.
+    assert [block.text for block in t1.thinking] == ["REASONING_MARKER"]
+    assert t1.rendered is not None
+
+    assistant = next(m for m in t1.rendered if m.role == "assistant")
+    assert [block.text for block in assistant.thinking] == ["REASONING_MARKER"]
+
+    agent.cycles += 1
+    await agent.run_turn()
+
+    # Strict cache: the next request replays the frozen assistant turn verbatim.
+    replayed = [m for m in llm.requests[1].messages if m.role == "assistant"][0]
+    assert [block.text for block in replayed.thinking] == ["REASONING_MARKER"]

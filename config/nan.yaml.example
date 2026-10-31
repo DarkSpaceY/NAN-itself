@@ -12,6 +12,9 @@ llm:
   base_url: ""              # empty = provider default endpoint
   api_key: ""               # anything OpenAI-compatible: OpenAI, OpenRouter, llama.cpp...
   model: ""
+  max_tokens: 8192          # Anthropic requires it; must exceed thinking_budget
+  thinking: true            # capture reasoning and replay it into history
+  thinking_budget: 4096     # Anthropic extended-thinking budget; 0 = no native thinking request
   timeout: 120.0
   max_retries: 2
   proxy: ""                 # "": direct (ambient proxies ignored) | "env" | http://host:port

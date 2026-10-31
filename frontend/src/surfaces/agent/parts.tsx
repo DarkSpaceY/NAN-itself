@@ -12,6 +12,7 @@ import type {
   InputPart,
   Part,
   TextPart,
+  ThinkingPart,
   VerbPart,
 } from "../../kernel/history/parts";
 
@@ -45,6 +46,22 @@ function Input({ part }: { part: InputPart }) {
     <div className="input-part">
       <div className="input-text">{part.text}</div>
     </div>
+  );
+}
+
+function Thinking({ part }: { part: ThinkingPart }) {
+  return (
+    <details
+      className={`thinking-part${part.streaming ? " streaming" : ""}`}
+      open={part.streaming}
+    >
+      <summary>
+        <span className="caret">›</span>
+        <span className="thinking-label">thinking</span>
+        {part.streaming && <span className="thinking-state">…</span>}
+      </summary>
+      <div className="thinking-body">{part.text}</div>
+    </details>
   );
 }
 
@@ -119,6 +136,8 @@ export function PartView({
   switch (part.kind) {
     case "text":
       return <Text part={part} />;
+    case "thinking":
+      return <Thinking part={part} />;
     case "input":
       return <Input part={part} />;
     case "verb":

@@ -43,12 +43,30 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any]
 
 
+class ThinkingBlock(BaseModel):
+    """
+    One piece of model reasoning, preserved verbatim.
+
+    text       visible reasoning text
+    signature  provider signature proving provenance (Anthropic)
+    data       encrypted reasoning payload (redacted / encrypted)
+    format     provider format tag when one exists (OpenRouter)
+    """
+
+    type: Literal["text", "encrypted"] = "text"
+    text: str = ""
+    signature: str | None = None
+    data: str | None = None
+    format: str | None = None
+
+
 class Message(BaseModel):
     """
     Provider-neutral conversation message.
 
     assistant:
         content may be text
+        thinking carries the reasoning that preceded it
         tool_calls may contain model-generated calls
 
     tool:
@@ -64,6 +82,10 @@ class Message(BaseModel):
     ]
 
     content: str | None = None
+
+    thinking: list[ThinkingBlock] = Field(
+        default_factory=list,
+    )
 
     tool_calls: list[ToolCall] = Field(
         default_factory=list,
@@ -89,6 +111,10 @@ class LLMResponse(BaseModel):
 
     content: str | None = None
 
+    thinking: list[ThinkingBlock] = Field(
+        default_factory=list,
+    )
+
     tool_calls: list[ToolCall] = Field(
         default_factory=list,
     )
@@ -104,16 +130,22 @@ class LLMStreamEvent(BaseModel):
     Provider-neutral streaming event.
 
     kind:
+        thinking
         text
         tool_call
         done
     """
 
     kind: Literal[
+        "thinking",
         "text",
         "tool_call",
         "done",
     ]
+
+    thinking_text: str | None = None
+
+    thinking: list[ThinkingBlock] | None = None
 
     text: str | None = None
 

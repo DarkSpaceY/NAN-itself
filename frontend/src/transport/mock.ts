@@ -111,10 +111,32 @@ function stream(
   delta(steps, base, id, text);
 }
 
+/** Reasoning stream: thinking_started -> deltas -> thinking_done, before the answer opens. */
+function think(
+  steps: Step[],
+  base: Record<string, unknown>,
+  id: string,
+  text: string,
+): void {
+  steps.push((e) => {
+    e("thinking_started", base, id);
+    return STREAM_MS;
+  });
+  for (const piece of pieces(text)) {
+    steps.push((e) => {
+      e("thinking_delta", { ...base, text: piece }, id);
+      return STREAM_MS;
+    });
+  }
+  steps.push((e) => e("thinking_done", base, id));
+}
+
 interface TurnOpts {
   index: number;
   text: string;
   inbox?: number;
+  /** Reasoning streamed before the answer. */
+  think?: string;
   /** Has a tool call: the backend sends output_cancelled; the text still goes into history. */
   cancelled?: boolean;
   retries?: number;
@@ -137,6 +159,7 @@ function textTurn(
       inbox_count: opts.inbox ?? 1,
     }),
   );
+  if (opts.think) think(steps, base, `${out}-think`, opts.think);
   stream(steps, base, out, opts.text);
   steps.push((e) =>
     e(opts.cancelled ? "output_cancelled" : "output_done", base, out),
@@ -240,6 +263,7 @@ export class MockTransport implements Transport {
         textTurn(steps, ROOT_BASE, {
           index: this.rootTurns + 1,
           text: `收到：${msg.text}。这是 mock 回放，不真的跑工具。`,
+          think: "先确认输入含义，再决定是否要走工具；这里只是回放。",
           latency: 0.9,
         });
         this.queue.push(...steps);
@@ -307,12 +331,19 @@ export class MockTransport implements Transport {
     textTurn(steps, ROOT_BASE, {
       index: 1,
       text: "收到：看一遍仓库。先扫目录结构，再读关键模块。",
+      think: "先看目录，再挑关键模块；不要读 node_modules。",
       latency: 1.2,
     });
 
     // 2. Tool turn: not a single character of text, the backend still sends started/cancelled.
     userInput(steps, "verbs 目录里都有什么？");
     const toolOut = outId();
+    think(
+      steps,
+      ROOT_BASE,
+      `${toolOut}-think`,
+      "先列目录确认文件数量，再判断要不要挨个读。",
+    );
     steps.push(
       (e) => e("turn_started", { ...ROOT_BASE, turn_index: 2, inbox_count: 1 }),
       // Every injected service reports, failures included
@@ -364,6 +395,7 @@ export class MockTransport implements Transport {
     textTurn(steps, ROOT_BASE, {
       index: 3,
       text: "先跑测试。",
+      think: "上一轮读 persona 失败了，这次先确认文件还在不在，再决定重试。",
       retries: 1,
       latency: 3.4,
       history: 2200,
@@ -372,6 +404,12 @@ export class MockTransport implements Transport {
     // 4. Two-layer spawn: root -> a3 -> a7; the unknown verb fails once only, the round continues.
     userInput(steps, "让子 agent 把 verbs 逐个读一遍");
     const spawnOut = outId();
+    think(
+      steps,
+      ROOT_BASE,
+      `${spawnOut}-think`,
+      "逐个读太慢，派一个子 agent；让它在第二层再细分一次。",
+    );
     steps.push((e) =>
       e("turn_started", { ...ROOT_BASE, turn_index: 4, inbox_count: 1 }),
     );
@@ -418,6 +456,12 @@ export class MockTransport implements Transport {
       (e) =>
         e("turn_started", { ...CHILD_BASE, turn_index: 1, inbox_count: 1 }),
     );
+    think(
+      steps,
+      CHILD_BASE,
+      `${childOut}-think`,
+      "先用 wc -l 拿到数量，再把最深的细节交给下一层。",
+    );
     stream(steps, CHILD_BASE, childOut, "先数一遍，再让下一层读细节。");
     steps.push((e) => e("output_cancelled", CHILD_BASE, childOut));
     verb(
@@ -458,6 +502,7 @@ export class MockTransport implements Transport {
     textTurn(steps, GRANDCHILD_BASE, {
       index: 1,
       text: "shell verb 只有一条执行路径。",
+      think: "只需要看 shell.py 一个文件，读完直接回报。",
       latency: 0.8,
     });
     steps.push((e) =>
@@ -472,6 +517,7 @@ export class MockTransport implements Transport {
     textTurn(steps, CHILD_BASE, {
       index: 2,
       text: "下一层回报：verbs 一共九个，没有隐藏分支。",
+      think: "把下一层的结论和刚才的数量对齐，没有再发现了。",
       latency: 1.1,
     });
     steps.push((e) =>
@@ -488,6 +534,12 @@ export class MockTransport implements Transport {
     const reportOut = outId();
     steps.push((e) =>
       e("turn_started", { ...ROOT_BASE, turn_index: 5, inbox_count: 1 }),
+    );
+    think(
+      steps,
+      ROOT_BASE,
+      `${reportOut}-think`,
+      "子 agent 回来了，先复述它的结论，再等用户补一句。",
     );
     stream(steps, ROOT_BASE, reportOut, "子 agent 回报：verbs 清点完毕。");
     userInput(steps, "顺便把结论记一下");
@@ -506,6 +558,7 @@ export class MockTransport implements Transport {
     textTurn(steps, ROOT_BASE, {
       index: 6,
       text: "记下了：verbs 一共九个，目录很浅。",
+      think: "用户只是让我记结论，不需要再跑工具。",
       latency: 0.9,
     });
 
@@ -518,6 +571,12 @@ export class MockTransport implements Transport {
     const cancelledOut = outId();
     steps.push((e) =>
       e("turn_started", { ...ROOT_BASE, turn_index: 7, inbox_count: 1 }),
+    );
+    think(
+      steps,
+      ROOT_BASE,
+      `${cancelledOut}-think`,
+      "照旧按目录深度排序，先回忆一下上一轮的结论。",
     );
     stream(steps, ROOT_BASE, cancelledOut, "继续分析（这半句会被 pause 丢掉）");
     steps.push(

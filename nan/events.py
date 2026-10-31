@@ -82,15 +82,16 @@ class Sink:
         tail: dict[str, Any] | None, event: dict[str, Any]
     ) -> dict[str, Any] | None:
         """
-        Coalesce a streaming delta into the previous history entry.
+        Coalesce a streaming delta (text or thinking) into the previous
+        history entry.
 
         Returns the merged entry to store in place of `tail`, or None
         when there is nothing to merge.
         """
-        if tail is None or event["t"] != "output_delta":
+        if tail is None or event["t"] not in ("output_delta", "thinking_delta"):
             return None
 
-        if tail.get("t") != "output_delta" or tail.get("id") != event["id"]:
+        if tail.get("t") != event["t"] or tail.get("id") != event["id"]:
             return None
 
         merged = dict(tail)

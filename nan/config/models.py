@@ -50,6 +50,9 @@ class LLMSettings(BaseModel):
     base_url: str = ""
     api_key: str = ""
     model: str = ""
+    max_tokens: int = 8192
+    thinking: bool = True
+    thinking_budget: int = 4096
     timeout: float = 120.0
     max_retries: int = 2
     proxy: str = ""

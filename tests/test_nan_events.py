@@ -21,6 +21,20 @@ def test_coalesces_stream_deltas_in_history(no_sink: Any) -> None:
     assert sink.history()[1]["content"]["text"] == "hello"
 
 
+def test_coalesces_thinking_deltas_in_history(no_sink: Any) -> None:
+    sink = no_sink
+
+    sink.emit("thinking_started", content={"agent_id": "r0"}, id="k1")
+    sink.emit("thinking_delta", content={"agent_id": "r0", "text": "rea"}, id="k1")
+    sink.emit("thinking_delta", content={"agent_id": "r0", "text": "son"}, id="k1")
+    sink.emit("thinking_done", content={"agent_id": "r0"}, id="k1")
+
+    kinds = [e["t"] for e in sink.history()]
+
+    assert kinds == ["thinking_started", "thinking_delta", "thinking_done"]
+    assert sink.history()[1]["content"]["text"] == "reason"
+
+
 def test_does_not_coalesce_across_streams(no_sink: Any) -> None:
     sink = no_sink
 

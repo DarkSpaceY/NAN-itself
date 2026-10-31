@@ -16,6 +16,9 @@ provider SDKs may fall back to their own env vars when
 | `base_url` | `""` | Endpoint URL; empty = provider default |
 | `api_key` | `""` | Empty = SDK default behavior |
 | `model` | `""` | Model name sent to the endpoint |
+| `max_tokens` | `8192` | Anthropic output cap; must exceed `thinking_budget` when native thinking is on |
+| `thinking` | `true` | Capture model reasoning and replay it verbatim in history (strict prefix cache) |
+| `thinking_budget` | `4096` | Anthropic extended-thinking budget; `0` = do not send the native thinking request |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
 | `max_retries` | `2` | SDK-level retry count |
 | `proxy` | `""` | `""`: direct connection, ignoring environment proxies. `"env"`: inherit proxies from the environment. Any other value: that proxy URL |

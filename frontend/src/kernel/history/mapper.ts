@@ -7,7 +7,7 @@
 // reconnect replay).
 
 import { errorOf, obj, str, textOf, verbOf, type Envelope } from "../protocol";
-import type { InputPart, Part, Round, TextPart, VerbPart } from "./parts";
+import type { InputPart, Part, Round, TextPart, ThinkingPart, VerbPart } from "./parts";
 
 type Listener = (mapper: Mapper) => void;
 
@@ -20,6 +20,9 @@ export class Mapper {
 
   /** output_* family pairs by event id: id -> the part it belongs to. */
   private streams = new Map<string, TextPart>();
+
+  /** thinking_* family pairs by event id, kept separate from answer streams. */
+  private thinkingStreams = new Map<string, ThinkingPart>();
 
   /** verb calls: verb name -> the most recent part not yet closed. */
   private running = new Map<string, VerbPart>();
@@ -105,10 +108,12 @@ export class Mapper {
     // extra marker and leaves the lines as they are.
     for (const part of round.parts) {
       if (part.kind === "text" && part.streaming) part.streaming = false;
+      if (part.kind === "thinking" && part.streaming) part.streaming = false;
       if (killVerbs && part.kind === "verb" && part.state === "running")
         part.state = "failed";
     }
     this.streams.clear();
+    this.thinkingStreams.clear();
     this.running.clear();
 
     this.stamp(round);
@@ -258,6 +263,50 @@ export class Mapper {
         break;
       }
 
+      case "thinking_started": {
+        const round = this.current(env);
+        const part: ThinkingPart = {
+          kind: "thinking",
+          id: env.id ?? `think-${env.seq}`,
+          text: "",
+          streaming: true,
+        };
+        round.parts.push(part);
+        if (env.id) this.thinkingStreams.set(env.id, part);
+        this.stamp(round);
+        break;
+      }
+
+      case "thinking_delta": {
+        const part = env.id ? this.thinkingStreams.get(env.id) : undefined;
+        const round = this.current(env);
+        if (part) {
+          part.text += textOf(env);
+        } else {
+          // Replay starts mid-reasoning: merge by event id like output_delta.
+          const orphan: ThinkingPart = {
+            kind: "thinking",
+            id: env.id ?? `think-${env.seq}`,
+            text: textOf(env),
+            streaming: true,
+          };
+          round.parts.push(orphan);
+          if (env.id) this.thinkingStreams.set(env.id, orphan);
+        }
+        this.stamp(round);
+        break;
+      }
+
+      case "thinking_done": {
+        const part = env.id ? this.thinkingStreams.get(env.id) : undefined;
+        if (part) {
+          part.streaming = false;
+          if (env.id) this.thinkingStreams.delete(env.id);
+        }
+        if (this.open) this.stamp(this.open);
+        break;
+      }
+
       case "verb_started": {
         const round = this.current(env);
         const verb = verbOf(env);
@@ -353,7 +402,12 @@ export class Mapper {
         if (part.kind !== "input" || part.status !== "echo") return;
         const consumed = round.parts
           .slice(index + 1)
-          .some((later) => later.kind === "text" || later.kind === "verb");
+          .some(
+            (later) =>
+              later.kind === "text" ||
+              later.kind === "thinking" ||
+              later.kind === "verb",
+          );
         if (consumed) part.status = "consumed";
       });
     }

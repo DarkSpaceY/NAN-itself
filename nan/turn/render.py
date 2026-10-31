@@ -22,13 +22,14 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
     """
     messages: list[Message] = [_observation_message(turn)]
 
-    if turn.reply is None and not turn.calls:
+    if turn.reply is None and not turn.calls and not turn.thinking:
         return tuple(messages)
 
     messages.append(
         Message(
             role="assistant",
             content=turn.reply or "",
+            thinking=list(turn.thinking),
             tool_calls=list(turn.calls),
         )
     )

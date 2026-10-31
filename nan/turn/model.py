@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from nan.llm import Message, ToolCall, Usage
+from nan.llm import Message, ThinkingBlock, ToolCall, Usage
 
 InboxKind = Literal["user", "parentagent", "subagent", "unknown"]
 
@@ -148,6 +148,7 @@ class Turn:
     persona: str | None = None
 
     reply: str | None = None
+    thinking: tuple[ThinkingBlock, ...] = ()
     calls: tuple[ToolCall, ...] = ()
     results: tuple[ToolResult, ...] = ()
 
@@ -196,6 +197,7 @@ class Turn:
             ],
             "delta": [{"section": e.section, "line": e.line} for e in self.delta],
             "reply": self.reply,
+            "thinking": [b.model_dump() for b in self.thinking],
             "calls": [c.model_dump() for c in self.calls],
             "results": [
                 {

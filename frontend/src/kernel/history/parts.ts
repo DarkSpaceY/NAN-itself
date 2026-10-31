@@ -16,6 +16,15 @@ export interface TextPart {
   streaming?: boolean;
 }
 
+/** Model reasoning streamed before the answer; rendered dim and collapsible. */
+export interface ThinkingPart {
+  kind: "thinking";
+  id: string;
+  text: string;
+  /** Stream not finished (before thinking_done). */
+  streaming?: boolean;
+}
+
 /**
  * User input echo. Appears only in the root's timeline.
  *
@@ -47,7 +56,7 @@ export interface VerbPart {
   durationS?: number;
 }
 
-export type Part = TextPart | InputPart | VerbPart;
+export type Part = TextPart | ThinkingPart | InputPart | VerbPart;
 
 export interface Round {
   /** Backend turn_index; rounds created before turn_started use a local counter first. */

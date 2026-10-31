@@ -164,16 +164,23 @@ Conventions:
 
 | t | content |
 |---|---|
+| `thinking_started` | `{agent_id, depth}` |
+| `thinking_delta` | `{agent_id, depth, text}` |
+| `thinking_done` | `{agent_id, depth}` |
 | `output_started` | `{agent_id, depth}` |
 | `output_delta` | `{agent_id, depth, text}` |
 | `output_done` | `{agent_id, depth}` |
 | `output_cancelled` | `{agent_id, depth}` |
 
-All four carry the same envelope `id` (stream_id); a stream is
-started -> delta* -> done | cancelled. `output_cancelled` closes
-the text stream when the model returned tool calls, and the turn
-continues into the verbs; turn-level cancellation is the separate
-`turn_cancelled` event.
+Each family carries its own envelope `id` (stream_id) and follows
+started -> delta* -> done | cancelled. `thinking_*` is reasoning
+streamed before the answer; it opens lazily on the first thinking
+chunk, and `output_*` opens lazily on the first text chunk, so the
+two render in arrival order. `output_cancelled` closes the text
+stream when the model returned tool calls, and the turn continues
+into the verbs; turn-level cancellation is the separate
+`turn_cancelled` event. Empty assistant answers still get an
+`output_started` + close pair at the end of the turn.
 
 ### Verbs (linear per call, no correlation id)
 

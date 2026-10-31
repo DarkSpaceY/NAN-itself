@@ -16,13 +16,15 @@ from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
 from nan.config import settings
 from nan.injection import InjectionHub
-from nan.llm import ToolCall, Usage
+from nan.llm import ThinkingBlock, ToolCall, Usage
 
 
 @dataclass
 class FakeStreamEvent:
     kind: str
     text: str | None = None
+    thinking_text: str | None = None
+    thinking: list[ThinkingBlock] | None = None
     tool_call: ToolCall | None = None
     usage: Usage | None = None
     finish_reason: str | None = None
@@ -45,6 +47,7 @@ class FakeLLM:
     def __init__(self) -> None:
         self.scripts: dict[str, list[tuple[Any, ...]]] = {}
         self.requests: list[Any] = []
+        self.thinking: str | None = None
 
     def script(self, marker: str, calls: list[tuple[Any, ...]]) -> None:
         self.scripts[marker] = list(calls)
@@ -70,13 +73,21 @@ class FakeLLM:
 
         content, calls = await self._respond(request)
 
+        if self.thinking:
+            yield FakeStreamEvent("thinking", thinking_text=self.thinking)
+
         if content:
             yield FakeStreamEvent("text", text=content)
 
         for c in calls:
             yield FakeStreamEvent("tool_call", tool_call=c)
 
-        yield FakeStreamEvent("done", usage=Usage(), finish_reason="stop")
+        yield FakeStreamEvent(
+            "done",
+            usage=Usage(),
+            finish_reason="stop",
+            thinking=[ThinkingBlock(text=self.thinking)] if self.thinking else None,
+        )
 
 
 class SlowFakeLLM(FakeLLM):

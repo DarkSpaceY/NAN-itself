@@ -26,7 +26,15 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from nan.events import sink
-from nan.llm import FinishReason, LLMRequest, LLMResponse, Message, ToolCall, Usage
+from nan.llm import (
+    FinishReason,
+    LLMRequest,
+    LLMResponse,
+    Message,
+    ThinkingBlock,
+    ToolCall,
+    Usage,
+)
 from nan.turn import DeltaEvent, Injection, LLMCall, ToolResult, Turn, freeze_turn, render_turn
 
 from .verbs import tool_definitions
@@ -172,15 +180,41 @@ class TurnEngine:
         # Emission without subscribers simply lands in the
         # history ring.
         text_parts: list[str] = []
-        tool_calls: list = []
+        thinking_text_parts: list[str] = []
+        thinking_blocks: list[ThinkingBlock] = []
+        tool_calls: list[ToolCall] = []
         usage = Usage()
         finish_reason: FinishReason = "unknown"
 
-        stream_id = sink.emit("output_started", content={"agent_id": agent_id, "depth": depth})
+        # Streams start lazily: reasoning normally arrives before the
+        # answer, so opening output first would render them out of order.
+        thinking_id: str | None = None
+        stream_id: str | None = None
 
         async for event in self.llm.generate(request):
-            if event.kind == "text" and event.text:
+            if event.kind == "thinking" and event.thinking_text:
+                thinking_text_parts.append(event.thinking_text)
+
+                if thinking_id is None:
+                    thinking_id = sink.emit(
+                        "thinking_started",
+                        content={"agent_id": agent_id, "depth": depth},
+                    )
+
+                sink.emit(
+                    "thinking_delta",
+                    id=thinking_id,
+                    content={"text": event.thinking_text, "agent_id": agent_id, "depth": depth},
+                )
+
+            elif event.kind == "text" and event.text:
                 text_parts.append(event.text)
+
+                if stream_id is None:
+                    stream_id = sink.emit(
+                        "output_started",
+                        content={"agent_id": agent_id, "depth": depth},
+                    )
 
                 sink.emit(
                     "output_delta",
@@ -198,15 +232,36 @@ class TurnEngine:
                 if event.finish_reason is not None:
                     finish_reason = event.finish_reason
 
-        if stream_id:
+                if event.thinking:
+                    thinking_blocks = list(event.thinking)
+
+        if thinking_id:
             sink.emit(
-                "output_done" if not tool_calls else "output_cancelled",
-                id=stream_id,
+                "thinking_done",
+                id=thinking_id,
                 content={"agent_id": agent_id, "depth": depth},
             )
 
+        if not thinking_blocks and thinking_text_parts:
+            thinking_blocks = [ThinkingBlock(text="".join(thinking_text_parts))]
+
+        if stream_id is None:
+            # No text streamed (tools only, or an empty answer): keep
+            # the started/closed pair contract.
+            stream_id = sink.emit(
+                "output_started",
+                content={"agent_id": agent_id, "depth": depth},
+            )
+
+        sink.emit(
+            "output_done" if not tool_calls else "output_cancelled",
+            id=stream_id,
+            content={"agent_id": agent_id, "depth": depth},
+        )
+
         return LLMResponse(
             content=("".join(text_parts) or None),
+            thinking=thinking_blocks,
             tool_calls=tool_calls,
             model=self.llm.model,
             usage=usage,
@@ -225,6 +280,7 @@ def _with_response(
     return replace(
         turn,
         reply=response.content or "",
+        thinking=tuple(response.thinking),
         calls=tuple(response.tool_calls),
         llm=LLMCall(
             model=response.model,
