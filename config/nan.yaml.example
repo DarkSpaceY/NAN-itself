@@ -26,7 +26,7 @@ agent:
   max_children: 5            # -1: unlimited, per agent
 
 sandbox:
-  required: false           # true: refuse to start when no sandbox tool exists
+  required: true            # true: refuse to start when no sandbox tool exists
   # Command-level deny list, checked before the OS sandbox wraps the
   deny:
     - pattern: '\brm\s+(?:-[^\s]+\s+)*(?:/|~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|[;&|])'

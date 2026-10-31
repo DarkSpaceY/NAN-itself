@@ -73,7 +73,7 @@ class DenyRule(BaseModel):
 
 
 class SandboxSettings(BaseModel):
-    required: bool = False
+    required: bool = True
     # Rules come from config; an absent `deny` means no rules.
     deny: list[DenyRule] = Field(default_factory=list)
 

@@ -114,7 +114,7 @@ def test_live_config_and_committed_template_agree() -> None:
     assert settings.gateway.port == 8765
     assert settings.injection.host == "127.0.0.1"
     assert settings.injection.port == 8901
-    assert settings.sandbox.required is False
+    assert settings.sandbox.required is True
     assert settings.agent.autonomous_interval == 0.0
     assert settings.autostart.enabled is True
 
