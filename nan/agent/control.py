@@ -1,32 +1,20 @@
 """
-Control: the agent loop as a fold over one event stream.
+Control: the agent loop as a fold over its own state.
 
 The loop holds no branching of its own. Each iteration derives the
-current Status from the agent, folds ONE event through
-`transition`, and performs the returned Action:
-
-    event = await ports.next()        inbox message or latch change
-    action = transition(status, event, interval=...)
-    event = await perform(action)     run a turn / wait / sleep
-
-Death, pause, shutdown, the open turn and the ReACT continuation
+current Status from the agent, folds it once through `transition`,
+and performs the returned Action. Death, pause, shutdown, the
+resident turn, the ReACT continuation and the autonomous cadence
 are decided here, once: the loop has no `if death` / `if paused`
-scattered between awaits.
-
-`event` is why the fold ran:
-
-    start      the loop's first step
-    input      the inbox has a message to observe
-    change     a control latch changed (pause / resume / exit)
-    turn_done  the agent finished one turn task
+between awaits, and no second place asks what is pending.
 
 `action` is what the loop must do next:
 
-    stop       leave the fold and finalize (dispose or suspend)
-    wait       block for the next event
-    run        open a new turn
-    resume     continue the open turn from its phase
-    sleep      the autonomous-interval pause, then fold again
+    stop    leave the fold and finalize (dispose or suspend)
+    wait    block until a latch changes or input arrives
+    run     open a new turn
+    resume  continue the open turn from its phase
+    pace    wait out `autonomous_interval`, then open a turn
 """
 
 from __future__ import annotations
@@ -36,48 +24,47 @@ from typing import Literal
 
 from nan.turn import Death
 
-Action = Literal["stop", "wait", "run", "resume", "sleep"]
-
-Event = Literal["start", "input", "change", "turn_done"]
+Action = Literal["stop", "wait", "run", "resume", "pace"]
 
 
 @dataclass(frozen=True)
 class Status:
     """
     Everything a transition may read: the three latches, whether a
-    turn is open (opened, not ended), and whether the last closed
-    turn called verbs (the ReACT continuation is owed).
+    turn is open (opened, not ended), whether the last closed turn
+    called verbs (the ReACT continuation is owed), whether input
+    waits to be observed, and whether the cadence is served.
     """
 
     death: Death | None = None
     stopping: bool = False  # shutdown: persist, no death
     paused: bool = False
     open_turn: bool = False
-    called: bool = False
+    owed_step: bool = False
+    input_ready: bool = False
+    paced: bool = True  # a turn may open now
 
 
-def transition(status: Status, event: Event, *, interval: float) -> Action:
-    """The one place (status, event) becomes an action."""
+def transition(status: Status, *, interval: float) -> Action:
+    """The one place (status, interval) becomes an action."""
     if status.death is not None or status.stopping:
         return "stop"
 
     if status.paused:
         return "wait"
 
+    # The open turn owns the agent: it continues where it stands.
     if status.open_turn:
         return "resume"
 
-    if event == "turn_done":
-        if interval > 0:
-            return "sleep"
+    # An interval agent is paced entirely by the cadence: sleep, then
+    # run, then sleep again. Pending input never skips the interval.
+    if interval > 0:
+        return "run" if status.paced else "pace"
 
-        # Results the model has not seen yet continue the ReACT
-        # cycle without new input.
-        return "run" if status.called else "wait"
+    # Results the model has not seen yet continue the ReACT cycle
+    # without new input.
+    if status.input_ready or status.owed_step:
+        return "run"
 
-    if event == "start":
-        # Event-driven agents wait for their first observation;
-        # interval agents take a turn immediately.
-        return "run" if interval > 0 else "wait"
-
-    return "run"
+    return "wait"

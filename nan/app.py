@@ -4,6 +4,10 @@ gateway + execution sandbox.
 
 Every component reads the process-wide `settings`; this module wires
 input and pause and owns the process lifecycle.
+
+One instance drives one process; `run` may be called once. Shutdown
+is persistence, not death: `root.suspend()` saves the snapshot and
+the next boot restores from it.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import contextlib
 import os
 import signal
 import uuid
+from enum import Enum
 
 from loguru import logger
 
@@ -27,108 +32,109 @@ from nan.recovery import SnapshotStore, restore
 from nan.turn import InboxMessage
 from nan.utils.autostart import Autostart
 
+_SHUTDOWN_TIMEOUT = 10.0
+_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
-async def run_core() -> None:
-    llm = LLMProvider()
 
-    hub = InjectionHub()
+class CoreState(Enum):
+    """The process lifetime: INIT -> RUNNING -> STOPPING -> STOPPED."""
 
-    settings.paths.workspace.mkdir(parents=True, exist_ok=True)
+    INIT = "init"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
 
-    sandbox = Sandbox()
+
+class Core:
+    """Owns the lifecycle and the wired components."""
+
+    def __init__(self) -> None:
+        self._state = CoreState.INIT
+        self._boot_id = uuid.uuid4().hex[:12]
+        self._stop: asyncio.Event | None = None
+
+        self._llm: LLMProvider | None = None
+        self._hub: InjectionHub | None = None
+        self._sandbox: Sandbox | None = None
+        self._snapshots: SnapshotStore | None = None
+        self._root: Agent | None = None
+        self._gateway: Gateway | None = None
+        self._autostart: Autostart | None = None
+
+        self._gateway_task: asyncio.Task[None] | None = None
+        self._signal_handlers: list[int] = []
 
     # ------------------------------------------------------------------
-    # Gateway: subscribes to the `sink` singleton on its own.
+    # lifecycle
     # ------------------------------------------------------------------
 
-    BOOT_ID = uuid.uuid4().hex[:12]
+    async def run(self) -> None:
+        if self._state is not CoreState.INIT:
+            raise RuntimeError("Core can only be run once")
 
-    # Reset before restore: its events must belong to this boot.
-    sink.reset(boot_id=BOOT_ID)
+        try:
+            await self._initialize()
+            await self._serve()
 
-    snapshots = SnapshotStore(settings.paths.snapshots)
+        finally:
+            await self._shutdown()
 
-    root = await restore(
-        llm=llm,
-        injections=hub,
-        sandbox=sandbox,
-        snapshots=snapshots,
-    )
+    async def _initialize(self) -> None:
+        self._stop = asyncio.Event()
 
-    if root is None:
-        root = Agent(
-            llm=llm,
-            injections=hub,
-            sandbox=sandbox,
-            snapshots=snapshots,
+        self._llm = LLMProvider()
+        self._hub = InjectionHub()
+
+        settings.paths.workspace.mkdir(parents=True, exist_ok=True)
+
+        self._sandbox = Sandbox()
+
+        # Reset before restore: its events must belong to this boot.
+        sink.reset(boot_id=self._boot_id)
+
+        self._snapshots = SnapshotStore(settings.paths.snapshots)
+
+        self._root = await restore(
+            llm=self._llm,
+            injections=self._hub,
+            sandbox=self._sandbox,
+            snapshots=self._snapshots,
         )
 
-    def ingest(text: str, mid: str | None = None) -> None:
-        # User input enters the root's inbox directly.
-        root.deliver(InboxMessage.from_user(text))
-
-        sink.emit(
-            "user_input",
-            content={"text": text} | ({"mid": mid} if mid else {}),
-        )
-
-    def on_pause(paused: bool) -> None:
-        # Pause cancels the in-flight turn where it stands and saves
-        # it; resume continues that same turn.
-        if paused:
-            root.pause()
-        else:
-            root.resume()
-
-    gateway = Gateway(
-        on_input=ingest,
-        on_pause=on_pause,
-        state_provider=lambda: {
-            "boot": BOOT_ID,
-            "model": llm.model,
-            "paused": root.paused,
-        },
-    )
-
-    gateway_task: asyncio.Task[None] | None = None
-    stop_task: asyncio.Task[bool] | None = None
-
-    autostart: Autostart | None = None
-
-    loop = asyncio.get_running_loop()
-
-    try:
-        await hub.start()
-
-        if settings.autostart.enabled:
-            autostart = Autostart(
-                (
-                    ("user", settings.paths.autostart, False),
-                    ("agent", settings.paths.agent_autostart, True),
-                ),
-                env={
-                    **os.environ,
-                    "NAN_CORE_HOME": str(settings.paths.package),
-                    "NAN_WORKSPACE": str(settings.paths.workspace),
-                    "NAN_INJECTION_PORT": str(settings.injection.port),
-                    "NAN_CORE_PID": str(os.getpid()),
-                },
-                wrap=sandbox.wrap,
+        if self._root is None:
+            self._root = Agent(
+                llm=self._llm,
+                injections=self._hub,
+                sandbox=self._sandbox,
+                snapshots=self._snapshots,
             )
 
-            autostart.start()
+        self._gateway = Gateway(
+            on_input=self._ingest,
+            on_pause=self._on_pause,
+            state_provider=self._state_provider,
+        )
 
-        # Restored agents were started by restore; a fresh root
-        # starts here.
-        if root.task is None:
-            root.start()
+    async def _serve(self) -> None:
+        assert self._hub is not None and self._root is not None
+        assert self._gateway is not None and self._sandbox is not None
 
-        gateway_task = asyncio.create_task(gateway.serve(open_browser=True), name="gateway")
+        await self._hub.start()
 
-        stop = asyncio.Event()
+        if settings.autostart.enabled:
+            self._start_autostart()
 
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: _shutdown(root, stop))
+        # Restored agents were started by restore; a fresh root starts here.
+        if self._root.task is None:
+            self._root.start()
+
+        self._gateway_task = asyncio.create_task(
+            self._gateway.serve(open_browser=True),
+            name="gateway",
+        )
+
+        self._install_signals()
+        self._state = CoreState.RUNNING
 
         logger.info(
             "nan running: gateway http://{}:{}, injection registry :{}, workspace {}, sandbox {}",
@@ -136,77 +142,277 @@ async def run_core() -> None:
             settings.gateway.port,
             settings.injection.port,
             settings.paths.workspace,
-            sandbox.available and "on" or "degraded",
+            "on" if self._sandbox.available else "degraded",
         )
 
-        stop_task = asyncio.create_task(stop.wait(), name="stop")
+        await self._wait_for_stop()
 
-        # The core lives until a stop signal. A dead gateway is
-        # reported and the core keeps running: its failure must not
-        # kill the agents or their snapshots.
-        done, _ = await asyncio.wait({stop_task, gateway_task}, return_when=asyncio.FIRST_COMPLETED)
+    # ------------------------------------------------------------------
+    # shutdown
+    # ------------------------------------------------------------------
 
-        if gateway_task in done:
-            error = gateway_task.exception()
+    async def _shutdown(self) -> None:
+        if self._state is CoreState.STOPPED:
+            return
+
+        self._state = CoreState.STOPPING
+
+        # Suspend is synchronous: it survives cancellation of this
+        # coroutine, so the snapshot is written before the first await.
+        # Everything after it is best-effort cleanup.
+        self._suspend_root()
+
+        await self._await_root_task()
+        await self._stop_autostart()
+        await self._close_gateway()
+        await self._stop_hub()
+        await self._close_llm()
+        self._remove_signals()
+
+        self._state = CoreState.STOPPED
+
+        logger.info("nan stopped")
+
+    def _suspend_root(self) -> None:
+        if self._root is None:
+            return
+
+        try:
+            self._root.suspend()
+
+        except Exception:
+            logger.exception("Root suspend failed")
+
+    async def _await_root_task(self) -> None:
+        task = self._root.task if self._root is not None else None
+
+        if task is None:
+            return
+
+        _, pending = await asyncio.wait({task}, timeout=_SHUTDOWN_TIMEOUT)
+
+        if task in pending:
+            logger.warning("Root task did not finish within {}s; cancelling", _SHUTDOWN_TIMEOUT)
+
+            task.cancel()
+
+            _, still_pending = await asyncio.wait({task}, timeout=_SHUTDOWN_TIMEOUT)
+
+            if task in still_pending:
+                logger.error("Root task ignored cancellation")
+
+        if task.done() and not task.cancelled():
+            error = task.exception()
 
             if error is not None:
-                logger.error("Gateway stopped; core continues: {}", error)
+                logger.error("Root task failed during shutdown: {}", error)
 
-            await stop_task
-
-    finally:
-        _shutdown(root)
-
-        if stop_task is not None and not stop_task.done():
-            stop_task.cancel()
-
-            with contextlib.suppress(BaseException):
-                await stop_task
-
-        if root._task is not None:
-            with contextlib.suppress(BaseException):
-                await root._task
+    async def _stop_autostart(self) -> None:
+        if self._autostart is None:
+            return
 
         # The boot scripts' services are children of this core: stop
         # them while the gateway and the hub are still up, so they can
         # unregister and close their stores, and so the next boot finds
         # the ports free.
-        if autostart is not None:
-            await autostart.stop()
+        try:
+            await self._autostart.stop()
+
+        except Exception:
+            logger.exception("Autostart stop failed")
+
+    async def _close_gateway(self) -> None:
+        if self._gateway is not None:
+            try:
+                await self._gateway.close()
+
+            except Exception:
+                logger.exception("Gateway close failed")
+
+        task = self._gateway_task
+
+        if task is not None:
+            if not task.done():
+                task.cancel()
+
+            try:
+                await task
+
+            except asyncio.CancelledError:
+                pass
+
+            except Exception:
+                logger.exception("Gateway task failed during shutdown")
+
+    async def _stop_hub(self) -> None:
+        if self._hub is None:
+            return
 
         try:
-            await gateway.close()
+            await self._hub.stop()
 
-        except BaseException:
-            logger.exception("Gateway shutdown failed")
+        except Exception:
+            logger.exception("Hub stop failed")
 
-        if gateway_task is not None and not gateway_task.done():
-            gateway_task.cancel()
+    async def _close_llm(self) -> None:
+        if self._llm is None:
+            return
 
-            with contextlib.suppress(BaseException):
-                await gateway_task
+        try:
+            await self._llm.close()
 
-        await hub.stop()
+        except Exception:
+            logger.exception("LLM close failed")
 
-        await llm.close()
+    # ------------------------------------------------------------------
+    # signals
+    # ------------------------------------------------------------------
 
-        logger.info("nan stopped")
+    def _install_signals(self) -> None:
+        loop = asyncio.get_running_loop()
 
+        for sig in _SIGNALS:
+            try:
+                loop.add_signal_handler(sig, self._request_stop)
 
-def _shutdown(root: Agent, stop_event: asyncio.Event | None = None) -> None:
-    logger.info("Stop signal received")
+            except (NotImplementedError, ValueError):
+                logger.warning("Signal {} unsupported; relying on KeyboardInterrupt", sig)
 
-    # Shutdown is persistence, not death: the snapshot stays and
-    # the next boot restores from it.
-    root.suspend()
+            else:
+                self._signal_handlers.append(sig)
 
-    if stop_event is not None:
-        stop_event.set()
+    def _remove_signals(self) -> None:
+        loop = asyncio.get_running_loop()
+
+        for sig in self._signal_handlers:
+            with contextlib.suppress(Exception):
+                loop.remove_signal_handler(sig)
+
+        self._signal_handlers.clear()
+
+    def _request_stop(self) -> None:
+        if self._stop is None or self._stop.is_set():
+            return
+
+        if self._state in (CoreState.STOPPING, CoreState.STOPPED):
+            return
+
+        logger.info("Stop signal received")
+
+        self._stop.set()
+
+    # ------------------------------------------------------------------
+    # serving
+    # ------------------------------------------------------------------
+
+    async def _wait_for_stop(self) -> None:
+        stop = self._stop
+        assert stop is not None and self._gateway_task is not None
+
+        stop_task = asyncio.create_task(stop.wait(), name="stop")
+
+        try:
+            done, _ = await asyncio.wait(
+                {stop_task, self._gateway_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+        finally:
+            if not stop_task.done():
+                stop_task.cancel()
+
+                with contextlib.suppress(BaseException):
+                    await stop_task
+
+        if self._gateway_task in done:
+            self._report_gateway_exit()
+
+            # Gateway is gone; keep serving until a stop signal.
+            await stop.wait()
+
+    def _report_gateway_exit(self) -> None:
+        task = self._gateway_task
+        assert task is not None
+
+        if task.cancelled():
+            return
+
+        error = task.exception()
+
+        if error is not None:
+            logger.error("Gateway stopped; core continues: {}", error)
+
+        elif self._stop is not None and not self._stop.is_set():
+            logger.warning("Gateway exited normally; core continues")
+
+    # ------------------------------------------------------------------
+    # gateway callbacks
+    # ------------------------------------------------------------------
+
+    def _ingest(self, text: str, mid: str | None = None) -> None:
+        if self._state is not CoreState.RUNNING or self._root is None:
+            logger.warning("Input dropped: core state is {}", self._state.value)
+
+            return
+
+        # `mid` is the transport-level correlation id; it rides on the
+        # event only. The inbox message gets its own id from
+        # `InboxMessage.from_user`.
+        self._root.deliver(InboxMessage.from_user(text))
+
+        content: dict[str, str] = {"text": text}
+
+        if mid:
+            content["mid"] = mid
+
+        sink.emit("user_input", content=content)
+
+    def _on_pause(self, paused: bool) -> None:
+        if self._root is None or self._state is not CoreState.RUNNING:
+            return
+
+        if paused:
+            self._root.pause()
+
+        else:
+            self._root.resume()
+
+    def _state_provider(self) -> dict[str, object]:
+        return {
+            "boot": self._boot_id,
+            "model": self._llm.model if self._llm is not None else None,
+            "paused": self._root.paused if self._root is not None else False,
+        }
+
+    # ------------------------------------------------------------------
+    # autostart
+    # ------------------------------------------------------------------
+
+    def _start_autostart(self) -> None:
+        sandbox = self._sandbox
+        assert sandbox is not None
+
+        self._autostart = Autostart(
+            (
+                ("user", settings.paths.autostart, False),
+                ("agent", settings.paths.agent_autostart, True),
+            ),
+            env={
+                **os.environ,
+                "NAN_CORE_HOME": str(settings.paths.package),
+                "NAN_WORKSPACE": str(settings.paths.workspace),
+                "NAN_INJECTION_PORT": str(settings.injection.port),
+                "NAN_CORE_PID": str(os.getpid()),
+            },
+            wrap=sandbox.wrap,
+        )
+
+        self._autostart.start()
 
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_core())
+        asyncio.run(Core().run())
 
 
 if __name__ == "__main__":

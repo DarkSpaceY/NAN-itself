@@ -1,10 +1,11 @@
 """
 Boot restore: rebuild the live tree from the snapshots on disk.
 
-One snapshot per agent holds that agent's Turn list; every turn
-carries agent_id / parent_id / depth, so the spawn tree is not
-stored separately -- it is rebuilt from the files. A snapshot
-whose parent_id is None is a root.
+One snapshot per agent carries its identity (`agent_id` /
+`parent_id` / `depth`) and its Turn list, so the spawn tree is
+not stored separately -- it is rebuilt from the files. A snapshot
+whose parent_id is None is a root; an agent whose turns are empty
+was spawned but never observed, and is still live.
 
 Restore is automatic and has no user input: a turn whose inputs
 were never observed is dropped and its inbox rides into the next
@@ -96,10 +97,9 @@ async def restore(
 
         snapshots.remove(agent_id)
 
-    # Local imports: nan.agent imports nan.recovery, so the cycle
+    # Local import: nan.agent imports nan.recovery, so the cycle
     # must close after this module is fully loaded.
     from nan.agent.core import Agent
-    from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS
 
     agents: dict[str, Agent] = {}
 
@@ -113,8 +113,6 @@ async def restore(
             parent=parent,
             agent_id=snapshot.agent_id,
             snapshots=snapshots,
-            verbs=CHILD_VERBS if parent is not None else ROOT_VERBS,
-            on_exhausted="die" if parent is not None else "park",
         )
 
         agent.turns = list(snapshot.turns)
@@ -139,7 +137,7 @@ async def restore(
         agents[agent.agent_id] = agent
 
     for agent in agents.values():
-        await _recover(agent, reachable[agent.agent_id], snapshots)
+        await _recover(agent, reachable[agent.agent_id])
 
     for agent in agents.values():
         agent.start()
@@ -168,7 +166,7 @@ def _subtree(root: AgentSnapshot, tree: dict[str, list[AgentSnapshot]]) -> list[
     return ordered
 
 
-async def _recover(agent: Agent, snapshot: AgentSnapshot, snapshots: SnapshotStore) -> None:
+async def _recover(agent: Agent, snapshot: AgentSnapshot) -> None:
     """
     Resolve the last open turn and persist the result. Only a turn
     whose inputs were never seen is dropped (its inbox rides into
@@ -195,13 +193,9 @@ async def _recover(agent: Agent, snapshot: AgentSnapshot, snapshots: SnapshotSto
     for message in snapshot.pending:
         agent.deliver(message)
 
-    agent._messages = None
-
-    if agent.turns:
-        await snapshots.save(AgentSnapshot(turns=tuple(agent.turns), pending=tuple(agent._inbox)))
-
-    else:
-        snapshots.remove(agent.agent_id)
+    # Always rewritten: an agent with no turns is a spawned agent
+    # still waiting for its first observation, and it stays live.
+    await agent.persist()
 
     sink.emit(
         "snapshot_restored",

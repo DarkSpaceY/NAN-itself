@@ -47,6 +47,9 @@ InjectFn = Callable[..., Awaitable[tuple[tuple[Injection, ...], list[DeltaEvent]
 # Verb execution: one call in, its string result out.
 ExecuteFn = Callable[[ToolCall], Awaitable[str]]
 
+# Progress hook: the turn as it stands, made durable by the Agent.
+RecordFn = Callable[[Turn], Awaitable[None]]
+
 
 class TurnEngine:
     """
@@ -120,9 +123,12 @@ class TurnEngine:
             retries=retries,
         )
 
-    async def act(self, turn: Turn, *, execute: ExecuteFn) -> Turn:
-        results: list[ToolResult] = []
-
+    async def act(self, turn: Turn, *, execute: ExecuteFn, record: RecordFn) -> Turn:
+        """
+        Run the calls in order. Every result is recorded before the
+        next call starts, so a stop mid-batch loses only the call in
+        flight -- never a reported one, and no call runs twice.
+        """
         for call in turn.calls:
             logger.info("[{}] verb {} {}", turn.agent_id, call.name, call.arguments)
 
@@ -130,17 +136,23 @@ class TurnEngine:
 
             output = await execute(call)
 
-            results.append(
-                ToolResult(
-                    call_id=call.id,
-                    name=call.name,
-                    output=output,
-                    started_at=started_at,
-                    ended_at=time.time(),
-                )
+            turn = replace(
+                turn,
+                results=(
+                    *turn.results,
+                    ToolResult(
+                        call_id=call.id,
+                        name=call.name,
+                        output=output,
+                        started_at=started_at,
+                        ended_at=time.time(),
+                    ),
+                ),
             )
 
-        return _with_results(turn, results)
+            await record(turn)
+
+        return replace(turn, phase="acted")
 
     # ------------------------------------------------------------------
     # The model call
@@ -259,7 +271,3 @@ def _with_response(
             retries=retries,
         ),
     )
-
-
-def _with_results(turn: Turn, results: list[ToolResult]) -> Turn:
-    return replace(turn, results=tuple(results), phase="acted")

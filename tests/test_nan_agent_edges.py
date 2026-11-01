@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from nan_fakes import FakeLLM, SlowFakeLLM, await_until, make_agent
 
+from nan.recovery import SnapshotStore
 from nan.turn import InboxMessage
 
 pytestmark = pytest.mark.asyncio
@@ -74,6 +75,121 @@ async def test_pause_parks_turn_and_resume_continues_it(tmp_path: Path, no_sink:
         await root._task
 
 
+async def test_pause_freezes_the_whole_subtree(tmp_path: Path, no_sink: None) -> None:
+    """Pause is one latch over the spawn tree: a paused root freezes
+    its children too, and a resume lifts both."""
+    root = make_agent(tmp_path=tmp_path, agent={"autonomous_interval": 0.0})
+
+    root.start()
+
+    child, err = await root.spawn_child("child pause probe")
+
+    assert err is None and child is not None
+
+    await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
+
+    root.pause()
+
+    assert root.paused and child.paused
+
+    # Frozen means frozen: a delivery waits in the child's inbox.
+    child.deliver(InboxMessage.from_parent("after pause", source=root.agent_id))
+
+    await asyncio.sleep(0.05)
+
+    assert len(child.turns) == 1
+
+    root.resume()
+
+    assert not root.paused and not child.paused
+
+    await await_until(lambda: len(child.turns) == 2)
+
+    assert child.turns[-1].inbox[0].text == "after pause"
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task
+
+
+async def test_pause_mid_spawn_still_starts_the_child(
+    tmp_path: Path, no_sink: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pause that lands inside the child's first write must not
+    orphan it: the child is registered and holds its task, so it
+    starts (frozen) rather than sitting as a zombie."""
+    llm = FakeLLM()
+
+    llm.script("spawn-me", [("tool", "spawn", {"task": "late child"})])
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.0})
+
+    store = root._snapshots
+    original = store.save
+    entered = asyncio.Event()
+    never = asyncio.Event()
+
+    async def save(snapshot: Any) -> None:
+        if not snapshot.turns:
+            entered.set()
+
+            await never.wait()  # cancelled by the pause
+
+        await original(snapshot)
+
+    monkeypatch.setattr(store, "save", save)
+
+    root.start()
+
+    root.deliver(InboxMessage.from_user("spawn-me"))
+
+    await asyncio.wait_for(entered.wait(), timeout=3)
+
+    root.pause()
+
+    child = next(iter(root.children.values()))
+
+    # The pause is delivered asynchronously: the spawn's finally
+    # starts the child (frozen) right after the turn task unwinds.
+    await await_until(lambda: child.task is not None)
+
+    assert child.paused
+
+    root.resume()
+
+    assert not child.paused
+
+    await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
+
+    assert child.turns[0].inbox[0].text == "late child"
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task
+
+
+async def test_spawn_persists_the_child_before_it_runs(tmp_path: Path, no_sink: None) -> None:
+    """A child is durable from birth: the snapshot exists with the
+    task pending and no turns, before its loop takes anything."""
+    root = make_agent(tmp_path=tmp_path)
+
+    child, err = await root.spawn_child("durable from birth")
+
+    assert err is None and child is not None
+
+    snapshot = SnapshotStore(tmp_path / "snapshots").load_all()[child.agent_id]
+
+    assert snapshot.turns == ()
+    assert [message.text for message in snapshot.pending] == ["durable from birth"]
+
+    child.request_death("test cleanup")
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await child.task
+
+
 async def test_shutdown_persists_the_whole_subtree(tmp_path: Path, no_sink: None) -> None:
     """Shutdown is persistence, not death: every agent in the
     subtree keeps its turn list on disk."""
@@ -87,9 +203,9 @@ async def test_shutdown_persists_the_whole_subtree(tmp_path: Path, no_sink: None
 
     await await_until(lambda: bool(root.turns) and root.turns[-1].phase == "committed")
 
-    child, err = root.spawn_child("child work")
+    child, err = await root.spawn_child("child work")
 
-    assert err is None
+    assert err is None and child is not None
 
     await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
 
@@ -214,21 +330,21 @@ async def test_max_depth_and_children_enforced(tmp_path: Path, no_sink: None) ->
         agent={"max_depth": 1, "max_children": 1},
     )
 
-    child, err = root.spawn_child("A")
+    child, err = await root.spawn_child("A")
 
     assert err is None and child is not None
 
     # depth: child is at 1 == max_depth; a grandchild would be 2
-    grandchild, err = child.spawn_child("B")
+    grandchild, err = await child.spawn_child("B")
 
-    assert grandchild is not None and err is not None
+    assert grandchild is None and err is not None
 
     assert "Max depth" in err
 
     # children: the one slot is taken
-    sibling, err = root.spawn_child("C")
+    sibling, err = await root.spawn_child("C")
 
-    assert sibling is not None and err is not None
+    assert sibling is None and err is not None
 
     assert "Max children" in err
 
@@ -261,9 +377,9 @@ async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) ->
     """
     root = make_agent(tmp_path=tmp_path, agent={"max_children": 1})
 
-    first, err = root.spawn_child("A")
+    first, err = await root.spawn_child("A")
 
-    assert err is None
+    assert err is None and first is not None
 
     first.request_death("test")
 
@@ -274,9 +390,9 @@ async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) ->
 
     await await_until(lambda: first.agent_id not in root.children)
 
-    second, err = root.spawn_child("B")
+    second, err = await root.spawn_child("B")
 
-    assert err is None
+    assert err is None and second is not None
     assert second.agent_id != first.agent_id
 
 
@@ -284,7 +400,7 @@ async def test_kind_is_named_by_the_edge(tmp_path: Path, no_sink: None) -> None:
     """The sender knows the edge it used, so it names the kind."""
     root = make_agent(tmp_path=tmp_path)
 
-    child, err = root.spawn_child("A")
+    child, err = await root.spawn_child("A")
 
     assert err is None and child is not None
 
@@ -294,6 +410,35 @@ async def test_kind_is_named_by_the_edge(tmp_path: Path, no_sink: None) -> None:
 
     assert message.kind == "subagent"
     assert message.source == child.agent_id
+
+
+async def test_interval_agent_paces_itself(tmp_path: Path, no_sink: None) -> None:
+    """An interval agent takes one turn per interval with no input
+    at all: the cadence alone opens turns."""
+    llm = FakeLLM()
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.05})
+
+    root.start()
+
+    assert root._task is not None
+
+    # no deliver: two turns come from the cadence
+    await await_until(lambda: len(root.turns) >= 2)
+
+    first, second = root.turns[0], root.turns[1]
+
+    assert first.inbox == () and second.inbox == ()
+    assert first.ended_at is not None
+
+    # the second turn opened no earlier than one interval after the
+    # first ended
+    assert second.started_at - first.ended_at >= 0.05
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task
 
 
 async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sink: None) -> None:

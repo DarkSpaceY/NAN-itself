@@ -1,11 +1,14 @@
 """
-Persistence: one snapshot per agent -- its Turn list plus the
-messages no turn has observed yet, and nothing else.
+Persistence: one snapshot per agent -- its identity, its Turn list,
+plus the messages no turn has observed yet, and nothing else.
 
-A Turn is self-contained (identity, observation, reply, verb
-results, exit record), so the turns are the agent's history. The
-spawn tree is not stored either: every turn carries its parent_id,
-so restore rebuilds the tree from the files on disk.
+Identity belongs to the snapshot, not to the turns: an agent exists
+as soon as its snapshot does, so a child that was spawned but never
+observed a turn is still durable. The turns carry the same identity
+so each Turn stays self-contained for observers.
+
+The spawn tree is not stored: `parent_id` names the edge, so
+restore rebuilds the tree from the files on disk.
 
 The store is whole-state, never append: the state is serialized to
 a temp file and atomically replaced over the target, so a crash
@@ -33,34 +36,21 @@ from nan.turn import Death, InboxMessage, Turn
 @dataclass(frozen=True)
 class AgentSnapshot:
     """
-    One agent's turns, in order, plus the inbox messages that
-    arrived but no turn has observed. The file is named by the
-    agent's id; the id, parent and depth come from the first turn.
+    One agent: its identity, its turns in order, and the inbox
+    messages that arrived but no turn has observed. The file is
+    named by the agent's id. `turns` may be empty -- that is a
+    spawned agent which has not opened its first turn yet.
     """
 
-    turns: tuple[Turn, ...]
+    agent_id: str
+    parent_id: str | None
+    depth: int
+    turns: tuple[Turn, ...] = ()
     pending: tuple[InboxMessage, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.turns:
-            raise ValueError("a snapshot holds at least one turn")
-
-        first = self.turns[0]
-
-        if any(turn.agent_id != first.agent_id for turn in self.turns):
-            raise ValueError(f"snapshot mixes agents: expected {first.agent_id}")
-
-    @property
-    def agent_id(self) -> str:
-        return self.turns[0].agent_id
-
-    @property
-    def parent_id(self) -> str | None:
-        return self.turns[0].parent_id
-
-    @property
-    def depth(self) -> int:
-        return self.turns[0].depth
+        if any(turn.agent_id != self.agent_id for turn in self.turns):
+            raise ValueError(f"snapshot {self.agent_id} carries another agent's turn")
 
     @property
     def last(self) -> Turn:
@@ -73,18 +63,33 @@ class AgentSnapshot:
 
     def to_json(self) -> dict[str, Any]:
         return {
+            "agent_id": self.agent_id,
+            "parent_id": self.parent_id,
+            "depth": self.depth,
             "turns": [turn.to_json() for turn in self.turns],
             "pending": [message.to_json() for message in self.pending],
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> AgentSnapshot:
-        turns = data.get("turns")
+        try:
+            agent_id = data["agent_id"]
+            parent_id = data["parent_id"]
+            depth = data["depth"]
+            turns = data["turns"]
+        except KeyError as exc:
+            raise ValueError(f"snapshot missing {exc}") from exc
+
+        if not isinstance(agent_id, str) or not isinstance(depth, int):
+            raise ValueError("snapshot requires a string agent_id and an int depth")
 
         if not isinstance(turns, list):
             raise ValueError("snapshot requires a turns list")
 
         return cls(
+            agent_id=agent_id,
+            parent_id=parent_id if isinstance(parent_id, str) else None,
+            depth=depth,
             turns=tuple(Turn.from_json(item) for item in turns),
             pending=tuple(InboxMessage.from_json(message) for message in data.get("pending", ())),
         )
@@ -106,6 +111,9 @@ class InFlight:
 
     @classmethod
     def read(cls, snapshot: AgentSnapshot) -> InFlight | None:
+        if not snapshot.turns:
+            return None
+
         last = snapshot.last
 
         return None if last.phase == "committed" else cls(turn=last)
@@ -188,7 +196,7 @@ class SnapshotStore:
                         f"snapshot id {snapshot.agent_id} does not match file {path.name}"
                     )
 
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, TypeError, AttributeError) as exc:
                 logger.error("snapshot {} unreadable; agent not restored: {}", path.name, exc)
 
                 continue

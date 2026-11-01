@@ -36,14 +36,14 @@ TurnOrigin = Literal["first", "normal", "context_cleared"]
 #     observed  the turn opened on its inputs
 #     injected  service contributions collected
 #     thought   the model answered
-#     acted     the verbs finished (ended_at is set here)
+#     acted     the verbs reported
 #     committed frozen and durable
 TurnPhase = Literal["observed", "injected", "thought", "acted", "committed"]
 
 # What the model sees for a call whose verb never ran or never
 # reported back (a pause, a crash mid-act, a restored turn). Also
 # recorded in turn.results, so the turn stays self-contained.
-INTERRUPTED = "interrupted: agent paused during execution"
+INTERRUPTED = "interrupted: agent stopped during execution"
 
 
 @dataclass(frozen=True)
@@ -361,6 +361,17 @@ class Turn:
             ),
             started_at=data.get("started_at", 0.0),
             ended_at=data.get("ended_at"),
+        )
+
+    def noted(self, line: str, *, section: str = "agent") -> Turn:
+        """
+        This turn plus one delta line: the one way a runtime fact
+        (paused, resumed, a failure) is attached to the turn it
+        happened during.
+        """
+        return replace(
+            self,
+            delta=tuple([*self.delta, DeltaEvent(section=section, line=line)]),
         )
 
     def close_interrupted(self, *, ended_at: float | None = None) -> Turn:

@@ -241,9 +241,20 @@ class InjectionHub:
         self._last_reported.pop(agent_id, None)
 
     def _live_services(self) -> list[ServiceEntry]:
+        """
+        The registered services whose heartbeat is still fresh. The
+        single read point, so it also evicts: a service that stopped
+        beating is forgotten here and never accumulates.
+        """
         now = time.time()
 
-        return [e for e in self._services.values() if now - e.last_seen <= self.heartbeat_ttl]
+        for service_id, entry in list(self._services.items()):
+            if now - entry.last_seen > self.heartbeat_ttl:
+                logger.info("Injection service expired: {}", service_id)
+
+                del self._services[service_id]
+
+        return list(self._services.values())
 
     async def inject(self, turn: Turn) -> tuple[tuple[Injection, ...], list[DeltaEvent]]:
         """

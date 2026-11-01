@@ -9,10 +9,10 @@ so the ring holds turns.
 
 The sink is the process-wide singleton (loguru-style):
 producers call `sink.emit(...)`; consumers call `sink.subscribe()`.
-The sink is domain-free: the three identity keys
-(`agent_hash` / `parent_hash` / `depth`), when present, are
-placed into `content` by the CALLER; an event that carries none
-simply has no agent context (module lifecycle, gateway echo).
+The sink is domain-free: the identity keys (`agent_id` /
+`parent_id` / `depth`), when present, are placed into `content` by
+the CALLER; an event that carries none simply has no agent
+context (module lifecycle, gateway echo).
 
 Tests isolate themselves via `sink.reset()`.
 """

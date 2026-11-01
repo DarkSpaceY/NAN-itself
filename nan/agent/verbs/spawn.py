@@ -40,10 +40,10 @@ class SpawnVerb(Verb):
         if not isinstance(task, str) or not task.strip():
             return VerbOutcome("spawn requires a non-empty 'task'.")
 
-        child, error = agent.spawn_child(task)
+        child, error = await agent.spawn_child(task)
 
-        if error:
-            return VerbOutcome(error)
+        if child is None or error is not None:
+            return VerbOutcome(error or "spawn failed")
 
         return VerbOutcome(
             f"Subagent spawned.\nid: {child.agent_id}\ndepth: {child.depth}",

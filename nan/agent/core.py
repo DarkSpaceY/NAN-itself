@@ -2,10 +2,11 @@
 The Agent: one homogeneous loop, root or subagent.
 
     1 agent = 1 asyncio Task. The loop is a fold: it derives the
-    agent's Status, folds ONE event through `control.transition`,
-    and performs the action that comes back. Death, pause,
-    shutdown and the ReACT continuation are decided there, once;
-    the loop holds no `if death` / `if paused` between awaits.
+    agent's Status, folds it through `control.transition`, and
+    performs the action that comes back. Death, pause, shutdown,
+    the ReACT continuation and the autonomous cadence are decided
+    there, once; the loop holds no `if death` / `if paused`
+    between awaits.
 
     A turn opens when the agent observes (drains its inbox,
     collects its deltas) and stays resident in `turns` until it
@@ -22,9 +23,14 @@ The Agent: one homogeneous loop, root or subagent.
     ladder runs out, a subagent dies; the root parks the turn
     instead of dying.
 
-    Persistence: the whole Turn list is snapshotted at four points
-    per turn (intent, response, verb results, commit), so a stop
+    Persistence: a turn is durable at its intent, after the model
+    answers, after EACH verb result, and at commit, so a stop
     restarts from the last complete fact rather than from nothing.
+
+    Pause is one latch on every agent in the subtree: a pause
+    cancels the in-flight turn where it stands and the whole tree
+    waits; a resume lifts it and each turn continues from its
+    phase. Pause is process-scoped -- a restart lifts it.
 
     Exit has two shapes, and both cascade over the subtree. Shutdown
     (SIGTERM/SIGINT) suspends: every agent persists its in-flight
@@ -39,14 +45,15 @@ import asyncio
 import contextlib
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from nan.agent.control import Action, Event, Status, transition
+from nan.agent.control import Action, Status, transition
 from nan.agent.engine import TurnEngine
-from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS, Verb, tool_definitions
+from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS, tool_definitions
 from nan.config import settings
 from nan.events import sink
 from nan.llm import Message
@@ -82,8 +89,6 @@ class Agent:
         parent: Agent | None = None,
         agent_id: str | None = None,
         snapshots: SnapshotStore | None = None,
-        verbs: dict[str, Verb] | None = None,
-        on_exhausted: Literal["park", "die"] = "park",
     ) -> None:
         # --- collaborators (handed in) ---
         self.llm = llm
@@ -93,14 +98,12 @@ class Agent:
         self.sandbox = sandbox  # execution-level sandbox for the shell verb
         self._snapshots = snapshots or SnapshotStore(settings.paths.snapshots)
 
-        # --- capability: the verb set is the identity of a root/child ---
-        # A root runs ROOT_VERBS (no finish: it never exits); a child
-        # runs CHILD_VERBS. `on_exhausted` is the terminal of a failed
-        # turn: a root parks (the process stays alive to be resumed),
-        # a child dies.
-        self.verbs = verbs if verbs is not None else ROOT_VERBS
+        # --- identity: root or child is ONE fact, `parent` ---
+        # It decides the verb set (a root never exits, so it cannot
+        # finish) and the terminal of a failed turn: the root parks
+        # for a resume, a child dies.
+        self.verbs = ROOT_VERBS if parent is None else CHILD_VERBS
         self.tools = tool_definitions(self.verbs)
-        self.on_exhausted = on_exhausted
 
         # --- identity ---
         self.agent_id = agent_id or uuid.uuid4().hex[:8]
@@ -108,15 +111,7 @@ class Agent:
 
         # --- persona: boot read ---
         # The file is CORE: an unreadable persona refuses startup.
-        # It is re-read every turn (a mid-run failure fails that
-        # turn) and a content change is a system-prompt
-        # invalidation point.
-        try:
-            self._persona_last = settings.paths.persona.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise RuntimeError(
-                f"persona file unreadable at boot: {settings.paths.persona}"
-            ) from exc
+        self._persona_last = self._read_persona()
 
         # --- children: the spawn tree edge, keyed by child id ---
         # `Turn.parent_id` is the durable fact; this map is the live
@@ -152,6 +147,11 @@ class Agent:
         self._paused = False  # the whole agent is frozen
         self._stopping = False  # shutdown: persist, no death
         self._started = False
+
+        # The autonomous cadence: True when a turn may open. It is
+        # spent by opening a turn and earned back by one interval's
+        # sleep (see control.transition).
+        self._paced = True
 
         # Set when pause cancels the in-flight turn, read by the
         # cancellation handlers, cleared once consumed. A latch,
@@ -220,16 +220,18 @@ class Agent:
     # Spawning
     # ==================================================================
 
-    def spawn_child(self, task: str) -> tuple[Agent, str | None]:
+    async def spawn_child(self, task: str) -> tuple[Agent | None, str | None]:
         """
-        Create and start a child; return (child, error). The
-        caller (spawn verb) renders the error for the model.
+        Create, make durable and start a child; return (child,
+        error). The caller (spawn verb) renders the error for the
+        model. The task is delivered before the snapshot is written,
+        so the child survives a stop from birth.
         """
         if settings.agent.max_depth >= 0 and self.depth + 1 > settings.agent.max_depth:
-            return self, f"Max depth exceeded: {self.depth + 1} > {settings.agent.max_depth}"
+            return None, f"Max depth exceeded: {self.depth + 1} > {settings.agent.max_depth}"
 
         if settings.agent.max_children >= 0 and len(self.children) >= settings.agent.max_children:
-            return self, f"Max children reached: {settings.agent.max_children}"
+            return None, f"Max children reached: {settings.agent.max_children}"
 
         # A child shares the parent's collaborators and inherits
         # everything else from the process-wide settings.
@@ -239,8 +241,6 @@ class Agent:
             sandbox=self.sandbox,
             parent=self,
             snapshots=self._snapshots,
-            verbs=CHILD_VERBS,
-            on_exhausted="die",
         )
 
         self.children[child.agent_id] = child
@@ -251,7 +251,20 @@ class Agent:
 
         self.note_delta("subagent", f"+{child.agent_id} spawned")
 
-        child.start()
+        # Durable before it runs: a snapshot with no turns is a
+        # spawned agent that has not observed anything yet.
+        try:
+            await child.persist()
+
+        finally:
+            # Started even when this spawn was cancelled mid-write
+            # (pause or shutdown): the child is registered and holds
+            # its task, so an unstarted one would be a zombie. A child
+            # born into a frozen subtree is frozen too.
+            if self._paused:
+                child.pause()
+
+            child.start()
 
         return child, None
 
@@ -263,9 +276,29 @@ class Agent:
         """
         Record a system-state event line ("subagent", "-j died:
         ..."), drained into the next turn's <delta> section under
-        the given tag.
+        the given tag. Passive: it never wakes the loop.
         """
         self._pending_deltas.append(DeltaEvent(section=section, line=line))
+
+    def _note(self, line: str, *, section: str = "agent") -> None:
+        """
+        Attach one runtime fact to the turn it happened during: the
+        open turn when there is one, otherwise the pending channel
+        the next observation drains. A committed turn is frozen and
+        never takes a new line.
+        """
+        turn = self.last_turn
+
+        if turn is not None and turn.phase != "committed":
+            self.turns[-1] = turn.noted(line, section=section)
+
+        else:
+            self.note_delta(section, line)
+
+    @property
+    def _exiting(self) -> bool:
+        """The agent is leaving: death, or shutdown."""
+        return self._death is not None or self._stopping
 
     def _begin_death(self, death: Death) -> bool:
         """Record the exit; the first record wins (idempotent)."""
@@ -304,7 +337,7 @@ class Agent:
         snapshot. No death, no cascade, no notices -- the next
         boot restores from disk.
         """
-        if self._death is not None or self._stopping:
+        if self._exiting:
             return
 
         self._stopping = True
@@ -315,11 +348,12 @@ class Agent:
 
     def pause(self) -> None:
         """
-        Freeze the agent: the in-flight turn is cancelled where it
-        stands (its inputs and facts stay on the turn, snapshotted)
-        and the loop waits for resume. Idempotent.
+        Freeze the agent and its whole subtree: every in-flight turn
+        is cancelled where it stands (its inputs and facts stay on
+        the turn, snapshotted) and every loop waits for resume.
+        Idempotent.
         """
-        if self._paused or self._death is not None or self._stopping:
+        if self._paused or self._exiting:
             return
 
         self._park()
@@ -328,6 +362,9 @@ class Agent:
             self._pause_cancel = True
 
             self._turn_task.cancel()
+
+        for child in list(self.children.values()):
+            child.pause()
 
     def _park(self) -> None:
         """The one pause transition: freeze and announce it."""
@@ -339,10 +376,10 @@ class Agent:
 
     def resume(self) -> None:
         """
-        Lift the freeze. The resident turn continues from its
-        phase: an unanswered one re-runs its model call, an
-        answered one closes its unfinished calls as interrupted.
-        Idempotent.
+        Lift the freeze over the whole subtree. Each resident turn
+        continues from its phase: an unanswered one re-runs its
+        model call, an answered one closes its unfinished calls as
+        interrupted. Idempotent.
         """
         if not self._paused:
             return
@@ -352,6 +389,9 @@ class Agent:
         sink.emit("agent_resumed", content={"agent_id": self.agent_id})
 
         self._wake.set()
+
+        for child in list(self.children.values()):
+            child.resume()
 
     @property
     def paused(self) -> bool:
@@ -384,20 +424,14 @@ class Agent:
             },
         )
 
-        event: Event = "start"
-
         try:
             while True:
-                action = transition(
-                    self._status(),
-                    event,
-                    interval=settings.agent.autonomous_interval,
-                )
+                action = transition(self._status(), interval=settings.agent.autonomous_interval)
 
                 if action == "stop":
                     break
 
-                event = await self._perform(action)
+                await self._perform(action)
 
         finally:
             if self._death is not None:
@@ -412,17 +446,16 @@ class Agent:
             stopping=self._stopping,
             paused=self._paused,
             open_turn=self._resident_turn() is not None,
-            called=self._owes_a_step(),
+            owed_step=self._owes_a_step(),
+            input_ready=bool(self._inbox),
+            paced=self._paced,
         )
 
     def _resident_turn(self) -> Turn | None:
-        """The open turn, if any: not committed and not terminated."""
+        """The open turn, if any: the last turn, before its commit."""
         turn = self.last_turn
 
-        if turn is None or turn.phase == "committed" or turn.death is not None:
-            return None
-
-        return turn
+        return None if turn is None or turn.phase == "committed" else turn
 
     def _owes_a_step(self) -> bool:
         """A committed turn that called verbs owes the model its
@@ -433,15 +466,28 @@ class Agent:
             turn is not None and turn.phase == "committed" and turn.calls and turn.death is None
         )
 
-    async def _perform(self, action: Action) -> Event:
-        """Carry out one action; return the event it produced."""
+    async def _perform(self, action: Action) -> None:
+        """Carry out one action; the fold re-reads the agent after it."""
         if action == "wait":
-            return await self._next_event()
+            # The check in `_status` and this clear are one
+            # synchronous step, so no delivery can slip between.
+            self._wake.clear()
 
-        if action == "sleep":
+            await self._wake.wait()
+
+            return
+
+        if action == "pace":
+            # The cadence: wait it out, then the fold opens the turn.
             await asyncio.sleep(settings.agent.autonomous_interval)
 
-            return "change"
+            self._paced = True
+
+            return
+
+        # A turn runs here, and the cadence is spent with it -- a
+        # resumed turn counts as a turn too.
+        self._paced = False
 
         turn_task = asyncio.create_task(
             self._resume_turn() if action == "resume" else self.run_turn(),
@@ -455,38 +501,14 @@ class Agent:
 
         except asyncio.CancelledError:
             # Only a pause leaves the loop alive: the turn stays
-            # resident and the next fold continues it. Death and
-            # shutdown are re-raised (the loop itself is ending).
-            if self._death is not None or self._stopping or not self._pause_cancel:
+            # resident and the next fold continues it. An exit
+            # (death or shutdown) re-raises, and the loop unwinds.
+            if self._exiting or not self._pause_cancel:
                 raise
 
         finally:
             self._turn_task = None
             self._pause_cancel = False
-
-        return "turn_done"
-
-    async def _next_event(self) -> Event:
-        """
-        Block until something the fold can act on exists: an inbox
-        message, a lifted pause with a resident turn, or an exit.
-        While paused the inbox is not observed, so a message alone
-        never ends the wait: only a control change does.
-        """
-        while True:
-            self._wake.clear()
-
-            if self._death is not None or self._stopping:
-                return "change"
-
-            if not self._paused:
-                if self._inbox:
-                    return "input"
-
-                if self._resident_turn() is not None:
-                    return "change"
-
-            await self._wake.wait()
 
     # ==================================================================
     # One turn
@@ -505,10 +527,7 @@ class Agent:
         # The same turn continues: the `resumed` line rides its
         # observation and re-announcing it lets the UI overwrite the
         # interrupted attempt (same turn index).
-        turn = replace(
-            turn,
-            delta=tuple([*turn.delta, DeltaEvent(section="agent", line="resumed")]),
-        )
+        turn = turn.noted("resumed")
 
         self.turns[-1] = turn
 
@@ -561,7 +580,7 @@ class Agent:
         """
         Run the remaining phases of `turn` and commit it. A
         cancelled turn is parked where it stands (pause); a failed
-        one is parked or dies by `on_exhausted`.
+        one is parked (root) or dies (child).
         """
         try:
             persona, marker = self._persona_for_turn()
@@ -573,7 +592,7 @@ class Agent:
 
             # Write 1 of 4: the turn's intent (identity, inbox,
             # deltas), so a stop can requeue it.
-            await self._save_snapshot()
+            await self.persist()
 
             sink.emit(
                 "turn_started",
@@ -596,7 +615,7 @@ class Agent:
             # A pause cancel parks the turn where it stands. Any
             # other cancel ends the loop, and the turn is dropped
             # with the agent instead.
-            if self._death is None and not self._stopping and self._pause_cancel:
+            if not self._exiting and self._pause_cancel:
                 await self._park_turn()
 
             raise
@@ -618,16 +637,24 @@ class Agent:
         self.turns[-1] = turn
 
         # Write 2 of 4: the model answered.
-        await self._save_snapshot()
+        await self.persist()
 
-        turn = await self.engine.act(turn, execute=self._run_call)
+        # Each verb result is recorded as it lands (write 3 of 4),
+        # so a crash mid-batch loses only the call in flight.
+        turn = await self.engine.act(turn, execute=self._run_call, record=self._record_result)
 
         self.turns[-1] = turn
 
-        # Write 3 of 4: the verbs that landed.
-        await self._save_snapshot()
+        await self.persist()
 
         return turn
+
+    async def _record_result(self, turn: Turn) -> None:
+        """The act phase's durability hook: this is the turn as it
+        now stands, with one more verb result on it."""
+        self.turns[-1] = turn
+
+        await self.persist()
 
     async def _continue(self, turn: Turn, *, persona: str) -> Turn:
         """Resume a resident turn from its phase, never re-running verbs."""
@@ -642,14 +669,17 @@ class Agent:
         # "thought": the model answered, but its verbs may have run
         # partially. Re-executing them is not safe, so what never
         # reported is closed as interrupted (the model sees it).
-        sink.emit(
-            "turn_interrupted",
-            content={
-                "agent_id": self.agent_id,
-                "turn_index": len(self.turns),
-                "reason": "resumed mid-execution",
-            },
-        )
+        reported = {result.call_id for result in turn.results}
+
+        if any(call.id not in reported for call in turn.calls):
+            sink.emit(
+                "turn_interrupted",
+                content={
+                    "agent_id": self.agent_id,
+                    "turn_index": len(self.turns),
+                    "reason": "resumed mid-execution",
+                },
+            )
 
         return turn.close_interrupted()
 
@@ -722,7 +752,7 @@ class Agent:
         self._messages = None
 
         # Write 4 of 4: the turn is complete and durable.
-        await self._save_snapshot()
+        await self.persist()
 
         sink.emit(
             "turn_done",
@@ -745,14 +775,9 @@ class Agent:
 
     async def _park_turn(self) -> None:
         """Pause cancelled the turn: keep it exactly where it stands."""
-        turn = self.turns[-1]
+        self._note("paused")
 
-        self.turns[-1] = replace(
-            turn,
-            delta=tuple([*turn.delta, DeltaEvent(section="agent", line="paused")]),
-        )
-
-        await self._save_snapshot()
+        await self.persist()
 
     async def _fail_turn(self, exc: Exception) -> None:
         """
@@ -769,14 +794,9 @@ class Agent:
 
             logger.exception("[{}] turn failed: {}", self.agent_id, reason)
 
-        turn = self.turns[-1]
+        self._note(reason)
 
-        self.turns[-1] = replace(
-            turn,
-            delta=tuple([*turn.delta, DeltaEvent(section="agent", line=reason)]),
-        )
-
-        await self._save_snapshot()
+        await self.persist()
 
         sink.emit(
             "turn_interrupted",
@@ -787,12 +807,14 @@ class Agent:
             },
         )
 
-        if self.on_exhausted == "park":
-            self._park()
+        # A root parks the turn and waits to be resumed; a child has
+        # nobody to resume it, so it dies.
+        if self.parent is not None:
+            self._begin_death(Death(f"unrecoverable: {reason}"))
 
             return
 
-        self._begin_death(Death(f"unrecoverable: {reason}"))
+        self._park()
 
     # ==================================================================
     # Persona (re-read every turn)
@@ -800,27 +822,27 @@ class Agent:
 
     def _persona_for_turn(self) -> tuple[str, str | None]:
         """
-        Re-read the persona file every turn. A read failure raises
-        (the turn fails). Returns the text to use plus, when it
-        changed since the last turn, that text as the turn's
-        persona marker.
+        Re-read the persona; a content change is the one legal
+        system-prompt invalidation and rides the turn as its marker.
         """
+        text = self._read_persona()
+
+        if text == self._persona_last:
+            return text, None
+
+        logger.info("[{}] persona changed; new system prompt from this turn", self.agent_id)
+
+        self._persona_last = text
+
+        return text, text
+
+    def _read_persona(self) -> str:
+        """The persona file, read at boot and re-read every turn."""
         try:
-            text = settings.paths.persona.read_text(encoding="utf-8")
+            return settings.paths.persona.read_text(encoding="utf-8")
 
-        except OSError:
-            raise RuntimeError(
-                f"[{self.agent_id}] persona file unreadable: {settings.paths.persona}"
-            ) from None
-
-        changed = text != self._persona_last
-
-        if changed:
-            logger.info("[{}] persona changed; new system prompt from this turn", self.agent_id)
-
-            self._persona_last = text
-
-        return text, (text if changed else None)
+        except OSError as exc:
+            raise RuntimeError(f"persona file unreadable: {settings.paths.persona}") from exc
 
     # ==================================================================
     # Verbs
@@ -889,27 +911,37 @@ class Agent:
     # Persistence
     # ==================================================================
 
-    async def _save_snapshot(self) -> None:
-        """Persist the turns and the unobserved inbox in one write."""
-        if not self.turns:
-            return
+    async def persist(self) -> None:
+        """
+        Write this agent's whole state -- identity, turns and the
+        unobserved inbox -- in one atomic, fsynced file.
 
-        await self._snapshots.save(
-            AgentSnapshot(turns=tuple(self.turns), pending=tuple(self._inbox))
+        One writer, best effort: a failed write is logged and the
+        last good snapshot stands. Losing the process over a disk
+        error would lose far more than the one phase.
+        """
+        snapshot = AgentSnapshot(
+            agent_id=self.agent_id,
+            parent_id=(self.parent.agent_id if self.parent is not None else None),
+            depth=self.depth,
+            turns=tuple(self.turns),
+            pending=tuple(self._inbox),
         )
+
+        try:
+            await self._snapshots.save(snapshot)
+
+        except Exception:
+            logger.exception(
+                "[{}] snapshot write failed; the last good snapshot stands", self.agent_id
+            )
 
     # ==================================================================
     # Exit: dispose (death) / suspend (shutdown)
     # ==================================================================
 
-    async def _dispose(self) -> None:
-        death = self._death
-
-        if death is None:
-            raise RuntimeError("dispose without a death record")
-
-        # An in-flight turn (cancelled with the loop, or still
-        # running) dies with the agent, never written to history.
+    async def _halt(self) -> None:
+        """Cancel the in-flight turn and await what it leaves."""
         turn_task, self._turn_task = self._turn_task, None
 
         if turn_task is not None and not turn_task.done():
@@ -918,17 +950,32 @@ class Agent:
             with contextlib.suppress(BaseException):
                 await turn_task
 
-        # Cascade: every child dies with me; its loop task is
-        # awaited.
-        child_tasks = []
+    async def _stop_children(self, stop: Callable[[Agent], None]) -> None:
+        """The exit cascades over the subtree: stop every child, then
+        await its loop (each child repeats this over its own)."""
+        children = list(self.children.values())
 
-        for child in self.children.values():
-            child.request_death(f"killed by holder {self.agent_id}")
+        for child in children:
+            stop(child)
 
-            if child.task is not None:
-                child_tasks.append(child.task)
+        await asyncio.gather(
+            *(child.task for child in children if child.task is not None),
+            return_exceptions=True,
+        )
 
-        await asyncio.gather(*child_tasks, return_exceptions=True)
+    async def _dispose(self) -> None:
+        death = self._death
+
+        if death is None:
+            raise RuntimeError("dispose without a death record")
+
+        # An in-flight turn dies with the agent, never written to
+        # history; the subtree dies with me.
+        await self._halt()
+
+        await self._stop_children(
+            lambda child: child.request_death(f"killed by holder {self.agent_id}")
+        )
 
         self.children.clear()
 
@@ -962,27 +1009,11 @@ class Agent:
 
     async def _suspend(self) -> None:
         """Process shutdown: persist the subtree and end quietly."""
-        turn_task, self._turn_task = self._turn_task, None
+        await self._halt()
 
-        if turn_task is not None and not turn_task.done():
-            turn_task.cancel()
+        await self._stop_children(lambda child: child.suspend())
 
-            with contextlib.suppress(BaseException):
-                await turn_task
-
-        # The subtree stops with me: each child persists its own
-        # turn list and awaits its own children.
-        child_tasks = []
-
-        for child in self.children.values():
-            child.suspend()
-
-            if child.task is not None:
-                child_tasks.append(child.task)
-
-        await asyncio.gather(*child_tasks, return_exceptions=True)
-
-        await self._save_snapshot()
+        await self.persist()
 
         logger.info("[{}] suspended after {} turns", self.agent_id, len(self.turns))
 

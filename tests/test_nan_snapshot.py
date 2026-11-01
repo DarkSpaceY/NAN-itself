@@ -85,8 +85,13 @@ def test_turn_from_minimal_json_uses_defaults() -> None:
     assert turn.rendered is None
 
 
-def test_snapshot_derives_identity_from_its_turns() -> None:
-    snapshot = AgentSnapshot(turns=(_turn(agent_id="a2", parent_id="a1"),))
+def test_snapshot_carries_its_own_identity() -> None:
+    snapshot = AgentSnapshot(
+        agent_id="a2",
+        parent_id="a1",
+        depth=1,
+        turns=(_turn(agent_id="a2", parent_id="a1"),),
+    )
 
     assert snapshot.agent_id == "a2"
     assert snapshot.parent_id == "a1"
@@ -94,16 +99,35 @@ def test_snapshot_derives_identity_from_its_turns() -> None:
     assert snapshot.death is None
 
 
-def test_snapshot_rejects_empty_or_mixed_turns() -> None:
-    with pytest.raises(ValueError):
-        AgentSnapshot(turns=())
+def test_snapshot_without_turns_is_a_spawned_agent() -> None:
+    snapshot = AgentSnapshot(agent_id="a2", parent_id="a1", depth=1)
 
+    assert snapshot.turns == ()
+    assert InFlight.read(snapshot) is None
+
+    assert AgentSnapshot.from_json(snapshot.to_json()) == snapshot
+
+
+def test_snapshot_rejects_mixed_turns() -> None:
     with pytest.raises(ValueError):
-        AgentSnapshot(turns=(_turn(agent_id="a1"), _turn(agent_id="a2")))
+        AgentSnapshot(
+            agent_id="a1",
+            parent_id=None,
+            depth=0,
+            turns=(_turn(agent_id="a1"), _turn(agent_id="a2")),
+        )
+
+
+def test_snapshot_from_json_requires_identity() -> None:
+    with pytest.raises(ValueError):
+        AgentSnapshot.from_json({"turns": []})
 
 
 def test_snapshot_round_trips() -> None:
     snapshot = AgentSnapshot(
+        agent_id="a1",
+        parent_id=None,
+        depth=0,
         turns=(_turn(), _turn(agent_id="a1", death=Death(reason="killed"))),
     )
 
@@ -114,7 +138,7 @@ def test_snapshot_round_trips() -> None:
 async def test_store_saves_and_loads(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    snapshot = AgentSnapshot(turns=(_turn(),))
+    snapshot = AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),))
 
     await store.save(snapshot)
 
@@ -130,10 +154,15 @@ async def test_store_saves_and_loads(tmp_path: Path) -> None:
 async def test_save_overwrites_whole_state(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    await store.save(AgentSnapshot(turns=(_turn(),)))
+    await store.save(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
 
     await store.save(
-        AgentSnapshot(turns=(_turn(agent_id="a1", death=Death(reason="killed")),)),
+        AgentSnapshot(
+            agent_id="a1",
+            parent_id=None,
+            depth=0,
+            turns=(_turn(agent_id="a1", death=Death(reason="killed")),),
+        ),
     )
 
     loaded = store.load_all()["a1"]
@@ -146,7 +175,7 @@ async def test_save_overwrites_whole_state(tmp_path: Path) -> None:
 async def test_save_leaves_no_temporary_files(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    await store.save(AgentSnapshot(turns=(_turn(),)))
+    await store.save(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
 
     assert sorted(path.name for path in tmp_path.iterdir()) == ["a1.json"]
 
@@ -155,7 +184,7 @@ async def test_save_leaves_no_temporary_files(tmp_path: Path) -> None:
 async def test_remove_deletes_the_snapshot(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    await store.save(AgentSnapshot(turns=(_turn(),)))
+    await store.save(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
 
     store.remove("a1")
 
@@ -172,7 +201,7 @@ def test_load_all_without_a_directory_is_empty(tmp_path: Path) -> None:
 async def test_corrupt_snapshot_is_skipped(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    await store.save(AgentSnapshot(turns=(_turn(),)))
+    await store.save(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
 
     (tmp_path / "bad.json").write_text("{not json", encoding="utf-8")
 
@@ -183,7 +212,7 @@ async def test_corrupt_snapshot_is_skipped(tmp_path: Path) -> None:
 async def test_id_mismatch_is_skipped(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path)
 
-    await store.save(AgentSnapshot(turns=(_turn(),)))
+    await store.save(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
 
     (tmp_path / "a1.json").rename(tmp_path / "other.json")
 
@@ -191,7 +220,10 @@ async def test_id_mismatch_is_skipped(tmp_path: Path) -> None:
 
 
 def test_no_in_flight_when_the_last_turn_ended() -> None:
-    assert InFlight.read(AgentSnapshot(turns=(_turn(),))) is None
+    assert (
+        InFlight.read(AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(),)))
+        is None
+    )
 
 
 def test_in_flight_without_an_answer_is_requeued() -> None:
@@ -203,7 +235,9 @@ def test_in_flight_without_an_answer_is_requeued() -> None:
         started_at=1.0,
     )
 
-    flight = InFlight.read(AgentSnapshot(turns=(_turn(), open_turn)))
+    flight = InFlight.read(
+        AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(_turn(), open_turn))
+    )
 
     assert flight is not None
     assert flight.turn is open_turn
@@ -221,7 +255,9 @@ def test_in_flight_with_an_answer_is_resumed() -> None:
         started_at=1.0,
     )
 
-    flight = InFlight.read(AgentSnapshot(turns=(open_turn,)))
+    flight = InFlight.read(
+        AgentSnapshot(agent_id="a1", parent_id=None, depth=0, turns=(open_turn,))
+    )
 
     assert flight is not None
     assert flight.requeue == ()

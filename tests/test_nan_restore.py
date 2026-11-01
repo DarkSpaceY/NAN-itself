@@ -58,10 +58,20 @@ async def _stop(root: Any) -> None:
 async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path / "snapshots")
 
-    await store.save(AgentSnapshot(turns=(_done("r0", None, 0, "hello"),)))
+    await store.save(
+        AgentSnapshot(
+            agent_id="r0",
+            parent_id=None,
+            depth=0,
+            turns=(_done("r0", None, 0, "hello"),),
+        )
+    )
 
     await store.save(
         AgentSnapshot(
+            agent_id="c0",
+            parent_id="r0",
+            depth=1,
             turns=(
                 Turn(
                     agent_id="c0",
@@ -72,7 +82,7 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
                     reply="",
                     calls=(ToolCall(id="k1", name="sleep", arguments={"seconds": 0}),),
                 ),
-            )
+            ),
         )
     )
 
@@ -122,13 +132,16 @@ async def test_restore_drops_an_unanswered_turn_and_requeues_its_inbox(tmp_path:
         inbox=(InboxMessage(kind="user", source="user", text="lost input"),),
     )
 
-    await store.save(AgentSnapshot(turns=(lost,)))
+    await store.save(AgentSnapshot(agent_id="r0", parent_id=None, depth=0, turns=(lost,)))
 
     root = await _restore(store)
 
     assert root is not None
     assert root.turns == []
-    assert not store.path("r0").exists()
+
+    # The agent itself stays live: its snapshot is rewritten with
+    # no turns, which is a spawned agent that observed nothing yet.
+    assert store.load_all()["r0"].turns == ()
     assert len(root._inbox) == 1
 
     message = root._inbox.pop(0)
@@ -145,6 +158,9 @@ async def test_restore_delivers_an_unobserved_message(tmp_path: Path) -> None:
 
     await store.save(
         AgentSnapshot(
+            agent_id="r0",
+            parent_id=None,
+            depth=0,
             turns=(_done("r0", None, 0, "hello"),),
             pending=(InboxMessage(kind="user", source="user", text="typed mid-turn"),),
         )
@@ -161,15 +177,56 @@ async def test_restore_delivers_an_unobserved_message(tmp_path: Path) -> None:
     await _stop(root)
 
 
+async def test_restore_keeps_a_child_with_no_turns(tmp_path: Path) -> None:
+    """A child spawned just before the stop is durable from birth:
+    its snapshot has no turns, and restore keeps it live."""
+    store = SnapshotStore(tmp_path / "snapshots")
+
+    await store.save(
+        AgentSnapshot(
+            agent_id="r0",
+            parent_id=None,
+            depth=0,
+            turns=(_done("r0", None, 0, "hello"),),
+        )
+    )
+
+    await store.save(
+        AgentSnapshot(
+            agent_id="c0",
+            parent_id="r0",
+            depth=1,
+            pending=(InboxMessage.from_parent("first task", source="r0"),),
+        )
+    )
+
+    root = await _restore(store)
+
+    assert root is not None
+
+    child = root.children.get("c0")
+
+    assert child is not None and child.task is not None
+
+    await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
+
+    assert child.turns[0].inbox[0].text == "first task"
+
+    await _stop(root)
+
+
 async def test_restore_keeps_closed_turns_before_the_open_one(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path / "snapshots")
 
     await store.save(
         AgentSnapshot(
+            agent_id="r0",
+            parent_id=None,
+            depth=0,
             turns=(
                 _done("r0", None, 0, "hello"),
                 Turn(agent_id="r0", parent_id=None, depth=0),
-            )
+            ),
         )
     )
 
@@ -186,7 +243,14 @@ async def test_restore_discards_orphans_and_the_dead(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path / "snapshots")
 
     # No root at all: nothing is reachable.
-    await store.save(AgentSnapshot(turns=(_done("c0", "missing", 1, "orphan"),)))
+    await store.save(
+        AgentSnapshot(
+            agent_id="c0",
+            parent_id="missing",
+            depth=1,
+            turns=(_done("c0", "missing", 1, "orphan"),),
+        )
+    )
 
     assert await _restore(store) is None
     assert store.load_all() == {}
@@ -194,7 +258,7 @@ async def test_restore_discards_orphans_and_the_dead(tmp_path: Path) -> None:
     # A turn carrying an exit record means the agent already died.
     dead = replace(_done("r9", None, 0, "gone"), death=Death("finished", "gone"))
 
-    await store.save(AgentSnapshot(turns=(dead,)))
+    await store.save(AgentSnapshot(agent_id="r9", parent_id=None, depth=0, turns=(dead,)))
 
     assert await _restore(store) is None
     assert store.load_all() == {}
@@ -207,7 +271,7 @@ async def test_restore_lifts_a_parked_root(tmp_path: Path) -> None:
         agent_id="r0", parent_id=None, depth=0, origin="first", phase="thought", reply="ok"
     )
 
-    await store.save(AgentSnapshot(turns=(parked,)))
+    await store.save(AgentSnapshot(agent_id="r0", parent_id=None, depth=0, turns=(parked,)))
 
     root = await _restore(store)
 

@@ -58,7 +58,7 @@ async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
 async def test_kill_produces_death_notice(tmp_path: Path, no_sink: None) -> None:
     root = make_agent(tmp_path=tmp_path, llm=FakeLLM())
 
-    victim, err = root.spawn_child("VICTIMTASK")
+    victim, err = await root.spawn_child("VICTIMTASK")
 
     assert err is None and victim is not None
 
@@ -82,7 +82,7 @@ async def test_send_down_and_up(tmp_path: Path, no_sink: None) -> None:
 
     root = make_agent(tmp_path=tmp_path, llm=llm)
 
-    target, err = root.spawn_child("SENDTARGET")
+    target, err = await root.spawn_child("SENDTARGET")
 
     assert err is None and target is not None
 
@@ -121,7 +121,7 @@ async def test_root_death_cascades_and_tree_empties(tmp_path: Path, no_sink: Non
 
     assert child is not None
 
-    grandchild, err = child.spawn_child("GRANDTASK")
+    grandchild, err = await child.spawn_child("GRANDTASK")
 
     assert err is None and grandchild is not None
 
@@ -146,7 +146,7 @@ async def test_finish_verb_scope(tmp_path: Path, no_sink: None) -> None:
 
     assert "finish" not in [tool.name for tool in root.tools]
 
-    child, _ = root.spawn_child("FINISHTASK")
+    child, _ = await root.spawn_child("FINISHTASK")
 
     assert child is not None
 
