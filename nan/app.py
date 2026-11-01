@@ -17,7 +17,6 @@ import uuid
 from loguru import logger
 
 from nan.agent import Agent
-from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
 from nan.config import settings
 from nan.events import sink
@@ -25,13 +24,12 @@ from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
 from nan.recovery import SnapshotStore, restore
+from nan.turn import InboxMessage
 from nan.utils.autostart import Autostart
 
 
 async def run_core() -> None:
     llm = LLMProvider()
-
-    book = Book()
 
     hub = InjectionHub()
 
@@ -51,7 +49,6 @@ async def run_core() -> None:
     snapshots = SnapshotStore(settings.paths.snapshots)
 
     root = await restore(
-        book=book,
         llm=llm,
         injections=hub,
         sandbox=sandbox,
@@ -60,7 +57,6 @@ async def run_core() -> None:
 
     if root is None:
         root = Agent(
-            book=book,
             llm=llm,
             injections=hub,
             sandbox=sandbox,
@@ -68,8 +64,8 @@ async def run_core() -> None:
         )
 
     def ingest(text: str, mid: str | None = None) -> None:
-        # User input enters the root handle directly.
-        asyncio.get_running_loop().create_task(root.receive_up(text, "user"))
+        # User input enters the root's inbox directly.
+        root.deliver(InboxMessage.from_user(text))
 
         sink.emit(
             "user_input",

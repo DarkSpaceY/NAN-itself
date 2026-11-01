@@ -23,7 +23,9 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
     """
     messages: list[Message] = [_observation_message(turn)]
 
-    if turn.reply is None and not turn.calls and not turn.thinking:
+    # observed / injected: the model has not answered yet, so the
+    # turn renders as its observation alone.
+    if turn.phase in ("observed", "injected"):
         return tuple(messages)
 
     messages.append(
@@ -100,7 +102,7 @@ def _observation_message(turn: Turn) -> Message:
     if turn.inbox:
         sections = []
         for message in turn.inbox:
-            attrs = f' id="{message.source}"' if message.kind in ("subagent", "unknown") else ""
+            attrs = f' id="{message.source}"' if message.kind == "subagent" else ""
             if message.event != "send":
                 attrs += f' event="{message.event}"'
             sections.append(f"<{message.kind}{attrs}>\n{message.text}\n</{message.kind}>")

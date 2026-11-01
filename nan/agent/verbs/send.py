@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
 from nan.llm import ToolDefinition
+from nan.turn import InboxMessage
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
@@ -16,11 +17,10 @@ class SendVerb(Verb):
         return ToolDefinition(
             name=self.name,
             description=(
-                "Send text along a handle. direction 'up' delivers to "
-                "your parent's inbox (your parent handle needs no id). "
+                "Send text to another agent. direction 'up' delivers to "
+                "your parent's inbox (the root has no parent). "
                 "direction 'down' delivers into a child you spawned: "
-                "pass its handle_id (the short id spawn gave you). "
-                "Text only: handles themselves never travel."
+                "pass its child_id. Text only: ids never travel."
             ),
             input_schema={
                 "type": "object",
@@ -28,9 +28,9 @@ class SendVerb(Verb):
                     "direction": {
                         "type": "string",
                         "enum": ["up", "down"],
-                        "description": "'up' to parent, 'down' to a held child.",
+                        "description": "'up' to parent, 'down' to a child.",
                     },
-                    "handle_id": {
+                    "child_id": {
                         "type": "string",
                         "description": "Child short id; required for direction 'down'.",
                     },
@@ -56,21 +56,21 @@ class SendVerb(Verb):
             if agent.parent is None:
                 return VerbOutcome("No parent: the root cannot send up.")
 
-            await agent.parent.receive_up(text, agent.agent_id)
+            agent.parent.deliver(InboxMessage.from_child(text, source=agent.agent_id))
 
             return VerbOutcome("Sent up.", {"direction": "up"})
 
-        handle_id = call.arguments.get("handle_id")
+        child_id = call.arguments.get("child_id")
 
-        handle = agent.child_handle(handle_id)
+        child = agent.children.get(child_id) if isinstance(child_id, str) else None
 
-        if handle is None:
-            held = ", ".join(h.agent_id for h in agent.child_handles()) or "(none)"
-            return VerbOutcome(f"Unknown handle '{handle_id}'. Held children: {held}")
+        if child is None:
+            held = ", ".join(agent.children) or "(none)"
+            return VerbOutcome(f"Unknown child '{child_id}'. Children: {held}")
 
-        await handle.send(text)
+        child.deliver(InboxMessage.from_parent(text, source=agent.agent_id))
 
         return VerbOutcome(
-            f"Sent down to {handle.agent_id}.",
-            {"direction": "down", "to": handle.agent_id},
+            f"Sent down to {child.agent_id}.",
+            {"direction": "down", "to": child.agent_id},
         )

@@ -35,9 +35,6 @@ class FinishVerb(Verb):
         )
 
     async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
-        if agent.depth == 0:
-            return VerbOutcome("finish is only available to subagents.")
-
         report = call.arguments.get("report")
 
         if not isinstance(report, str) or not report.strip():

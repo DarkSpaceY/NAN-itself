@@ -38,7 +38,9 @@ def _turn(
             Injection(service_id="svc", text="context", started_at=2.0, ended_at=2.5, ok=False),
         ),
         delta=(DeltaEvent(section="subagent", line="+a2 spawned"),),
+        epoch=1,
         origin="context_cleared",
+        phase="committed",
         persona="new persona",
         reply="answer",
         thinking=(thinking,),
@@ -76,6 +78,8 @@ def test_turn_from_minimal_json_uses_defaults() -> None:
 
     assert turn.agent_id == "a1"
     assert turn.origin == "normal"
+    assert turn.epoch == 0
+    assert turn.phase == "observed"
     assert turn.inbox == ()
     assert turn.reply is None
     assert turn.rendered is None
@@ -203,15 +207,15 @@ def test_in_flight_without_an_answer_is_requeued() -> None:
 
     assert flight is not None
     assert flight.turn is open_turn
-    assert flight.answered is False
     assert flight.requeue == open_turn.inbox
 
 
-def test_in_flight_with_an_answer_is_replayed() -> None:
+def test_in_flight_with_an_answer_is_resumed() -> None:
     open_turn = Turn(
         agent_id="a1",
         parent_id=None,
         depth=0,
+        phase="thought",
         reply="partial",
         calls=(ToolCall(id="c1", name="shell", arguments={}),),
         started_at=1.0,
@@ -220,5 +224,4 @@ def test_in_flight_with_an_answer_is_replayed() -> None:
     flight = InFlight.read(AgentSnapshot(turns=(open_turn,)))
 
     assert flight is not None
-    assert flight.answered is True
     assert flight.requeue == ()

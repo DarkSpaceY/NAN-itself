@@ -24,11 +24,21 @@ from typing import Any, Literal
 
 from nan.llm import Message, ThinkingBlock, ToolCall, Usage
 
-InboxKind = Literal["user", "parentagent", "subagent", "unknown"]
+InboxKind = Literal["user", "parentagent", "subagent"]
 
 # Why a turn began: the first of an agent's life, an ordinary
-# turn, or the turn right after the context was cleared.
+# turn, or the turn right after the context was cleared. This is
+# a wire label for observers; behaviour reads `epoch`.
 TurnOrigin = Literal["first", "normal", "context_cleared"]
+
+# Where a turn stands. Monotone: a turn only moves forward, so a
+# parked or restored turn resumes exactly where it stopped.
+#     observed  the turn opened on its inputs
+#     injected  service contributions collected
+#     thought   the model answered
+#     acted     the verbs finished (ended_at is set here)
+#     committed frozen and durable
+TurnPhase = Literal["observed", "injected", "thought", "acted", "committed"]
 
 # What the model sees for a call whose verb never ran or never
 # reported back (a pause, a crash mid-act, a restored turn). Also
@@ -68,13 +78,13 @@ class LLMCall:
 @dataclass(frozen=True)
 class InboxMessage:
     """
-    One message received at a turn boundary. `kind` names the
-    SENDER'S ROLE, resolved at delivery time:
+    One message received at a turn boundary. `kind` names the edge
+    it came in through, which the sender knows and sets:
 
-    "user"         root only; text from the gateway
-    "parentagent"  my parent sent down (includes the spawn task)
-    "subagent"     one of my subagents sent up; `event` is "send"
-                   or "finish" (text IS the finish report)
+    "user"         from the gateway into the root
+    "parentagent"  sent down into a child (includes the spawn task)
+    "subagent"     sent up into a parent; `event` is "send" or
+                   "finish" (text IS the finish report)
 
     Agent lifecycle changes, including death, ride the <delta>
     section (agent_delta).
@@ -85,6 +95,40 @@ class InboxMessage:
     text: str
     event: str = "send"
     received_at: float = field(default_factory=time.time)
+
+    @classmethod
+    def from_user(cls, text: str) -> InboxMessage:
+        """Gateway input, delivered to the root."""
+        return cls(kind="user", source="user", text=text)
+
+    @classmethod
+    def from_parent(cls, text: str, *, source: str) -> InboxMessage:
+        """A message sent down into a child."""
+        return cls(kind="parentagent", source=source, text=text)
+
+    @classmethod
+    def from_child(cls, text: str, *, source: str, event: str = "send") -> InboxMessage:
+        """A message sent up into a parent, or a finish report."""
+        return cls(kind="subagent", source=source, text=text, event=event)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "source": self.source,
+            "text": self.text,
+            "event": self.event,
+            "received_at": self.received_at,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> InboxMessage:
+        return cls(
+            kind=data["kind"],
+            source=data["source"],
+            text=data["text"],
+            event=data.get("event", "send"),
+            received_at=data.get("received_at", 0.0),
+        )
 
 
 @dataclass(frozen=True)
@@ -146,7 +190,16 @@ class Turn:
     injections: tuple[Injection, ...] = ()
     delta: tuple[DeltaEvent, ...] = ()  # grouped into <delta><section> at render
 
+    # The context epoch this turn belongs to. Clearing the context
+    # opens the next epoch; history never crosses it.
+    epoch: int = 0
+
+    # Why the turn began, for observers (see TurnOrigin).
     origin: TurnOrigin = "normal"
+
+    # How far the turn has run (see TurnPhase). The only stage
+    # marker: no caller infers progress from the payload shape.
+    phase: TurnPhase = "observed"
 
     # The new persona text when it changed before this turn: the
     # epoch marker for the system prompt. Null when unchanged.
@@ -163,11 +216,6 @@ class Turn:
     # does not begin another one.
     death: Death | None = None
 
-    # Set when this turn was parked instead of finished: an explicit
-    # pause, or the root exhausting its retry ladder. Mutually
-    # exclusive with death; a later turn clears the state.
-    paused: bool = False
-
     rendered: tuple[Message, ...] | None = None
 
     started_at: float = field(default_factory=time.time)
@@ -183,18 +231,11 @@ class Turn:
             "agent_id": self.agent_id,
             "parent_id": self.parent_id,
             "depth": self.depth,
+            "epoch": self.epoch,
             "origin": self.origin,
+            "phase": self.phase,
             "persona": self.persona,
-            "inbox": [
-                {
-                    "kind": m.kind,
-                    "source": m.source,
-                    "text": m.text,
-                    "event": m.event,
-                    "received_at": m.received_at,
-                }
-                for m in self.inbox
-            ],
+            "inbox": [message.to_json() for message in self.inbox],
             "injections": [
                 {
                     "service_id": i.service_id,
@@ -236,7 +277,6 @@ class Turn:
                 if self.death is not None
                 else None
             ),
-            "paused": self.paused,
             "rendered": (
                 [m.model_dump(mode="json") for m in self.rendered]
                 if self.rendered is not None
@@ -261,16 +301,7 @@ class Turn:
             agent_id=data["agent_id"],
             parent_id=data.get("parent_id"),
             depth=data["depth"],
-            inbox=tuple(
-                InboxMessage(
-                    kind=message["kind"],
-                    source=message["source"],
-                    text=message["text"],
-                    event=message.get("event", "send"),
-                    received_at=message.get("received_at", 0.0),
-                )
-                for message in data.get("inbox", ())
-            ),
+            inbox=tuple(InboxMessage.from_json(message) for message in data.get("inbox", ())),
             injections=tuple(
                 Injection(
                     service_id=injection["service_id"],
@@ -286,6 +317,8 @@ class Turn:
                 for event in data.get("delta", ())
             ),
             origin=data.get("origin", "normal"),
+            epoch=data.get("epoch", 0),
+            phase=data.get("phase", "observed"),
             persona=data.get("persona"),
             reply=data.get("reply"),
             thinking=tuple(
@@ -321,7 +354,6 @@ class Turn:
                 if death is not None
                 else None
             ),
-            paused=data.get("paused", False),
             rendered=(
                 tuple(Message.model_validate(message) for message in rendered)
                 if rendered is not None
@@ -360,6 +392,7 @@ class Turn:
                     ),
                 ]
             ),
+            phase="committed",
             ended_at=now,
         )
 
@@ -374,18 +407,10 @@ class Turn:
             "agent_id": self.agent_id,
             "parent_id": self.parent_id,
             "depth": self.depth,
+            "epoch": self.epoch,
             "origin": self.origin,
             "persona": self.persona,
-            "inbox": [
-                {
-                    "kind": m.kind,
-                    "source": m.source,
-                    "text": m.text,
-                    "event": m.event,
-                    "received_at": m.received_at,
-                }
-                for m in self.inbox
-            ],
+            "inbox": [message.to_json() for message in self.inbox],
             "injections": [
                 {
                     "service_id": i.service_id,

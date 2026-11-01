@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from nan.recovery import CancelReason, FailureDomain, FailureKind, Unrecoverable, classify
+from nan.recovery import FailureKind, Unrecoverable, classify
 
 
 class _Status(Exception):
@@ -72,13 +72,3 @@ def test_unrecoverable_is_fatal() -> None:
     assert classify(exc) is FailureKind.FATAL
     assert exc.reason == "retries exhausted"
     assert str(exc) == "retries exhausted"
-
-
-def test_vocabulary() -> None:
-    assert FailureDomain.PROCESS == "process"
-    assert FailureDomain.AGENT == "agent"
-    assert FailureDomain.TURN == "turn"
-    assert FailureKind.MODEL_CORRECTABLE == "model_correctable"
-    assert CancelReason.SHUTDOWN == "shutdown"
-    assert CancelReason.PAUSE == "pause"
-    assert CancelReason.KILL == "kill"

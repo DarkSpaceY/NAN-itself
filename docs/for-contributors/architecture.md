@@ -10,13 +10,17 @@ follows the actual layout.
     ├── gateway.py        web UI: HTTP + WebSocket
     ├── agent/
     │   ├── core.py       the Agent loop
+    │   ├── control.py    Status -> Action (the loop's fold)
     │   ├── engine.py     the turn engine (one model call)
-    │   ├── handle.py     Handle + Book
     │   ├── sandbox.py    OS-level execution sandbox
     │   └── verbs/        spawn / sleep / shell / send / kill / finish
     ├── turn/
     │   ├── model.py      the Turn record
     │   └── render.py     frozen prompt rendering
+    ├── recovery/
+    │   ├── failure.py    one failure classification
+    │   ├── snapshot.py   per-agent snapshots
+    │   └── restore.py    boot restore
     ├── llm/
     │   ├── provider.py   the model API transport
     │   └── types.py      protocol vocabulary (DTOs)
@@ -75,43 +79,42 @@ flowchart LR
     R --> T4["turn 4<br/>(frozen)"]
 ```
 
-## Handles: the multi-agent graph
+## The multi-agent graph: edges, not handles
 
 ```mermaid
 flowchart TD
-    R["root"] -->|"Handle a1<br/>send / kill"| A["a1"]
-    A -->|"Handle a1.1<br/>send / kill"| C["a1.1"]
-    C -.->|"self.parent<br/>send up / finish"| A
-    A -.->|"self.parent<br/>send up / finish"| R
+    R["root"] -->|"children[cid]<br/>send down / kill"| A["a1"]
+    A -->|"children[cid]<br/>send down / kill"| C["a1.1"]
+    C -.->|"parent<br/>send up / finish"| A
+    A -.->|"parent<br/>send up / finish"| R
 ```
 
-Solid edges are handles (downward, full authority); dotted
-edges are the parent reference a child uses to talk upstream,
-which carries no control right over the parent.
+Solid edges are the spawn map (`Agent.children`, keyed by child id),
+which carries the control right; dotted edges are the parent
+reference a child uses to talk upstream, which carries no control
+right over the parent.
 
-A Handle is a cross-agent channel plus the control right over
-one agent:
+Addressing is the edge itself, and there is nothing else:
 
-- bound to exactly one target and one holder, the spawner. The
-  composition root holds the root agent directly and feeds it
-  through `receive_up`; every child is reached through a handle
-- owned by its spawner, so the cascade-death graph follows the
-  spawn tree
-- through it the holder may `send()` into the target's inbox
-  and `kill()` the target; the target replies upstream through
-  its parent reference
+- `agent.children[child_id]` is the only way down. `spawn` adds an
+  id, `kill` and `send` look one up; a missing id is a verb error
+  the model reads, never an exception.
+- `agent.parent` is the only way up. The composition root holds the
+  root agent directly and feeds it through `deliver()`.
+- The sender names the edge it used, so the message kind is decided
+  there (`InboxMessage.from_user` / `from_parent` / `from_child`).
 
-The `Book` is the process-wide id -> agent registry; routing
-goes through handles, and whole-tree shutdown starts at
-`root.request_death` and follows the cascade. When an agent
-dies it tears down everything it holds (cascade), then a finish
-report goes to its parent's inbox; a bare death becomes a
-`parent.note_delta` line in `<delta>`.
+Whole-tree death starts at `root.request_death` and follows the
+spawn edges. When an agent dies it kills its children first
+(cascade), then a finish report goes to its parent's inbox; a bare
+death becomes a `parent.note_delta` line in `<delta>`. Shutdown
+(`suspend`) walks the same edges and persists every agent instead
+of removing any.
 
 ```mermaid
 flowchart TD
-    D["a1 dies"] --> D1["a1.1 killed (held handle)"]
-    D --> D2["a1.2 killed (held handle)"]
+    D["a1 dies"] --> D1["a1.1 killed (children)"]
+    D --> D2["a1.2 killed (children)"]
     D1 --> D3["a1.1.1 killed"]
     D -.->|"death notice / finish report"| P["parent inbox"]
 ```

@@ -16,35 +16,35 @@ class KillVerb(Verb):
         return ToolDefinition(
             name=self.name,
             description=(
-                "Kill a child you spawned (by handle_id). Its own "
+                "Kill a child you spawned (by child_id). Its own "
                 "subtree dies with it (cascade). You will receive a "
                 "death notice in your inbox."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "handle_id": {
+                    "child_id": {
                         "type": "string",
                         "description": "The child's short id.",
                     },
                 },
-                "required": ["handle_id"],
+                "required": ["child_id"],
                 "additionalProperties": False,
             },
         )
 
     async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
-        handle_id = call.arguments.get("handle_id")
+        child_id = call.arguments.get("child_id")
 
-        handle = agent.child_handle(handle_id)
+        child = agent.children.get(child_id) if isinstance(child_id, str) else None
 
-        if handle is None:
-            held = ", ".join(h.agent_id for h in agent.child_handles()) or "(none)"
-            return VerbOutcome(f"Unknown handle '{handle_id}'. Held children: {held}")
+        if child is None:
+            held = ", ".join(agent.children) or "(none)"
+            return VerbOutcome(f"Unknown child '{child_id}'. Children: {held}")
 
-        handle.kill()
+        child.request_death(f"killed by holder {agent.agent_id}")
 
         return VerbOutcome(
-            f"Kill requested for {handle.agent_id}.",
-            {"target_id": handle.agent_id},
+            f"Kill requested for {child.agent_id}.",
+            {"target_id": child.agent_id},
         )

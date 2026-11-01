@@ -3,14 +3,15 @@ Boot restore: rebuild the live tree from the snapshots on disk.
 
 One snapshot per agent holds that agent's Turn list; every turn
 carries agent_id / parent_id / depth, so the spawn tree is not
-stored separately -- it is rebuilt from the files.
+stored separately -- it is rebuilt from the files. A snapshot
+whose parent_id is None is a root.
 
-Restore is automatic and has no user input: the last open turn
-either closes (the model already answered: its missing verb
-results are filled as interrupted) or drops (nothing was
-produced: its inbox rides into the next turn), then every agent
-starts running again. Snapshots whose agent already carried an
-exit record, and subtrees whose parent is gone, are discarded.
+Restore is automatic and has no user input: a turn whose inputs
+were never observed is dropped and its inbox rides into the next
+turn; every other open turn stays resident and the loop continues
+it from its phase, then every agent starts running again. Snapshots
+whose agent already carried an exit record, and subtrees whose
+parent is gone, are discarded.
 """
 
 from __future__ import annotations
@@ -20,13 +21,11 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from nan.events import sink
-from nan.turn import freeze_turn
 
 from .snapshot import AgentSnapshot, InFlight, SnapshotStore
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
-    from nan.agent.handle import Book
     from nan.agent.sandbox import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
 
 async def restore(
     *,
-    book: Book,
     llm: LLMProvider,
     injections: InjectionHub,
     sandbox: Sandbox,
@@ -62,7 +60,7 @@ async def restore(
 
             del loaded[agent_id]
 
-    roots = [snapshot for snapshot in loaded.values() if snapshot.depth == 0]
+    roots = [snapshot for snapshot in loaded.values() if snapshot.parent_id is None]
 
     if not roots:
         logger.error("no root snapshot; starting fresh")
@@ -101,7 +99,7 @@ async def restore(
     # Local imports: nan.agent imports nan.recovery, so the cycle
     # must close after this module is fully loaded.
     from nan.agent.core import Agent
-    from nan.agent.handle import Handle
+    from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS
 
     agents: dict[str, Agent] = {}
 
@@ -109,13 +107,14 @@ async def restore(
         parent = agents.get(snapshot.parent_id) if snapshot.parent_id is not None else None
 
         agent = Agent(
-            book=book,
             llm=llm,
             injections=injections,
             sandbox=sandbox,
             parent=parent,
             agent_id=snapshot.agent_id,
             snapshots=snapshots,
+            verbs=CHILD_VERBS if parent is not None else ROOT_VERBS,
+            on_exhausted="die" if parent is not None else "park",
         )
 
         agent.turns = list(snapshot.turns)
@@ -127,7 +126,7 @@ async def restore(
                 )
 
         else:
-            parent._children[agent.agent_id] = Handle(holder_id=parent.agent_id, target=agent)
+            parent.children[agent.agent_id] = agent
 
             if snapshot.depth != agent.depth:
                 logger.warning(
@@ -140,7 +139,7 @@ async def restore(
         agents[agent.agent_id] = agent
 
     for agent in agents.values():
-        await _recover(agent, snapshots)
+        await _recover(agent, reachable[agent.agent_id], snapshots)
 
     for agent in agents.values():
         agent.start()
@@ -169,49 +168,37 @@ def _subtree(root: AgentSnapshot, tree: dict[str, list[AgentSnapshot]]) -> list[
     return ordered
 
 
-async def _recover(agent: Agent, snapshots: SnapshotStore) -> None:
+async def _recover(agent: Agent, snapshot: AgentSnapshot, snapshots: SnapshotStore) -> None:
     """
-    Apply the last open turn's disposition, persist the result and
-    announce the restore. Completed turns are already durable.
+    Resolve the last open turn and persist the result. Only a turn
+    whose inputs were never seen is dropped (its inbox rides into
+    the next turn); every other open turn is left resident and the
+    loop continues it from its phase. Messages no turn had
+    observed yet are delivered back into the inbox.
     """
-    snapshot = AgentSnapshot(turns=tuple(agent.turns)) if agent.turns else None
+    inflight = InFlight.read(snapshot) if snapshot.turns else None
 
     outcome = None
 
-    if snapshot is not None:
-        inflight = InFlight.read(snapshot)
+    if inflight is not None:
+        if inflight.unobserved:
+            agent.turns.pop()
 
-        if inflight is not None:
-            if inflight.answered:
-                # The model answered: close the turn without asking
-                # again, filling the verbs that never reported.
-                agent.turns[-1] = freeze_turn(inflight.turn.close_interrupted())
+            outcome = "requeued"
 
-                outcome = "closed"
+            for message in inflight.requeue:
+                agent.deliver(message)
 
-                sink.emit(
-                    "turn_interrupted",
-                    content={
-                        "agent_id": agent.agent_id,
-                        "turn_index": len(agent.turns),
-                        "reason": "restored mid-execution",
-                    },
-                )
+        else:
+            outcome = "resumed"
 
-            else:
-                # Nothing was produced: the turn is dropped and its
-                # inbox rides into the next one.
-                agent.turns.pop()
-
-                outcome = "requeued"
-
-                for message in inflight.requeue:
-                    agent._deliver(message)
+    for message in snapshot.pending:
+        agent.deliver(message)
 
     agent._messages = None
 
     if agent.turns:
-        await snapshots.save(AgentSnapshot(turns=tuple(agent.turns)))
+        await snapshots.save(AgentSnapshot(turns=tuple(agent.turns), pending=tuple(agent._inbox)))
 
     else:
         snapshots.remove(agent.agent_id)

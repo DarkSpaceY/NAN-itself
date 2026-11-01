@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 from nan_fakes import FakeLLM, SlowFakeLLM, await_until, make_agent
 
+from nan.turn import InboxMessage
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -38,7 +40,7 @@ async def test_pause_parks_turn_and_resume_continues_it(tmp_path: Path, no_sink:
     assert root._task is not None
 
     # a user message starts a turn; the model call blocks mid-turn
-    await root.receive_up("pause-me", "user")
+    root.deliver(InboxMessage.from_user("pause-me"))
 
     await asyncio.wait_for(llm.first_call_started.wait(), timeout=3)
 
@@ -47,9 +49,9 @@ async def test_pause_parks_turn_and_resume_continues_it(tmp_path: Path, no_sink:
     root.pause()
 
     # the turn stays resident with its input; nothing is requeued
-    await await_until(lambda: root.last_turn is not None and root.last_turn.paused)
+    await await_until(lambda: root.last_turn is not None and root.last_turn.phase == "injected")
 
-    assert root._inbox.qsize() == 0
+    assert root._inbox == []
 
     assert root.history == []
     assert root.last_turn is not None and root.last_turn.reply is None
@@ -72,6 +74,35 @@ async def test_pause_parks_turn_and_resume_continues_it(tmp_path: Path, no_sink:
         await root._task
 
 
+async def test_shutdown_persists_the_whole_subtree(tmp_path: Path, no_sink: None) -> None:
+    """Shutdown is persistence, not death: every agent in the
+    subtree keeps its turn list on disk."""
+    llm = FakeLLM()
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.0})
+
+    root.start()
+
+    root.deliver(InboxMessage.from_user("root work"))
+
+    await await_until(lambda: bool(root.turns) and root.turns[-1].phase == "committed")
+
+    child, err = root.spawn_child("child work")
+
+    assert err is None
+
+    await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
+
+    root.suspend()
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task
+
+    written = {path.stem for path in (tmp_path / "snapshots").glob("*.json")}
+
+    assert written == {root.agent_id, child.agent_id}
+
+
 async def test_pause_is_idempotent_and_resume_wakes_waiter(tmp_path: Path, no_sink: None) -> None:
     llm = SlowFakeLLM()
 
@@ -87,7 +118,7 @@ async def test_pause_is_idempotent_and_resume_wakes_waiter(tmp_path: Path, no_si
 
     root.pause()  # idempotent, no turn in flight
 
-    await root.receive_up("hello", "user")
+    root.deliver(InboxMessage.from_user("hello"))
 
     await asyncio.sleep(0.05)  # paused: the loop must not run a turn
 
@@ -117,20 +148,20 @@ async def test_history_over_limit_clears_at_the_next_epoch(tmp_path: Path, no_si
     )
 
     # turn 1: small, kept
-    await root.receive_up("short", "user")
+    root.deliver(InboxMessage.from_user("short"))
     await root.run_turn()
 
     assert len(root.history) == 2
 
     # turn 2: blows the limit, but the epoch is only cut when the
     # next turn opens
-    await root.receive_up("X" * 5000, "user")
+    root.deliver(InboxMessage.from_user("X" * 5000))
     await root.run_turn()
 
     assert len(root.history) == 4
 
     # turn 3: opens a new epoch; turns before it are dropped
-    await root.receive_up("after clear", "user")
+    root.deliver(InboxMessage.from_user("after clear"))
     turn = await root.run_turn()
 
     assert turn.origin == "context_cleared"
@@ -149,7 +180,7 @@ async def test_persona_change_applies_from_that_turn(tmp_path: Path, no_sink: No
 
     root = make_agent(tmp_path=tmp_path, llm=llm, persona_path=persona_file)
 
-    await root.receive_up("first", "user")
+    root.deliver(InboxMessage.from_user("first"))
     t1 = await root.run_turn()
 
     assert llm.requests[0].messages[0].content == "PERSONA_V1"
@@ -158,7 +189,7 @@ async def test_persona_change_applies_from_that_turn(tmp_path: Path, no_sink: No
     # content change = legal system-prompt invalidation point
     persona_file.write_text("PERSONA_V2", encoding="utf-8")
 
-    await root.receive_up("second", "user")
+    root.deliver(InboxMessage.from_user("second"))
     t2 = await root.run_turn()
 
     assert llm.requests[1].messages[0].content == "PERSONA_V2"
@@ -167,7 +198,7 @@ async def test_persona_change_applies_from_that_turn(tmp_path: Path, no_sink: No
     assert root._persona_last == "PERSONA_V2"
 
     # unchanged content: no action, same prompt
-    await root.receive_up("third", "user")
+    root.deliver(InboxMessage.from_user("third"))
     t3 = await root.run_turn()
 
     assert llm.requests[2].messages[0].content == "PERSONA_V2"
@@ -210,17 +241,17 @@ async def test_failed_turn_parks_the_root(tmp_path: Path, no_sink: None) -> None
     """
     root = make_agent(tmp_path=tmp_path, llm=ExplodingLLM())
 
-    await root.receive_up("lost input", "user")
+    root.deliver(InboxMessage.from_user("lost input"))
 
     turn = await root.run_turn()
 
-    assert turn.paused
+    assert turn.phase == "injected"
     assert turn.ended_at is None
     assert turn.reply is None
     assert len(root.turns) == 1
     assert root.history == []
     assert root.paused
-    assert root.last_turn is not None and root.last_turn.paused
+    assert root.last_turn is not None and root.last_turn.phase == "injected"
 
 
 async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) -> None:
@@ -241,7 +272,7 @@ async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) ->
     with contextlib.suppress(asyncio.CancelledError):
         await first.task
 
-    await await_until(lambda: first.agent_id not in root._children)
+    await await_until(lambda: first.agent_id not in root.children)
 
     second, err = root.spawn_child("B")
 
@@ -249,30 +280,20 @@ async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) ->
     assert second.agent_id != first.agent_id
 
 
-async def test_unverified_source_delivered_as_unknown(tmp_path: Path, no_sink: None) -> None:
-    llm = FakeLLM()
+async def test_kind_is_named_by_the_edge(tmp_path: Path, no_sink: None) -> None:
+    """The sender knows the edge it used, so it names the kind."""
+    root = make_agent(tmp_path=tmp_path)
 
-    root = make_agent(tmp_path=tmp_path, llm=llm)
-
-    await root.receive_up("hello", "stranger")
-
-    assert root._inbox.qsize() == 1
-
-    message = root._inbox.get_nowait()
-
-    assert message.kind == "unknown"
-    assert message.source == "stranger"
-
-    # a held child is labelled subagent, not unknown
     child, err = root.spawn_child("A")
 
     assert err is None and child is not None
 
-    await root.receive_up("report", child.agent_id)
+    root.deliver(InboxMessage.from_child("report", source=child.agent_id))
 
-    message = root._inbox.get_nowait()
+    message = root._inbox.pop(0)
 
     assert message.kind == "subagent"
+    assert message.source == child.agent_id
 
 
 async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sink: None) -> None:
@@ -291,7 +312,7 @@ async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sin
 
     assert root._task is not None
 
-    await root.receive_up("react-probe", "user")
+    root.deliver(InboxMessage.from_user("react-probe"))
 
     # no second input: the tool result itself drives turn 2
     await await_until(lambda: len(root.turns) == 2)

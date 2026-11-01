@@ -13,18 +13,15 @@ import pytest
 from nan_fakes import FakeLLM, await_until, make_agent
 
 from nan.agent.core import Death
-from nan.agent.handle import Book
-from nan.agent.verbs import tool_definitions
+from nan.turn import InboxMessage
 
 pytestmark = pytest.mark.asyncio
 
 
 async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
-    book = Book()
-
     llm = FakeLLM()
 
-    root = make_agent(tmp_path=tmp_path, book=book, llm=llm)
+    root = make_agent(tmp_path=tmp_path, llm=llm)
 
     # 1. spawn via verb, child finishes, report lands in root's next turn
     # Every script is in place before the spawn: the child's first
@@ -35,7 +32,7 @@ async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
 
     await root.run_turn()
 
-    child = next(a for a in book.all() if a.depth == 1)
+    child = next(iter(root.children.values()))
 
     assert child.depth == 1
 
@@ -59,9 +56,7 @@ async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
 
 
 async def test_kill_produces_death_notice(tmp_path: Path, no_sink: None) -> None:
-    book = Book()
-
-    root = make_agent(tmp_path=tmp_path, book=book, llm=FakeLLM())
+    root = make_agent(tmp_path=tmp_path, llm=FakeLLM())
 
     victim, err = root.spawn_child("VICTIMTASK")
 
@@ -93,11 +88,11 @@ async def test_send_down_and_up(tmp_path: Path, no_sink: None) -> None:
 
     llm.script("SENDTARGET", [("text", "child hears you")])
 
-    handle = root.child_handle(target.agent_id)
+    child = root.children.get(target.agent_id)
 
-    assert handle is not None
+    assert child is not None
 
-    await handle.send("hello down")
+    target.deliver(InboxMessage.from_parent("hello down", source=root.agent_id))
 
     # the message is consumed at the child's turn boundary and
     # lives in its frozen history
@@ -106,25 +101,23 @@ async def test_send_down_and_up(tmp_path: Path, no_sink: None) -> None:
     # child sends up: direct parent reference routing
     assert target.parent is root
 
-    await target.parent.receive_up("hello up", target.agent_id)
+    root.deliver(InboxMessage.from_child("hello up", source=target.agent_id))
 
     turn = await root.run_turn()
 
-    assert "hello up" in [m.text for m in turn.inbox]
+    assert [(message.kind, message.text) for message in turn.inbox] == [("subagent", "hello up")]
 
 
-async def test_root_death_cascades_and_book_empties(tmp_path: Path, no_sink: None) -> None:
-    book = Book()
-
+async def test_root_death_cascades_and_tree_empties(tmp_path: Path, no_sink: None) -> None:
     llm = FakeLLM()
 
-    root = make_agent(tmp_path=tmp_path, book=book, llm=llm)
+    root = make_agent(tmp_path=tmp_path, llm=llm)
 
     llm.script("ROOTPERSONA", [("tool", "spawn", {"task": "CASCADETASK"})])
     await root.run_turn()
 
     # a second, deeper level: grandchild under the child
-    child = next(a for a in book.all() if a.depth == 1)
+    child = next(iter(root.children.values()))
 
     assert child is not None
 
@@ -141,9 +134,9 @@ async def test_root_death_cascades_and_book_empties(tmp_path: Path, no_sink: Non
     with contextlib.suppress(asyncio.CancelledError):
         await root._task
 
-    await await_until(lambda: book.all() == [])
+    await await_until(lambda: root.children == {})
 
-    assert book.all() == []
+    assert root.children == {}
 
     assert grandchild._death is not None and grandchild._death.report is None
 
@@ -151,21 +144,22 @@ async def test_root_death_cascades_and_book_empties(tmp_path: Path, no_sink: Non
 async def test_finish_verb_scope(tmp_path: Path, no_sink: None) -> None:
     root = make_agent(tmp_path=tmp_path)
 
-    assert "finish" not in [t.name for t in tool_definitions(depth=root.depth)]
+    assert "finish" not in [tool.name for tool in root.tools]
 
     child, _ = root.spawn_child("FINISHTASK")
 
     assert child is not None
 
-    assert "finish" in [t.name for t in tool_definitions(depth=child.depth)]
+    assert "finish" in [tool.name for tool in child.tools]
 
-    # the verb itself refuses at the root, runs below it
+    # The capability set is enforced at execution too: the root
+    # does not own the finish verb at all.
     class Call:
         name = "finish"
 
         arguments = {"report": "nope"}
 
-    assert "only available to subagents" in await root._run_call(Call())
+    assert "Unknown action" in await root._run_call(Call())
 
     assert "finished" in await child._run_call(Call())
 
@@ -196,7 +190,6 @@ async def test_turn_origins_and_archive(tmp_path: Path, no_sink: None) -> None:
 
     agent = make_agent(
         tmp_path=tmp_path,
-        book=Book(),
         llm=FakeLLM(),
         agent={"history_char_limit": 1},
     )
@@ -228,7 +221,6 @@ async def test_normal_origin_without_clear(tmp_path: Path, no_sink: None) -> Non
 
     agent = make_agent(
         tmp_path=tmp_path,
-        book=Book(),
         llm=FakeLLM(),
     )
 
@@ -253,7 +245,7 @@ async def test_thinking_enters_history_and_replay(tmp_path: Path, no_sink: None)
     llm = FakeLLM()
     llm.thinking = "REASONING_MARKER"
 
-    agent = make_agent(tmp_path=tmp_path, book=Book(), llm=llm)
+    agent = make_agent(tmp_path=tmp_path, llm=llm)
 
     t1 = await agent.run_turn()
 

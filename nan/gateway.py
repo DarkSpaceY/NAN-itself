@@ -428,17 +428,6 @@ class Gateway:
 
         return True
 
-    def _latest_paused(self) -> bool:
-        """Pause state from the newest pause/resume event in history."""
-        for event in reversed(sink.history()):
-            if event.get("t") == "agent_paused":
-                return True
-
-            if event.get("t") == "agent_resumed":
-                return False
-
-        return False
-
     async def _send(self, websocket: WebSocket, payload: dict) -> None:
         """Send a message; failures are logged and re-raised."""
         try:
@@ -462,10 +451,6 @@ class Gateway:
                 state = self.state_provider() or {}
             except Exception as e:
                 logger.error(f"State provider error: {e}")
-
-        # paused is derived from event history when the app-level state omits it.
-        if "paused" not in state:
-            state["paused"] = self._latest_paused()
 
         return {
             "t": "hello",

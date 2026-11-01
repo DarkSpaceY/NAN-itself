@@ -10,9 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nan_fakes import FakeLLM
+from nan_fakes import FakeLLM, await_until
 
-from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
 from nan.events import sink
 from nan.injection import InjectionHub
@@ -30,17 +29,17 @@ def _done(agent_id: str, parent_id: str | None, depth: int, reply: str) -> Turn:
             parent_id=parent_id,
             depth=depth,
             origin="first",
+            phase="committed",
             reply=reply,
             ended_at=time.time(),
         )
     )
 
 
-async def _restore(store: SnapshotStore, *, book: Book | None = None) -> Any:
+async def _restore(store: SnapshotStore) -> Any:
     sink.reset(boot_id="test-boot")
 
     return await restore(
-        book=book or Book(),
         llm=FakeLLM(),
         injections=InjectionHub(),
         sandbox=Sandbox(),
@@ -69,6 +68,7 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
                     parent_id="r0",
                     depth=1,
                     origin="first",
+                    phase="thought",
                     reply="",
                     calls=(ToolCall(id="k1", name="sleep", arguments={"seconds": 0}),),
                 ),
@@ -76,28 +76,30 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
         )
     )
 
-    book = Book()
-
-    root = await _restore(store, book=book)
+    root = await _restore(store)
 
     assert root is not None
     assert root.agent_id == "r0"
     assert root.parent is None
 
-    child = book.get("c0")
+    child = root.children.get("c0")
 
     assert child is not None
     assert child.parent is root
     assert child.depth == 1
-    assert root.child_handle("c0") is not None
-    assert root.child_handle("c0").task is not None
+    assert child.task is not None
 
-    turn = child.turns[-1]
+    # The loop continues the open turn from its phase: the model
+    # already answered, so its missing verb result is closed as
+    # interrupted without re-running the verb.
+    await await_until(lambda: bool(child.turns) and child.turns[0].phase == "committed")
+
+    turn = child.turns[0]
 
     assert turn.ended_at is not None
     assert [result.output for result in turn.results] == [INTERRUPTED]
     assert turn.rendered is not None
-    assert len(child.history) == len(turn.rendered)
+    assert child.history[: len(turn.rendered)] == list(turn.rendered)
 
     # The completed root turn was already frozen; restore keeps it.
     assert root.history == list(root.last_turn.rendered)
@@ -127,11 +129,34 @@ async def test_restore_drops_an_unanswered_turn_and_requeues_its_inbox(tmp_path:
     assert root is not None
     assert root.turns == []
     assert not store.path("r0").exists()
-    assert root._inbox.qsize() == 1
+    assert len(root._inbox) == 1
 
-    message = root._inbox.get_nowait()
+    message = root._inbox.pop(0)
 
     assert message.text == "lost input"
+
+    await _stop(root)
+
+
+async def test_restore_delivers_an_unobserved_message(tmp_path: Path) -> None:
+    """A message that arrived while no turn was open rides the
+    snapshot, so a stop before the next turn loses nothing."""
+    store = SnapshotStore(tmp_path / "snapshots")
+
+    await store.save(
+        AgentSnapshot(
+            turns=(_done("r0", None, 0, "hello"),),
+            pending=(InboxMessage(kind="user", source="user", text="typed mid-turn"),),
+        )
+    )
+
+    root = await _restore(store)
+
+    assert root is not None
+
+    await await_until(lambda: len(root.turns) == 2 and root.turns[-1].phase == "committed")
+
+    assert [message.text for message in root.turns[-1].inbox] == ["typed mid-turn"]
 
     await _stop(root)
 
@@ -178,7 +203,9 @@ async def test_restore_discards_orphans_and_the_dead(tmp_path: Path) -> None:
 async def test_restore_lifts_a_parked_root(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path / "snapshots")
 
-    parked = Turn(agent_id="r0", parent_id=None, depth=0, origin="first", reply="ok", paused=True)
+    parked = Turn(
+        agent_id="r0", parent_id=None, depth=0, origin="first", phase="thought", reply="ok"
+    )
 
     await store.save(AgentSnapshot(turns=(parked,)))
 
@@ -186,6 +213,10 @@ async def test_restore_lifts_a_parked_root(tmp_path: Path) -> None:
 
     assert root is not None
     assert not root.paused
+
+    # The parked turn is not a death: the loop lifts it and commits.
+    await await_until(lambda: root.last_turn is not None and root.last_turn.phase == "committed")
+
     assert root.last_turn is not None and root.last_turn.ended_at is not None
 
     await _stop(root)

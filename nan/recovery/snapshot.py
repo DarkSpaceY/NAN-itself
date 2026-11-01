@@ -1,16 +1,17 @@
 """
-Persistence: one snapshot per agent -- its Turn list, and nothing
-else.
+Persistence: one snapshot per agent -- its Turn list plus the
+messages no turn has observed yet, and nothing else.
 
 A Turn is self-contained (identity, observation, reply, verb
-results, exit record), so a list of Turns is the agent's whole
-live state. The spawn tree is not stored either: every turn
-carries its parent_id, so restore rebuilds the tree from the
-files on disk.
+results, exit record), so the turns are the agent's history. The
+spawn tree is not stored either: every turn carries its parent_id,
+so restore rebuilds the tree from the files on disk.
 
-The store is whole-state, never append: the list is serialized to
+The store is whole-state, never append: the state is serialized to
 a temp file and atomically replaced over the target, so a crash
 leaves either the old snapshot or the new one, never a torn one.
+Every write is fsynced: the agent is durable at each phase
+boundary.
 """
 
 from __future__ import annotations
@@ -32,11 +33,13 @@ from nan.turn import Death, InboxMessage, Turn
 @dataclass(frozen=True)
 class AgentSnapshot:
     """
-    One agent's turns, in order. The file is named by its id; the
-    id, parent and depth come from the first turn.
+    One agent's turns, in order, plus the inbox messages that
+    arrived but no turn has observed. The file is named by the
+    agent's id; the id, parent and depth come from the first turn.
     """
 
     turns: tuple[Turn, ...]
+    pending: tuple[InboxMessage, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.turns:
@@ -69,7 +72,10 @@ class AgentSnapshot:
         return next((turn.death for turn in self.turns if turn.death is not None), None)
 
     def to_json(self) -> dict[str, Any]:
-        return {"turns": [turn.to_json() for turn in self.turns]}
+        return {
+            "turns": [turn.to_json() for turn in self.turns],
+            "pending": [message.to_json() for message in self.pending],
+        }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> AgentSnapshot:
@@ -78,21 +84,22 @@ class AgentSnapshot:
         if not isinstance(turns, list):
             raise ValueError("snapshot requires a turns list")
 
-        return cls(turns=tuple(Turn.from_json(item) for item in turns))
+        return cls(
+            turns=tuple(Turn.from_json(item) for item in turns),
+            pending=tuple(InboxMessage.from_json(message) for message in data.get("pending", ())),
+        )
 
 
 @dataclass(frozen=True)
 class InFlight:
     """
-    The snapshot's last open turn (ended_at is None), and what a
-    restore must do with it:
+    The snapshot's last open turn (phase before `committed`), and
+    what a restore must do with it:
 
-    answered  the model produced a message: replay it verbatim
-              (thinking included), pair each tool_call_id with
-              the result that landed, and mark the rest
-              interrupted
-    requeue   nothing was produced: drop the turn and re-deliver
-              its inbox to the next turn
+    requeue   nothing was observed: drop the turn and re-deliver its
+              inbox to the next turn
+    resume    the turn already has inputs or progress: keep it, the
+              loop continues it from its phase
     """
 
     turn: Turn
@@ -101,20 +108,16 @@ class InFlight:
     def read(cls, snapshot: AgentSnapshot) -> InFlight | None:
         last = snapshot.last
 
-        return None if last.ended_at is not None else cls(turn=last)
+        return None if last.phase == "committed" else cls(turn=last)
 
     @property
-    def answered(self) -> bool:
-        return (
-            self.turn.reply is not None
-            or bool(self.turn.thinking)
-            or bool(self.turn.calls)
-            or self.turn.rendered is not None
-        )
+    def unobserved(self) -> bool:
+        """Nothing was observed: the turn cannot resume, only requeue."""
+        return self.turn.phase == "observed"
 
     @property
     def requeue(self) -> tuple[InboxMessage, ...]:
-        return () if self.answered else self.turn.inbox
+        return self.turn.inbox if self.unobserved else ()
 
 
 class SnapshotStore:
@@ -133,16 +136,11 @@ class SnapshotStore:
     def path(self, agent_id: str) -> Path:
         return self._directory / f"{agent_id}.json"
 
-    async def save(self, snapshot: AgentSnapshot, *, durable: bool = True) -> None:
-        """
-        Whole-state overwrite. `durable` adds the fsync: the
-        response and committed writes need it; the intent and
-        verb snapshots may lose their tail on a power cut (restore
-        can requeue).
-        """
-        await asyncio.to_thread(self._write, snapshot, durable)
+    async def save(self, snapshot: AgentSnapshot) -> None:
+        """Whole-state, fsynced overwrite. The write runs in a thread."""
+        await asyncio.to_thread(self._write, snapshot)
 
-    def _write(self, snapshot: AgentSnapshot, durable: bool) -> None:
+    def _write(self, snapshot: AgentSnapshot) -> None:
         self._directory.mkdir(parents=True, exist_ok=True)
 
         target = self.path(snapshot.agent_id)
@@ -157,10 +155,9 @@ class SnapshotStore:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(snapshot.to_json(), handle, ensure_ascii=False)
 
-                if durable:
-                    handle.flush()
+                handle.flush()
 
-                    os.fsync(handle.fileno())
+                os.fsync(handle.fileno())
 
             os.replace(tmp_name, target)
 

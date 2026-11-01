@@ -1,26 +1,22 @@
 """
-Failure vocabulary: one classification for everything a run can
-throw.
+Failure vocabulary: one classification for everything a turn throws.
 
-A failure has a domain -- where it happened -- and, for a turn, a
-kind -- what may be done about it:
+`classify` answers one question -- may this step run again? -- with
+three answers:
 
-    process  startup: a missing persona/sandbox/hub/config refuses
-             to start; there is no runtime to recover
-    agent    an agent-scope fault (auth, corrupt history, a child
-             that cannot start): the agent dies
-    turn     one turn: retryable, model-correctable, fatal, or a
-             cancellation
+    cancelled  the loop's control path owns it (pause, kill, shutdown)
+    retryable  the same step may run again later (429, network,
+               timeout, a broken stream, 5xx)
+    fatal      no retry can repair it
 
-Retryable means the same turn may run again later (429, network,
-timeout, a broken stream, 5xx). Model-correctable means the model
-sees the error as the verb result and rewrites its call; it is not
-an exception. Fatal means no retry can repair it; the retry
-ladder running out is fatal by definition (`Unrecoverable`).
+Only the model call is retried: a verb is at-most-once, and a verb
+that throws returns its error as the model-visible result instead of
+failing the turn (see Agent._run_call). A retry ladder that runs out
+is fatal by definition (`Unrecoverable`).
 
-`classify` is the one place exception types are interpreted. It
-reads status codes and transport exception names structurally,
-so the SDKs may wrap a cause without being imported here.
+`classify` is the one place exception types are interpreted. It reads
+status codes and transport exception names structurally, so the SDKs
+may wrap a cause without being imported here.
 """
 
 from __future__ import annotations
@@ -29,36 +25,18 @@ import asyncio
 from enum import StrEnum
 
 
-class FailureDomain(StrEnum):
-    """Where a failure happened."""
-
-    PROCESS = "process"
-    AGENT = "agent"
-    TURN = "turn"
-
-
 class FailureKind(StrEnum):
     """What may be done about a failure."""
 
     RETRYABLE = "retryable"
-    MODEL_CORRECTABLE = "model_correctable"
     FATAL = "fatal"
     CANCELLED = "cancelled"
 
 
-class CancelReason(StrEnum):
-    """Why a turn was cancelled: the three non-failure exits."""
-
-    SHUTDOWN = "shutdown"
-    PAUSE = "pause"
-    KILL = "kill"
-
-
 class Unrecoverable(Exception):
     """
-    Retrying is pointless: the agent dies. Raised when a retry
-    ladder is exhausted, or when a turn proved permanently
-    broken.
+    Retrying is pointless: raised when a retry ladder is exhausted,
+    carrying the reason the turn failed for.
     """
 
     def __init__(self, reason: str) -> None:
@@ -98,9 +76,6 @@ def classify(exc: BaseException) -> FailureKind:
     """The kind of one thrown failure."""
     if isinstance(exc, asyncio.CancelledError):
         return FailureKind.CANCELLED
-
-    if isinstance(exc, Unrecoverable):
-        return FailureKind.FATAL
 
     if _retryable(exc):
         return FailureKind.RETRYABLE

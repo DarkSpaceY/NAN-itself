@@ -1,12 +1,15 @@
 """
 Agent verbs: the six cognitive actions.
 
-    spawn    create a child agent, hold its handle
+    spawn    create a child agent
     sleep    block for a while
     shell    run a command in the workspace
-    send     send text message up to the parent, or down into a held child
-    kill     kill a held child (cascade is automatic)
-    finish   subagent-only: report upstream and die
+    send     send text message up to the parent, or down into a child
+    kill     kill a child (cascade is automatic)
+    finish   report upstream and die
+
+The verb set IS the agent's capability: a root runs ROOT_VERBS
+(no finish -- the root never exits), a child runs CHILD_VERBS.
 
 Tools and skills are plain files the agent reaches through
 shell.
@@ -84,12 +87,12 @@ def truncate_output(output: str, returncode: int | None, limit: int) -> str:
 
 VERBS: dict[str, Verb] = _build_registry()
 
+# A root never exits, so it cannot finish; a child can.
+CHILD_VERBS: dict[str, Verb] = dict(VERBS)
 
-def tool_definitions(*, depth: int) -> list[ToolDefinition]:
-    """
-    The verb list handed to the model. finish exists only below
-    the root.
-    """
-    verbs = [v for v in VERBS.values() if not (v.name == "finish" and depth == 0)]
+ROOT_VERBS: dict[str, Verb] = {name: verb for name, verb in VERBS.items() if name != "finish"}
 
-    return [v.definition() for v in verbs]
+
+def tool_definitions(verbs: dict[str, Verb]) -> list[ToolDefinition]:
+    """The verb protocol handed to the model: exactly `verbs`."""
+    return [verb.definition() for verb in verbs.values()]

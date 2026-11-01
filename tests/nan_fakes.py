@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 
 from nan.agent import Agent
-from nan.agent.handle import Book
 from nan.agent.sandbox import Sandbox
 from nan.config import settings
 from nan.injection import InjectionHub
@@ -121,7 +120,6 @@ class SlowFakeLLM(FakeLLM):
 def make_agent(
     *,
     tmp_path: Path,
-    book: Book | None = None,
     llm: FakeLLM | None = None,
     persona: str = "ROOTPERSONA",
     agent: dict[str, Any] | None = None,
@@ -155,7 +153,6 @@ def make_agent(
     sandbox = kwargs.pop("sandbox", Sandbox())
 
     return Agent(
-        book=book or Book(),
         llm=llm or FakeLLM(),  # type: ignore[arg-type]
         injections=InjectionHub(),
         sandbox=sandbox,

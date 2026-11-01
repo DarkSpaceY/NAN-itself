@@ -39,7 +39,7 @@ Example -- a local 27B model behind llama.cpp:
 | `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history and starts a new context epoch |
 | `shell_timeout` | `30.0` | `shell` verb execution timeout; the model cannot change it |
 | `shell_output_limit` | `20000` | `shell` verb output truncation size (head + tail kept, middle elided) |
-| `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Turn-failure retry ladder (seconds); a failed turn is retried whole after these delays |
+| `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Model-call retry ladder (seconds); a retryable failure re-runs the same model call after each delay, and running out parks the turn (root) or ends the agent (child) |
 | `max_depth` | `3` | Spawn depth limit; `-1` = unlimited |
 | `max_children` | `5` | Per-agent children limit; `-1` = unlimited |
 

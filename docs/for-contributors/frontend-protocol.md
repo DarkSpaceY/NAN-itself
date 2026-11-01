@@ -161,7 +161,7 @@ Conventions:
 | `turn_done` | `{agent_id, turn_index, usage?, latency_s, retries, calls, history_chars}` -- usage = `{prompt_tokens, completion_tokens}` |
 | `turn_failed` | `{agent_id, error, backoff_s, retry_index}` |
 | `turn_interrupted` | `{agent_id, turn_index, reason}` -- the turn was parked (retries exhausted, pause, or a restored open turn); it is kept, not discarded |
-| `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `closed` \| `requeued` \| null |
+| `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `closed` \| `requeued` \| `resumed` \| null |
 
 ### Model stream (correlated by envelope `id`)
 

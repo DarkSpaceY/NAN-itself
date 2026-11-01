@@ -33,11 +33,10 @@ from nan.llm import (
     Message,
     ThinkingBlock,
     ToolCall,
+    ToolDefinition,
     Usage,
 )
 from nan.turn import DeltaEvent, Injection, LLMCall, ToolResult, Turn, render_turn
-
-from .verbs import tool_definitions
 
 if TYPE_CHECKING:
     from nan.llm import LLMProvider
@@ -87,6 +86,7 @@ class TurnEngine:
             turn,
             injections=contributions,
             delta=tuple([*turn.delta, *service_deltas]),
+            phase="injected",
         )
 
     async def think(
@@ -95,6 +95,7 @@ class TurnEngine:
         *,
         persona: str,
         history: Sequence[Message],
+        tools: Sequence[ToolDefinition],
         retries: int,
     ) -> Turn:
         messages = [
@@ -108,7 +109,7 @@ class TurnEngine:
         response = await self.generate(
             agent_id=turn.agent_id,
             depth=turn.depth,
-            request=LLMRequest(messages=messages, tools=tool_definitions(depth=turn.depth)),
+            request=LLMRequest(messages=messages, tools=list(tools)),
         )
 
         return _with_response(
@@ -139,7 +140,7 @@ class TurnEngine:
                 )
             )
 
-        return _with_results(turn, results, ended_at=time.time())
+        return _with_results(turn, results)
 
     # ------------------------------------------------------------------
     # The model call
@@ -242,10 +243,10 @@ def _with_response(
     ended_at: float,
     retries: int,
 ) -> Turn:
-    # ended_at stays unset: the turn ends when its verbs end (or
-    # when restore closes it), not when the model answers.
+    # The turn ends at commit, not when the model answers.
     return replace(
         turn,
+        phase="thought",
         reply=response.content or "",
         thinking=tuple(response.thinking),
         calls=tuple(response.tool_calls),
@@ -260,6 +261,5 @@ def _with_response(
     )
 
 
-def _with_results(turn: Turn, results: list[ToolResult], *, ended_at: float) -> Turn:
-    # The turn ends when its last verb ends.
-    return replace(turn, results=tuple(results), ended_at=ended_at)
+def _with_results(turn: Turn, results: list[ToolResult]) -> Turn:
+    return replace(turn, results=tuple(results), phase="acted")
