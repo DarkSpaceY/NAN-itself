@@ -3,6 +3,6 @@
 from __future__ import annotations
 
 from .core import Agent
-from .engine import TurnEngine, next_backoff
+from .engine import TurnEngine
 
-__all__ = ["Agent", "TurnEngine", "next_backoff"]
+__all__ = ["Agent", "TurnEngine"]

@@ -92,14 +92,13 @@ failure in either script does not block the core.
 
 ## Paths
 
-Paths default to the `nan.config.Paths` values, carried by the same
-`settings` object every component reads; a `paths:` block in
-`config/nan.yaml` overrides them.
+Paths are fixed (`nan.config.Paths`), not configuration.
 
 | Key | Value | Meaning |
 |-----|---------|---------|
 | `paths.workspace` | `<repo>/workspace` | The agents' writable territory |
 | `paths.builtin` | `<repo>/builtin` | Read-only resource root (tools/skills as plain files) |
+| `paths.snapshots` | `<repo>/snapshots` | Per-agent recovery snapshots; kept outside the sandbox so a command cannot erase them |
 | `paths.package` | `<repo>/nan` | The package root (read-only to agents) |
 | `paths.persona` | `<repo>/nan/persona.md` | The global persona, re-read every turn |
 | `paths.frontend` | `<repo>/frontend/dist` | The built desktop served by the gateway |

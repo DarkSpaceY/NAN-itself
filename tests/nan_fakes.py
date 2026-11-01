@@ -17,6 +17,7 @@ from nan.agent.sandbox import Sandbox
 from nan.config import settings
 from nan.injection import InjectionHub
 from nan.llm import ThinkingBlock, ToolCall, Usage
+from nan.recovery import SnapshotStore
 
 
 @dataclass
@@ -158,6 +159,7 @@ def make_agent(
         llm=llm or FakeLLM(),  # type: ignore[arg-type]
         injections=InjectionHub(),
         sandbox=sandbox,
+        snapshots=SnapshotStore(tmp_path / "snapshots"),
         **kwargs,
     )
 

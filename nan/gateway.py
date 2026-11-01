@@ -306,22 +306,17 @@ class Gateway:
 
             try:
                 async for raw in websocket.iter_text():
-                    self._handle_message(websocket, raw)
+                    reply = self._handle_message(raw)
+
+                    if reply is not None:
+                        await self._send(websocket, reply)
             finally:
                 forwarder.cancel()
                 monitor.cancel()
-                try:
-                    await forwarder
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Forwarder error on cleanup: {e}")
-                try:
-                    await monitor
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Monitor error on cleanup: {e}")
+
+                for task in (forwarder, monitor):
+                    with contextlib.suppress(BaseException):
+                        await task
 
         except WebSocketDisconnect:
             logger.info(f"Client {client_id} disconnected")
@@ -334,7 +329,6 @@ class Gateway:
 
     async def _forward(self, websocket: WebSocket, queue: asyncio.Queue, client_id: str) -> None:
         """Forward events to the client."""
-        counter = 0
         logger.debug(f"Forwarder started for {client_id}")
 
         try:
@@ -349,18 +343,15 @@ class Gateway:
                         break
                     continue
 
-                counter += 1
-
-                logger.info(f"[Debug] Send Event:{event}")
                 await self._send(websocket, event)
 
         except asyncio.CancelledError:
-            logger.debug(f"Forwarder cancelled for {client_id} after {counter} events")
+            logger.debug(f"Forwarder cancelled for {client_id}")
             raise
         except Exception as e:
             logger.error(f"Forwarder error for {client_id}: {e}", exc_info=True)
         finally:
-            logger.debug(f"Forwarder stopped for {client_id} (processed {counter} events)")
+            logger.debug(f"Forwarder stopped for {client_id}")
 
     async def _monitor_forwarder(
         self, websocket: WebSocket, forwarder: asyncio.Task, client_id: str
@@ -384,16 +375,16 @@ class Gateway:
         except Exception as e:
             logger.error(f"Monitor error for {client_id}: {e}")
 
-    def _handle_message(self, websocket: WebSocket, raw: str) -> None:
-        """Parse one client message; malformed input is logged."""
+    def _handle_message(self, raw: str) -> dict | None:
+        """Parse one client message and return the reply, if any."""
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {raw[:100]}")
-            return
+            return None
 
         if not isinstance(data, dict):
-            return
+            return None
 
         kind = data.get("t")
         if kind == "input":
@@ -403,27 +394,17 @@ class Gateway:
 
             if text and self.on_input is not None:
                 if not self._accept_mid(mid):
-                    return
+                    return None
 
-                try:
-                    self.on_input(text, mid)
-                except Exception as e:
-                    logger.error(f"on_input callback error: {e}")
+                self.on_input(text, mid)
             elif not text:
                 logger.debug("Empty input ignored")
         elif kind == "ping":
-            asyncio.create_task(
-                self._safe_send(
-                    websocket,
-                    {"t": "pong", "content": {}},
-                )
-            )
-        elif kind in ("pause", "resume"):
-            if self.on_pause is not None:
-                try:
-                    self.on_pause(kind == "pause")
-                except Exception as e:
-                    logger.error(f"on_pause callback error: {e}")
+            return {"t": "pong", "content": {}}
+        elif kind in ("pause", "resume") and self.on_pause is not None:
+            self.on_pause(kind == "pause")
+
+        return None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -465,11 +446,6 @@ class Gateway:
         except Exception as e:
             logger.warning(f"Send failed for {payload.get('t')}: {e}")
             raise
-
-    async def _safe_send(self, websocket: WebSocket, payload: dict) -> None:
-        """Send while ignoring errors (ping responses)."""
-        with contextlib.suppress(Exception):
-            await self._send(websocket, payload)
 
     async def _broadcast(self, payload: dict) -> None:
         """Send to every connected desktop; a dead socket is dropped."""

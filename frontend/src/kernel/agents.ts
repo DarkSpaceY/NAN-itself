@@ -99,6 +99,14 @@ export function reduceTree(tree: AgentTree, env: Envelope): boolean {
       return true;
     }
 
+    case "snapshot_restored": {
+      const node = ensure(tree, agentId, env.seq);
+      node.parent_id = str(env.content.parent_id);
+      if (typeof env.content.depth === "number") node.depth = env.content.depth;
+      if (typeof env.content.turns === "number") node.turns = env.content.turns;
+      return true;
+    }
+
     case "agent_exited": {
       const node = ensure(tree, agentId, env.seq);
       node.status = "exited";
@@ -116,7 +124,8 @@ export function reduceTree(tree: AgentTree, env: Envelope): boolean {
     }
 
     case "turn_done":
-    case "turn_failed": {
+    case "turn_failed":
+    case "turn_interrupted": {
       const node = ensure(tree, agentId, env.seq);
       if (node.status !== "paused" && node.status !== "exited")
         node.status = "idle";

@@ -10,15 +10,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 from nan.llm import Message
-from nan.turn.model import Turn
+from nan.turn.model import INTERRUPTED, Turn
 
 
 def render_turn(turn: Turn) -> tuple[Message, ...]:
     """
     One turn as its message run: the observation (injections,
     inbox, task), then the assistant's reply or calls, then one
-    tool message per result. An in-flight turn renders as its
-    observation alone.
+    tool message per call -- paired by call id, so a call whose
+    result never landed renders as interrupted. An in-flight turn
+    renders as its observation alone.
     """
     messages: list[Message] = [_observation_message(turn)]
 
@@ -34,12 +35,16 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
         )
     )
 
-    for call, result in zip(turn.calls, turn.results, strict=True):
+    results = {result.call_id: result for result in turn.results}
+
+    for call in turn.calls:
+        result = results.get(call.id)
+
         messages.append(
             Message(
                 role="tool",
                 tool_call_id=call.id,
-                content=result.output,
+                content=result.output if result is not None else INTERRUPTED,
             )
         )
 

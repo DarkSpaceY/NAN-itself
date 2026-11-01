@@ -78,6 +78,20 @@ export interface TurnFailed extends AgentIdentity {
   retry_index: number;
 }
 
+/** The open turn was parked (pause, retry exhaustion, restore); its content stays visible. */
+export interface TurnInterrupted extends AgentIdentity {
+  turn_index: number;
+  reason: string;
+}
+
+/** A boot rebuilt this agent from its snapshot file. */
+export interface SnapshotRestored extends AgentIdentity {
+  parent_id: string | null;
+  depth: number;
+  turns: number;
+  in_flight: "closed" | "requeued" | null;
+}
+
 /** One verb invocation: name + structured arguments. */
 export interface VerbStarted extends AgentIdentity {
   verb: string;
@@ -155,7 +169,8 @@ export const EVENT_TYPES = new Set([
   "turn_started",
   "turn_done",
   "turn_failed",
-  "turn_cancelled",
+  "turn_interrupted",
+  "snapshot_restored",
   "injections_collected",
   "verb_started",
   "verb_result",

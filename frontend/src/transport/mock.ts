@@ -6,7 +6,7 @@
 //   2. tool-call-only turn    output_started -> output_cancelled (no text)
 //   3. round-level failure    turn_failed -> same turn_index retried after backoff
 //   4. two-layer spawn        root -> a3 -> a7, with verb_failed for an unknown verb
-//   5. pause interruption     agent_paused -> turn_cancelled -> reopened after resume
+//   5. pause interruption     agent_paused -> turn_interrupted -> reopened after resume
 //
 // Also replays injections_collected (one service ok, one failed),
 // agent_exited with report, and one surface withdrawal. Upstream
@@ -566,22 +566,27 @@ export class MockTransport implements Transport {
     //    drops it after surface_ttl and the rail loses that window.
     steps.push(() => this.onSurfaceRemoved("tests"));
 
-    // 7. pause interruption: the half-streamed sentence is voided with the round; the same turn_index reopens after resume.
+    // 7. pause interruption: the turn is parked where it stands and its same turn_index continues after resume.
     userInput(steps, "继续分析");
-    const cancelledOut = outId();
+    const parkedOut = outId();
     steps.push((e) =>
       e("turn_started", { ...ROOT_BASE, turn_index: 7, inbox_count: 1 }),
     );
     think(
       steps,
       ROOT_BASE,
-      `${cancelledOut}-think`,
+      `${parkedOut}-think`,
       "照旧按目录深度排序，先回忆一下上一轮的结论。",
     );
-    stream(steps, ROOT_BASE, cancelledOut, "继续分析（这半句会被 pause 丢掉）");
+    stream(steps, ROOT_BASE, parkedOut, "继续分析（这半句停在这里）");
     steps.push(
       (e) => e("agent_paused", { agent_id: ROOT, depth: 0 }),
-      (e) => e("turn_cancelled", { ...ROOT_BASE, requeued_count: 1 }),
+      (e) =>
+        e("turn_interrupted", {
+          ...ROOT_BASE,
+          turn_index: 7,
+          reason: "paused",
+        }),
       (e) => e("agent_resumed", { agent_id: ROOT, depth: 0 }),
     );
     textTurn(steps, ROOT_BASE, {

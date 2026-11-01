@@ -54,6 +54,13 @@ export function Stream({ rounds, version, onDrill, emptyHint }: StreamProps) {
               <span className="mark">×</span> {round.detail}
             </div>
           )}
+
+          {/* Parked, not lost: the partial content stays until the turn continues or the agent exits */}
+          {round.outcome === "interrupted" && round.detail && (
+            <div className="round-interrupted">
+              <span className="mark">‖</span> {round.detail}
+            </div>
+          )}
         </section>
       ))}
     </div>

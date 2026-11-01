@@ -204,13 +204,38 @@ describe("mapper", () => {
     expect(rounds[0].parts[1]).toMatchObject({ text: "完整结论" });
   });
 
-  it("marks a paused turn as cancelled", () => {
+  it("keeps a parked turn visible as interrupted", () => {
     const m = new Mapper("r0");
     m.feed(env(1, "turn_started", { ...base, turn_index: 1 }));
-    m.feed(env(2, "turn_cancelled", { ...base, requeued_count: 2 }));
+    m.feed(env(2, "output_started", base, "o1"));
+    m.feed(env(3, "output_delta", { ...base, text: "half" }, "o1"));
+    m.feed(env(4, "verb_started", { ...base, verb: "shell", arguments: { command: "ls" } }));
+    m.feed(env(5, "turn_interrupted", { ...base, turn_index: 1, reason: "unrecoverable: boom" }));
 
-    expect(m.getRounds()[0].outcome).toBe("cancelled");
-    expect(m.getRounds()[0].detail).toBe("2 input requeued");
+    const round = m.getRounds()[0];
+
+    expect(round.outcome).toBe("interrupted");
+    expect(round.detail).toBe("unrecoverable: boom");
+    expect(round.parts[0]).toMatchObject({ kind: "text", text: "half", streaming: false });
+    expect(round.parts[1]).toMatchObject({ kind: "verb", state: "failed" });
+  });
+
+  it("rolls the interrupted attempt away when the same turn resumes", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "turn_started", { ...base, turn_index: 2 }));
+    m.feed(env(2, "turn_interrupted", { ...base, turn_index: 2, reason: "paused" }));
+
+    m.feed(env(3, "turn_started", { ...base, turn_index: 2 }));
+    m.feed(env(4, "output_started", base, "o1"));
+    m.feed(env(5, "output_delta", { ...base, text: "after resume" }, "o1"));
+    m.feed(env(6, "output_done", base, "o1"));
+    m.feed(env(7, "turn_done", { ...base, turn_index: 2 }));
+
+    const rounds = m.getRounds();
+
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].outcome).toBe("done");
+    expect(rounds[0].parts[0]).toMatchObject({ kind: "text", text: "after resume" });
   });
 
   it("is idempotent under replay", () => {

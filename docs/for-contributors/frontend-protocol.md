@@ -124,7 +124,9 @@ Pause and resume travel over the socket as client messages:
 ```
 
 They take effect asynchronously; the confirmation is the
-`agent_paused` / `agent_resumed` event on the same socket.
+`agent_paused` / `agent_resumed` event on the same socket. A pause
+parks the in-flight turn (`turn_interrupted`); a resume re-announces
+it with the same `turn_index`.
 
 ## Payload schemas
 
@@ -154,11 +156,12 @@ Conventions:
 
 | t | content |
 |---|---|
-| `turn_started` | `{agent_id, turn_index, inbox_count}` -- turn_index = cycles+1, unique per agent |
+| `turn_started` | `{agent_id, turn_index, inbox_count}` -- turn_index = number of turns the agent holds (1-based), unique per agent |
 | `injections_collected` | `{agent_id, services: [{service_id, ok, duration_s, text_len}]}` -- one event per turn, aggregate over services |
 | `turn_done` | `{agent_id, turn_index, usage?, latency_s, retries, calls, history_chars}` -- usage = `{prompt_tokens, completion_tokens}` |
 | `turn_failed` | `{agent_id, error, backoff_s, retry_index}` |
-| `turn_cancelled` | `{agent_id, requeued_count}` -- pause or death mid-turn; the turn is discarded whole |
+| `turn_interrupted` | `{agent_id, turn_index, reason}` -- the turn was parked (retries exhausted, pause, or a restored open turn); it is kept, not discarded |
+| `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `closed` \| `requeued` \| null |
 
 ### Model stream (correlated by envelope `id`)
 
@@ -178,9 +181,8 @@ streamed before the answer; it opens lazily on the first thinking
 chunk, and `output_*` opens lazily on the first text chunk, so the
 two render in arrival order. `output_cancelled` closes the text
 stream when the model returned tool calls, and the turn continues
-into the verbs; turn-level cancellation is the separate
-`turn_cancelled` event. Empty assistant answers still get an
-`output_started` + close pair at the end of the turn.
+into the verbs. A turn that produced no text opens no stream at
+all.
 
 ### Verbs (linear per call, no correlation id)
 
@@ -215,10 +217,12 @@ the child's own `agent_started`; the spawn call itself still emits
 
 The stream is sufficient to rebuild the full UI state:
 
-- agents: from `agent_started` / `agent_exited`
+- agents: from `agent_started` / `agent_exited` / `snapshot_restored`
 - per-agent turn list: from `turn_started` / `turn_done` /
-  `turn_failed` / `turn_cancelled`, keyed by
-  `(agent_id, turn_index)`
+  `turn_failed` / `turn_interrupted`, keyed by
+  `(agent_id, turn_index)`; a `turn_started` with an existing
+  index means the interrupted attempt was rolled back and the
+  same turn continues
 - live output: from `output_*` keyed by envelope `id`
 - activity trace: from `verb_*`
 - system health: from `injections_collected`

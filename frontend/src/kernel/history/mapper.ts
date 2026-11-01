@@ -132,7 +132,7 @@ export class Mapper {
     const dead = this.rounds.filter(
       (round) =>
         round.index === index &&
-        (round.outcome === "failed" || round.outcome === "cancelled"),
+        (round.outcome === "failed" || round.outcome === "interrupted"),
     );
     if (dead.length === 0) return;
 
@@ -368,16 +368,12 @@ export class Mapper {
         this.closeOpen(env, "failed", str(env.content.error), true);
         break;
 
-      case "turn_cancelled": {
-        // pause interruption: the whole round is voided, its content does not enter history
-        const requeued = env.content.requeued_count;
-        this.closeOpen(
-          env,
-          "cancelled",
-          typeof requeued === "number" ? `${requeued} input requeued` : null,
-        );
+      case "turn_interrupted":
+        // The turn was parked, not discarded: the partial content
+        // stays visible until the turn continues (a new turn_started
+        // with the same index rolls it away) or the agent exits.
+        this.closeOpen(env, "interrupted", str(env.content.reason), true);
         break;
-      }
 
       case "agent_exited":
         this.closeOpen(env);

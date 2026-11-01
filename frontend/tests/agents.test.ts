@@ -42,6 +42,42 @@ describe("agents", () => {
     expect(tree.nodes.get("r0")?.exitReason).toBe("finished");
   });
 
+  it("keeps a restored agent in the tree with its snapshot state", () => {
+    const tree = emptyTree();
+    reduceTree(tree, env(1, "agent_started", { agent_id: "r0", depth: 0, parent_id: null }));
+    reduceTree(tree, env(2, "turn_started", { agent_id: "r0", turn_index: 1 }));
+
+    reduceTree(
+      tree,
+      env(3, "snapshot_restored", {
+        agent_id: "c1",
+        parent_id: "r0",
+        depth: 1,
+        turns: 4,
+        in_flight: "closed",
+      }),
+    );
+
+    expect(tree.nodes.get("c1")?.parent_id).toBe("r0");
+    expect(tree.nodes.get("c1")?.depth).toBe(1);
+    expect(tree.nodes.get("c1")?.turns).toBe(4);
+    expect(tree.nodes.get("c1")?.status).toBe("idle");
+  });
+
+  it("parks the node as idle when a turn is interrupted", () => {
+    const tree = emptyTree();
+    reduceTree(tree, env(1, "agent_started", { agent_id: "r0", depth: 0, parent_id: null }));
+    reduceTree(tree, env(2, "turn_started", { agent_id: "r0", turn_index: 1 }));
+
+    reduceTree(tree, env(3, "turn_interrupted", { agent_id: "r0", turn_index: 1, reason: "boom" }));
+
+    expect(tree.nodes.get("r0")?.status).toBe("idle");
+
+    reduceTree(tree, env(4, "agent_paused", { agent_id: "r0" }));
+
+    expect(tree.nodes.get("r0")?.status).toBe("paused");
+  });
+
   it("keeps exited nodes around so navigation stays possible", () => {
     const tree = emptyTree();
     reduceTree(tree, env(1, "agent_started", { agent_id: "r0", depth: 0, parent_id: null }));

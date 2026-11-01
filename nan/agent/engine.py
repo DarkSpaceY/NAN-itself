@@ -1,15 +1,15 @@
 """
-The turn engine: one turn, in phases.
+The turn engine: the phases of one turn.
 
-The Agent prepares the arrival shape (a fresh Turn skeleton:
-identity, inbox, deltas, origin, persona marker) and hands it
-over; the engine runs the pipeline -- collect service
-contributions, one model call, run verbs positionally, freeze
-the rendered messages -- and returns the complete Turn.
+The Agent owns the turn (it opens the Turn when it observes and
+keeps it resident in its Turn list); the engine runs each phase --
+collect service contributions, one model call, run verbs
+positionally -- and hands the updated Turn back. Freezing is the
+last phase.
 
 The engine owns no agent state: it reads only what rides the
-parameters and writes nothing back. The Agent applies the
-result (history, last_turn) after the call.
+parameters and writes nothing back. The Agent persists the turn
+between phases.
 
 Streaming always runs and is always emitted to the `sink`
 singleton; without subscribers the events simply land in the
@@ -35,7 +35,7 @@ from nan.llm import (
     ToolCall,
     Usage,
 )
-from nan.turn import DeltaEvent, Injection, LLMCall, ToolResult, Turn, freeze_turn, render_turn
+from nan.turn import DeltaEvent, Injection, LLMCall, ToolResult, Turn, render_turn
 
 from .verbs import tool_definitions
 
@@ -49,48 +49,17 @@ InjectFn = Callable[..., Awaitable[tuple[tuple[Injection, ...], list[DeltaEvent]
 ExecuteFn = Callable[[ToolCall], Awaitable[str]]
 
 
-def next_backoff(backoff: Sequence[float], index: int) -> tuple[float, int]:
-    """
-    The delay for retry `index`, and the index for the call
-    after it. An empty ladder means: no delay, no advance.
-    """
-    if not backoff:
-        return 0.0, index
-
-    return backoff[min(index, len(backoff) - 1)], index + 1
-
-
 class TurnEngine:
     """
-    One turn per invocation: skeleton in, complete Turn out.
+    One turn, phase by phase: the Agent calls inject, then think
+    (possibly more than once while retrying), then act, then
+    freeze.
     """
 
     def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
 
-    async def run_turn(
-        self,
-        turn: Turn,
-        *,
-        persona: str,
-        history: Sequence[Message],
-        inject: InjectFn,
-        execute: ExecuteFn,
-        retries: int,
-    ) -> Turn:
-        turn = await self._inject(turn, inject=inject)
-
-        turn = await self._think(turn, persona=persona, history=history, retries=retries)
-
-        turn = await self._act(turn, execute=execute)
-
-        return freeze_turn(turn)
-
-    # ------------------------------------------------------------------
-    # Phases
-    # ------------------------------------------------------------------
-
-    async def _inject(
+    async def inject(
         self,
         turn: Turn,
         *,
@@ -120,7 +89,7 @@ class TurnEngine:
             delta=tuple([*turn.delta, *service_deltas]),
         )
 
-    async def _think(
+    async def think(
         self,
         turn: Turn,
         *,
@@ -150,7 +119,7 @@ class TurnEngine:
             retries=retries,
         )
 
-    async def _act(self, turn: Turn, *, execute: ExecuteFn) -> Turn:
+    async def act(self, turn: Turn, *, execute: ExecuteFn) -> Turn:
         results: list[ToolResult] = []
 
         for call in turn.calls:
@@ -245,19 +214,15 @@ class TurnEngine:
         if not thinking_blocks and thinking_text_parts:
             thinking_blocks = [ThinkingBlock(text="".join(thinking_text_parts))]
 
-        if stream_id is None:
-            # No text streamed (tools only, or an empty answer): keep
-            # the started/closed pair contract.
-            stream_id = sink.emit(
-                "output_started",
+        # A tool-only answer streams nothing: no start/close pair to
+        # keep. The UI renders the verbs; the mapper tolerates
+        # orphans on replay either way.
+        if stream_id is not None:
+            sink.emit(
+                "output_done" if not tool_calls else "output_cancelled",
+                id=stream_id,
                 content={"agent_id": agent_id, "depth": depth},
             )
-
-        sink.emit(
-            "output_done" if not tool_calls else "output_cancelled",
-            id=stream_id,
-            content={"agent_id": agent_id, "depth": depth},
-        )
 
         return LLMResponse(
             content=("".join(text_parts) or None),
@@ -277,6 +242,8 @@ def _with_response(
     ended_at: float,
     retries: int,
 ) -> Turn:
+    # ended_at stays unset: the turn ends when its verbs end (or
+    # when restore closes it), not when the model answers.
     return replace(
         turn,
         reply=response.content or "",
@@ -290,7 +257,6 @@ def _with_response(
             finish_reason=response.finish_reason,
             retries=retries,
         ),
-        ended_at=ended_at,
     )
 
 

@@ -28,6 +28,7 @@ config/nan.yaml
 logs/
 turns/
 cache/
+snapshots/
 # RocksDB renames a store to turns.<reason>-<timestamp>/ when it fails to open.
 turns.*/
 *.log

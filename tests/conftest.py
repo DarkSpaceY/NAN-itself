@@ -16,15 +16,21 @@ def _restore_settings() -> Iterator[None]:
     it must not leak into the next one.
     """
     from nan.config import settings
+    from nan.config.models import PATHS, Paths
 
     snapshot = {
         name: getattr(settings, name).model_copy(deep=True) for name in type(settings).model_fields
     }
 
+    paths = PATHS.model_copy(deep=True)
+
     yield
 
     for name, value in snapshot.items():
         setattr(settings, name, value)
+
+    for name in Paths.model_fields:
+        setattr(PATHS, name, getattr(paths, name))
 
 
 @pytest.fixture

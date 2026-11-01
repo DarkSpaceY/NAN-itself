@@ -37,10 +37,15 @@ class Paths(BaseModel):
     config: Path = _REPO_ROOT / "config" / "nan.yaml"
     workspace: Path = _REPO_ROOT / "workspace"  # agents' writable territory
     builtin: Path = _REPO_ROOT / "builtin"  # read-only resources
+    snapshots: Path = _REPO_ROOT / "snapshots"  # per-agent recovery state, outside the sandbox
     persona: Path = _PACKAGE_DIR / "persona.md"  # re-read every turn
     frontend: Path = _REPO_ROOT / "frontend" / "dist"  # built desktop
     autostart: Path = _REPO_ROOT / "builtin" / "autostart.sh"  # user-owned, unsandboxed
     agent_autostart: Path = _REPO_ROOT / "workspace" / "autostart.sh"  # agent-writable, sandboxed
+
+
+# The one layout instance; components read it via settings.paths.
+PATHS = Paths()
 
 
 class LLMSettings(BaseModel):
@@ -101,12 +106,10 @@ class AutostartSettings(BaseModel):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        yaml_file=str(Paths().config),
+        yaml_file=str(PATHS.config),
         yaml_file_encoding="utf-8",
         extra="ignore",
     )
-
-    paths: Paths = Field(default_factory=Paths)
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
@@ -114,6 +117,11 @@ class Settings(BaseSettings):
     injection: InjectionSettings = Field(default_factory=InjectionSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     autostart: AutostartSettings = Field(default_factory=AutostartSettings)
+
+    @property
+    def paths(self) -> Paths:
+        """Not a config field: the layout never comes from the file."""
+        return PATHS
 
     @classmethod
     def settings_customise_sources(

@@ -27,14 +27,17 @@ async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
     root = make_agent(tmp_path=tmp_path, book=book, llm=llm)
 
     # 1. spawn via verb, child finishes, report lands in root's next turn
+    # Every script is in place before the spawn: the child's first
+    # turn may run as soon as the spawn persists.
     llm.script("ROOTPERSONA", [("tool", "spawn", {"task": "TASKSMOKE"})])
+
+    llm.script("TASKSMOKE", [("tool", "finish", {"report": "SMOKE_REPORT"})])
+
     await root.run_turn()
 
     child = next(a for a in book.all() if a.depth == 1)
 
     assert child.depth == 1
-
-    llm.script("TASKSMOKE", [("tool", "finish", {"report": "SMOKE_REPORT"})])
 
     assert child._task is not None
 
@@ -52,7 +55,7 @@ async def test_spawn_finish_report(tmp_path: Path, no_sink: None) -> None:
     # 2. the report is in history; rendered frozen; add-only holds
     assert turn.rendered is not None
 
-    assert any("SMOKE_REPORT" in (m.content or "") for m in root._messages)
+    assert any("SMOKE_REPORT" in (m.content or "") for m in root.history)
 
 
 async def test_kill_produces_death_notice(tmp_path: Path, no_sink: None) -> None:
@@ -67,7 +70,7 @@ async def test_kill_produces_death_notice(tmp_path: Path, no_sink: None) -> None
     assert victim._task is not None
 
     # event-driven child consumes its task turn, then blocks idle
-    await await_until(lambda: victim.cycles == 1)
+    await await_until(lambda: len(victim.turns) == 1)
 
     victim.request_death("smoke kill")
 
@@ -98,7 +101,7 @@ async def test_send_down_and_up(tmp_path: Path, no_sink: None) -> None:
 
     # the message is consumed at the child's turn boundary and
     # lives in its frozen history
-    await await_until(lambda: "hello down" in " ".join((m.content or "") for m in target._messages))
+    await await_until(lambda: "hello down" in " ".join((m.content or "") for m in target.history))
 
     # child sends up: direct parent reference routing
     assert target.parent is root
@@ -200,15 +203,11 @@ async def test_turn_origins_and_archive(tmp_path: Path, no_sink: None) -> None:
 
     agent.injections = hub
 
-    # 1. first turn: origin=first (run_turn direct calls bypass the
-    #    loop, so the loop's post-turn cycles increment is mimicked)
+    # 1. first turn: origin=first
     t1 = await agent.run_turn()
     assert t1.origin == "first"
 
-    agent.cycles += 1
-
-    # 2. history over the 1-char limit cleared wholesale -> next
-    #    turn opens a new context epoch
+    # 2. history over the 1-char limit cleared at the next epoch
     t2 = await agent.run_turn()
     assert t2.origin == "context_cleared"
 
@@ -218,7 +217,7 @@ async def test_turn_origins_and_archive(tmp_path: Path, no_sink: None) -> None:
 
     agent.request_death("test")
 
-    await agent._teardown()
+    await agent._dispose()
 
     assert hub.archives == [t1, t2]
     assert len(hub.injects) == 2
@@ -237,8 +236,6 @@ async def test_normal_origin_without_clear(tmp_path: Path, no_sink: None) -> Non
 
     t1 = await agent.run_turn()
 
-    agent.cycles += 1
-
     t2 = await agent.run_turn()
 
     assert (t1.origin, t2.origin) == ("first", "normal")
@@ -246,7 +243,7 @@ async def test_normal_origin_without_clear(tmp_path: Path, no_sink: None) -> Non
     agent.request_death("test")
 
     with contextlib.suppress(Exception):
-        await agent._teardown()
+        await agent._dispose()
 
     assert hub.archives == [t1, t2]
     assert len(hub.injects) == 2
@@ -267,7 +264,6 @@ async def test_thinking_enters_history_and_replay(tmp_path: Path, no_sink: None)
     assistant = next(m for m in t1.rendered if m.role == "assistant")
     assert [block.text for block in assistant.thinking] == ["REASONING_MARKER"]
 
-    agent.cycles += 1
     await agent.run_turn()
 
     # Strict cache: the next request replays the frozen assistant turn verbatim.

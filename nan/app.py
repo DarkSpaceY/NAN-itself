@@ -24,6 +24,7 @@ from nan.events import sink
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
+from nan.recovery import SnapshotStore, restore
 from nan.utils.autostart import Autostart
 
 
@@ -38,15 +39,33 @@ async def run_core() -> None:
 
     sandbox = Sandbox()
 
-    root = Agent(book=book, llm=llm, injections=hub, sandbox=sandbox)
-
     # ------------------------------------------------------------------
     # Gateway: subscribes to the `sink` singleton on its own.
     # ------------------------------------------------------------------
 
     BOOT_ID = uuid.uuid4().hex[:12]
 
+    # Reset before restore: its events must belong to this boot.
     sink.reset(boot_id=BOOT_ID)
+
+    snapshots = SnapshotStore(settings.paths.snapshots)
+
+    root = await restore(
+        book=book,
+        llm=llm,
+        injections=hub,
+        sandbox=sandbox,
+        snapshots=snapshots,
+    )
+
+    if root is None:
+        root = Agent(
+            book=book,
+            llm=llm,
+            injections=hub,
+            sandbox=sandbox,
+            snapshots=snapshots,
+        )
 
     def ingest(text: str, mid: str | None = None) -> None:
         # User input enters the root handle directly.
@@ -58,8 +77,8 @@ async def run_core() -> None:
         )
 
     def on_pause(paused: bool) -> None:
-        # Pause cancels the in-flight turn (discarded whole);
-        # resume opens a clean turn.
+        # Pause cancels the in-flight turn where it stands and saves
+        # it; resume continues that same turn.
         if paused:
             root.pause()
         else:
@@ -103,7 +122,10 @@ async def run_core() -> None:
 
             autostart.start()
 
-        root.start()
+        # Restored agents were started by restore; a fresh root
+        # starts here.
+        if root.task is None:
+            root.start()
 
         gateway_task = asyncio.create_task(gateway.serve(open_browser=True), name="gateway")
 
@@ -123,12 +145,18 @@ async def run_core() -> None:
 
         stop_task = asyncio.create_task(stop.wait(), name="stop")
 
-        # The core lives until a stop signal or until the gateway dies.
+        # The core lives until a stop signal. A dead gateway is
+        # reported and the core keeps running: its failure must not
+        # kill the agents or their snapshots.
         done, _ = await asyncio.wait({stop_task, gateway_task}, return_when=asyncio.FIRST_COMPLETED)
 
         if gateway_task in done:
-            # Propagate the gateway's exception.
-            gateway_task.result()
+            error = gateway_task.exception()
+
+            if error is not None:
+                logger.error("Gateway stopped; core continues: {}", error)
+
+            await stop_task
 
     finally:
         _shutdown(root)
@@ -136,11 +164,11 @@ async def run_core() -> None:
         if stop_task is not None and not stop_task.done():
             stop_task.cancel()
 
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            with contextlib.suppress(BaseException):
                 await stop_task
 
         if root._task is not None:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            with contextlib.suppress(BaseException):
                 await root._task
 
         # The boot scripts' services are children of this core: stop
@@ -159,7 +187,7 @@ async def run_core() -> None:
         if gateway_task is not None and not gateway_task.done():
             gateway_task.cancel()
 
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            with contextlib.suppress(BaseException):
                 await gateway_task
 
         await hub.stop()
@@ -172,7 +200,9 @@ async def run_core() -> None:
 def _shutdown(root: Agent, stop_event: asyncio.Event | None = None) -> None:
     logger.info("Stop signal received")
 
-    root.request_death("shutdown")
+    # Shutdown is persistence, not death: the snapshot stays and
+    # the next boot restores from it.
+    root.suspend()
 
     if stop_event is not None:
         stop_event.set()

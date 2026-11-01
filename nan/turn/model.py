@@ -19,7 +19,7 @@ its own rendered messages); history lives in the Turn list.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from nan.llm import Message, ThinkingBlock, ToolCall, Usage
@@ -29,6 +29,11 @@ InboxKind = Literal["user", "parentagent", "subagent", "unknown"]
 # Why a turn began: the first of an agent's life, an ordinary
 # turn, or the turn right after the context was cleared.
 TurnOrigin = Literal["first", "normal", "context_cleared"]
+
+# What the model sees for a call whose verb never ran or never
+# reported back (a pause, a crash mid-act, a restored turn). Also
+# recorded in turn.results, so the turn stays self-contained.
+INTERRUPTED = "interrupted: agent paused during execution"
 
 
 @dataclass(frozen=True)
@@ -158,6 +163,11 @@ class Turn:
     # does not begin another one.
     death: Death | None = None
 
+    # Set when this turn was parked instead of finished: an explicit
+    # pause, or the root exhausting its retry ladder. Mutually
+    # exclusive with death; a later turn clears the state.
+    paused: bool = False
+
     rendered: tuple[Message, ...] | None = None
 
     started_at: float = field(default_factory=time.time)
@@ -226,6 +236,7 @@ class Turn:
                 if self.death is not None
                 else None
             ),
+            "paused": self.paused,
             "rendered": (
                 [m.model_dump(mode="json") for m in self.rendered]
                 if self.rendered is not None
@@ -234,6 +245,123 @@ class Turn:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
         }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Turn:
+        """
+        Rebuild the complete Turn from `to_json` output. Nested
+        LLM DTOs are pydantic; the frozen records are rebuilt
+        field by field.
+        """
+        llm = data.get("llm")
+        death = data.get("death")
+        rendered = data.get("rendered")
+
+        return cls(
+            agent_id=data["agent_id"],
+            parent_id=data.get("parent_id"),
+            depth=data["depth"],
+            inbox=tuple(
+                InboxMessage(
+                    kind=message["kind"],
+                    source=message["source"],
+                    text=message["text"],
+                    event=message.get("event", "send"),
+                    received_at=message.get("received_at", 0.0),
+                )
+                for message in data.get("inbox", ())
+            ),
+            injections=tuple(
+                Injection(
+                    service_id=injection["service_id"],
+                    text=injection["text"],
+                    started_at=injection["started_at"],
+                    ended_at=injection["ended_at"],
+                    ok=injection.get("ok", True),
+                )
+                for injection in data.get("injections", ())
+            ),
+            delta=tuple(
+                DeltaEvent(section=event["section"], line=event["line"])
+                for event in data.get("delta", ())
+            ),
+            origin=data.get("origin", "normal"),
+            persona=data.get("persona"),
+            reply=data.get("reply"),
+            thinking=tuple(
+                ThinkingBlock.model_validate(block) for block in data.get("thinking", ())
+            ),
+            calls=tuple(ToolCall.model_validate(call) for call in data.get("calls", ())),
+            results=tuple(
+                ToolResult(
+                    call_id=result["call_id"],
+                    name=result["name"],
+                    output=result["output"],
+                    started_at=result["started_at"],
+                    ended_at=result["ended_at"],
+                )
+                for result in data.get("results", ())
+            ),
+            llm=(
+                LLMCall(
+                    model=llm["model"],
+                    started_at=llm["started_at"],
+                    ended_at=llm["ended_at"],
+                    usage=(
+                        Usage.model_validate(llm["usage"]) if llm.get("usage") is not None else None
+                    ),
+                    finish_reason=llm.get("finish_reason"),
+                    retries=llm.get("retries", 0),
+                )
+                if llm is not None
+                else None
+            ),
+            death=(
+                Death(reason=death["reason"], report=death.get("report"))
+                if death is not None
+                else None
+            ),
+            paused=data.get("paused", False),
+            rendered=(
+                tuple(Message.model_validate(message) for message in rendered)
+                if rendered is not None
+                else None
+            ),
+            started_at=data.get("started_at", 0.0),
+            ended_at=data.get("ended_at"),
+        )
+
+    def close_interrupted(self, *, ended_at: float | None = None) -> Turn:
+        """
+        End a turn whose verbs never all reported: every call
+        without a result gets an interrupted placeholder, then the
+        turn closes. Rendering pairs by call id, so the fill makes
+        the model see exactly what happened.
+        """
+        finished = {result.call_id for result in self.results}
+
+        now = time.time() if ended_at is None else ended_at
+
+        return replace(
+            self,
+            results=tuple(
+                [
+                    *self.results,
+                    *(
+                        ToolResult(
+                            call_id=call.id,
+                            name=call.name,
+                            output=INTERRUPTED,
+                            started_at=now,
+                            ended_at=now,
+                        )
+                        for call in self.calls
+                        if call.id not in finished
+                    ),
+                ]
+            ),
+            ended_at=now,
+        )
 
     def to_fresh_json(self) -> dict[str, Any]:
         """

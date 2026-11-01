@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .model import (
+    INTERRUPTED,
     Death,
     DeltaEvent,
     InboxKind,
@@ -18,6 +19,7 @@ from .render import freeze_turn, render_turn
 __all__ = [
     "Death",
     "DeltaEvent",
+    "INTERRUPTED",
     "Injection",
     "InboxKind",
     "InboxMessage",

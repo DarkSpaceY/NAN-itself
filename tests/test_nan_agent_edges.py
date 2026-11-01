@@ -1,6 +1,6 @@
 """Behavior increments over nan_core, as pytest edge cases:
-pause discards the interrupted turn, history clear-all, persona
-re-read per turn, max depth/children."""
+pause parks the resident turn, history clear-all, persona re-read
+per turn, max depth/children."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from typing import Any
 
 import pytest
 from nan_fakes import FakeLLM, SlowFakeLLM, await_until, make_agent
-
-from nan.turn import DeltaEvent
 
 pytestmark = pytest.mark.asyncio
 
@@ -28,9 +26,7 @@ class ExplodingLLM(FakeLLM):
         yield  # pragma: no cover
 
 
-async def test_pause_discards_turn_and_resume_opens_clean_turn(
-    tmp_path: Path, no_sink: None
-) -> None:
+async def test_pause_parks_turn_and_resume_continues_it(tmp_path: Path, no_sink: None) -> None:
     llm = SlowFakeLLM()
 
     llm.script("pause-me", [("text",)])
@@ -50,28 +46,25 @@ async def test_pause_discards_turn_and_resume_opens_clean_turn(
 
     root.pause()
 
-    # the interrupted turn is discarded whole: nothing rendered,
-    # nothing in history; its input rides back into the inbox
-    await await_until(lambda: root._inbox.qsize() == 1)
+    # the turn stays resident with its input; nothing is requeued
+    await await_until(lambda: root.last_turn is not None and root.last_turn.paused)
 
-    assert root._messages == []
+    assert root._inbox.qsize() == 0
 
-    assert root.last_turn is None
+    assert root.history == []
+    assert root.last_turn is not None and root.last_turn.reply is None
 
-    assert root._paused
-
-    # resume: a clean turn re-reads the re-queued input
+    # resume: the same turn re-runs its model call and commits
     llm.release_first.set()
 
     root.resume()
 
-    await await_until(lambda: root.cycles == 1)
+    await await_until(lambda: root.last_turn is not None and root.last_turn.ended_at is not None)
 
-    assert len(root._messages) == 2  # observation + assistant
-
-    assert "pause-me" in root._messages[0].content
-
-    assert not root._paused
+    assert len(root.turns) == 1
+    assert len(root.history) == 2  # observation + assistant
+    assert "pause-me" in root.history[0].content
+    assert not root.paused
 
     root.request_death("test cleanup")
 
@@ -98,7 +91,7 @@ async def test_pause_is_idempotent_and_resume_wakes_waiter(tmp_path: Path, no_si
 
     await asyncio.sleep(0.05)  # paused: the loop must not run a turn
 
-    assert root.cycles == 0 and root._messages == []
+    assert len(root.turns) == 0 and root.history == []
 
     llm.release_first.set()
 
@@ -106,7 +99,7 @@ async def test_pause_is_idempotent_and_resume_wakes_waiter(tmp_path: Path, no_si
 
     root.resume()  # idempotent
 
-    await await_until(lambda: root.cycles == 1)
+    await await_until(lambda: len(root.turns) == 1)
 
     root.request_death("test cleanup")
 
@@ -114,7 +107,7 @@ async def test_pause_is_idempotent_and_resume_wakes_waiter(tmp_path: Path, no_si
         await root._task
 
 
-async def test_history_over_limit_clears_all(tmp_path: Path, no_sink: None) -> None:
+async def test_history_over_limit_clears_at_the_next_epoch(tmp_path: Path, no_sink: None) -> None:
     llm = FakeLLM()
 
     root = make_agent(
@@ -126,19 +119,25 @@ async def test_history_over_limit_clears_all(tmp_path: Path, no_sink: None) -> N
     # turn 1: small, kept
     await root.receive_up("short", "user")
     await root.run_turn()
-    assert len(root._messages) == 2
 
-    # turn 2: blows the limit -> wholesale clear (a reset, not a rewrite)
+    assert len(root.history) == 2
+
+    # turn 2: blows the limit, but the epoch is only cut when the
+    # next turn opens
     await root.receive_up("X" * 5000, "user")
     await root.run_turn()
-    assert root._messages == []
 
-    # turn 3: history starts from scratch
+    assert len(root.history) == 4
+
+    # turn 3: opens a new epoch; turns before it are dropped
     await root.receive_up("after clear", "user")
-    await root.run_turn()
-    assert len(root._messages) == 2
-    assert "after clear" in root._messages[0].content
-    assert "short" not in root._messages[0].content
+    turn = await root.run_turn()
+
+    assert turn.origin == "context_cleared"
+    assert len(root.turns) == 1
+    assert len(root.history) == 2
+    assert "after clear" in root.history[0].content
+    assert "short" not in root.history[0].content
 
 
 async def test_persona_change_applies_from_that_turn(tmp_path: Path, no_sink: None) -> None:
@@ -203,35 +202,25 @@ async def test_max_depth_and_children_enforced(tmp_path: Path, no_sink: None) ->
     assert "Max children" in err
 
 
-async def test_failed_turn_requeues_inputs_and_restores_cleared(
-    tmp_path: Path, no_sink: None
-) -> None:
+async def test_failed_turn_parks_the_root(tmp_path: Path, no_sink: None) -> None:
     """
-    A pipeline failure (not a cancel) must roll back exactly like
-    a cancelled turn: inputs back in the inbox, deltas restored,
-    and the consumed context-cleared flag put back.
+    A fatal failure parks the turn instead of discarding it: the
+    turn keeps its inputs and facts, the agent keeps the turn
+    resident, and the root waits for a resume rather than dying.
     """
     root = make_agent(tmp_path=tmp_path, llm=ExplodingLLM())
 
-    root._cleared = True
-    root._delta_events.append(DeltaEvent(section="subagent", line="+abc spawned"))
-
     await root.receive_up("lost input", "user")
 
-    with pytest.raises(RuntimeError, match="model exploded"):
-        await root.run_turn()
+    turn = await root.run_turn()
 
-    assert root._inbox.qsize() == 1
-
-    message = root._inbox.get_nowait()
-
-    assert message.text == "lost input"
-
-    assert [d.line for d in root._delta_events] == ["+abc spawned"]
-
-    assert root._cleared is True
-    assert root._messages == []
-    assert root.last_turn is None
+    assert turn.paused
+    assert turn.ended_at is None
+    assert turn.reply is None
+    assert len(root.turns) == 1
+    assert root.history == []
+    assert root.paused
+    assert root.last_turn is not None and root.last_turn.paused
 
 
 async def test_child_slot_released_after_death(tmp_path: Path, no_sink: None) -> None:
@@ -305,7 +294,7 @@ async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sin
     await root.receive_up("react-probe", "user")
 
     # no second input: the tool result itself drives turn 2
-    await await_until(lambda: root.cycles == 2)
+    await await_until(lambda: len(root.turns) == 2)
 
     assert len(llm.requests) == 2
 

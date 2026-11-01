@@ -66,8 +66,8 @@ export interface Round {
   appliedSeq: number;
   closed: boolean;
   /** The backend's disposition of the whole round; null means truncated outright by agent_exited. */
-  outcome: "done" | "failed" | "cancelled" | null;
-  /** Failure reason or requeued input count; shown in the collapsed line. */
+  outcome: "done" | "failed" | "interrupted" | null;
+  /** Failure or interruption reason; shown in the collapsed line. */
   detail: string | null;
   parts: Part[];
 }

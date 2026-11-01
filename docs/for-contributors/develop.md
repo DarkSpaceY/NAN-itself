@@ -10,11 +10,11 @@
 
     uv run pytest tests/ -q
 
-The suite (83 tests) covers the agent loop (pause/resume, death
-cascade, persona re-read, depth/children limits), injection
-hub/client, sandbox behavior, gateway entry guard and config
-loading. Shared fakes (scripted LLM, slow LLM) live in
-`tests/nan_fakes.py`.
+The suite (133 tests) covers the agent loop (pause/resume, death
+cascade, persona re-read, depth/children limits), retry/exhaustion
+and restore from snapshots, injection hub/client, sandbox behavior,
+gateway entry guard and config loading. Shared fakes (scripted LLM,
+slow LLM) live in `tests/nan_fakes.py`.
 
 ## Service tests
 

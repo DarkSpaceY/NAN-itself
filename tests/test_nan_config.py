@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from nan.config import Settings, settings
+from nan.config.models import Paths
 from nan.llm.provider import _proxy_kwargs
 
 YAML = """
@@ -84,6 +85,9 @@ def test_paths_are_not_configuration() -> None:
     """
     cfg = _settings(
         """
+paths:
+  workspace: /tmp/elsewhere
+  snapshots: /tmp/snapshots
 workspace: elsewhere
 builtin_dir: elsewhere
 agent:
@@ -100,6 +104,17 @@ autostart:
     assert not hasattr(cfg.agent, "persona_path")
     assert not hasattr(cfg.gateway, "frontend_dir")
     assert not hasattr(cfg.autostart, "path")
+    assert cfg.paths.workspace == Paths().workspace
+    assert cfg.paths.snapshots == Paths().snapshots
+
+
+def test_snapshots_live_outside_the_agent_workspace() -> None:
+    """A shell command can write only under the workspace; recovery
+    state must survive one."""
+    paths = Paths()
+
+    assert paths.snapshots.name == "snapshots"
+    assert paths.workspace not in paths.snapshots.parents
 
 
 def test_live_config_and_committed_template_agree() -> None:
