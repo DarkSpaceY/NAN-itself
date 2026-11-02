@@ -89,7 +89,7 @@ module-name = "nan"
 module-root = ""
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "tests"]
 testpaths = ["tests"]
 
 [tool.mypy]

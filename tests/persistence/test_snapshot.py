@@ -67,24 +67,6 @@ def _turn(
     )
 
 
-def test_turn_round_trips_through_json() -> None:
-    turn = _turn(death=Death(reason="finished", report="done"))
-
-    assert Turn.from_json(turn.to_json()) == turn
-
-
-def test_turn_from_minimal_json_uses_defaults() -> None:
-    turn = Turn.from_json({"agent_id": "a1", "parent_id": None, "depth": 0})
-
-    assert turn.agent_id == "a1"
-    assert turn.origin == "normal"
-    assert turn.epoch == 0
-    assert turn.phase == "observed"
-    assert turn.inbox == ()
-    assert turn.reply is None
-    assert turn.rendered is None
-
-
 def test_snapshot_carries_its_own_identity() -> None:
     snapshot = AgentSnapshot(
         agent_id="a2",

@@ -102,7 +102,7 @@ conversations across turns.
     config/       nan.yaml, the configuration file
     frontend/     the desktop UI, built to frontend/dist
     scripts/      install.sh
-    tests/        the core pytest suite
+    tests/        the core pytest suite, one directory per feature
     docs/         this documentation
     dist/         build output (`uv build`)
 

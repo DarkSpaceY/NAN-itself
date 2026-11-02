@@ -10,11 +10,26 @@
 
     uv run pytest tests/ -q
 
-The suite (133 tests) covers the agent loop (pause/resume, death
-cascade, persona re-read, depth/children limits), retry/exhaustion
-and restore from snapshots, injection hub/client, sandbox behavior,
-gateway entry guard and config loading. Shared fakes (scripted LLM,
-slow LLM) live in `tests/nan_fakes.py`.
+The suite (214 tests) is organized one directory per core feature:
+
+    tests/agent/        the loop (control fold, pause/resume, epochs,
+                        persona, pacing, failed-turn terminal), the spawn
+                        tree, failure classification, and each verb
+    tests/turn/         the Turn record (JSON, fresh shape) and rendering
+    tests/persistence/  snapshots and in-flight recovery
+    tests/boot/         restore of the whole tree
+    tests/execution/    the command sandbox
+    tests/injection/    hub registry, guard and the two delivery modes
+    tests/llm/          provider mapping (reasoning replay)
+    tests/gateway/      entry guard, WS protocol, surfaces
+    tests/events/       the sink ring and stream coalescing
+    tests/config/       settings, paths and the YAML template
+    tests/utils/        loopback policy and autostart
+    tests/app/          Core lifecycle and gateway callbacks
+    tests/smoke/        end-to-end agent-tree scenarios
+
+Shared fakes (scripted LLM, slow LLM) live in `tests/nan_fakes.py`;
+`pythonpath` includes `tests/` so every subdirectory can import it.
 
 ## Service tests
 
