@@ -21,13 +21,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nan.agent import Agent
 from nan.events import sink
-
-from .snapshot import AgentSnapshot, InFlight, SnapshotStore
+from nan.persistence import AgentSnapshot, InFlight, SnapshotStore
 
 if TYPE_CHECKING:
-    from nan.agent.core import Agent
-    from nan.agent.sandbox import Sandbox
+    from nan.execution import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
 
@@ -96,10 +95,6 @@ async def restore(
         logger.warning("[{}] snapshot has no live parent; discarded", agent_id)
 
         snapshots.remove(agent_id)
-
-    # Local import: nan.agent imports nan.recovery, so the cycle
-    # must close after this module is fully loaded.
-    from nan.agent.core import Agent
 
     agents: dict[str, Agent] = {}
 

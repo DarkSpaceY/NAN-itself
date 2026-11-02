@@ -22,8 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -35,16 +34,7 @@ from nan.turn import DeltaEvent, Injection, Turn
 from nan.utils.loopback import entry_allowed, is_loopback_url
 
 from .client import InjectionClient
-
-ServiceMode = Literal["inject", "archive"]
-
-
-@dataclass
-class ServiceEntry:
-    service_id: str
-    endpoint: str
-    mode: ServiceMode
-    last_seen: float
+from .types import ServiceEntry, ServiceMode
 
 
 class InjectionHub:

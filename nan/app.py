@@ -22,13 +22,14 @@ from enum import Enum
 from loguru import logger
 
 from nan.agent import Agent
-from nan.agent.sandbox import Sandbox
+from nan.boot import restore
 from nan.config import settings
 from nan.events import sink
+from nan.execution import Sandbox
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
-from nan.recovery import SnapshotStore, restore
+from nan.persistence import SnapshotStore
 from nan.turn import InboxMessage
 from nan.utils.autostart import Autostart
 

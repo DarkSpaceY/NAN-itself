@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .client import InjectionClient
-from .hub import InjectionHub, ServiceEntry
+from .hub import InjectionHub
+from .types import ServiceEntry
 
 __all__ = ["InjectionClient", "InjectionHub", "ServiceEntry"]

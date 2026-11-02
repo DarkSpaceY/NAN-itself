@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nan.llm import Message, ThinkingBlock, ToolCall, Usage
-from nan.recovery import AgentSnapshot, InFlight, SnapshotStore
+from nan.persistence import AgentSnapshot, InFlight, SnapshotStore
 from nan.turn import (
     Death,
     DeltaEvent,

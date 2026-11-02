@@ -53,17 +53,12 @@ from loguru import logger
 
 from nan.agent.control import Action, Status, transition
 from nan.agent.engine import TurnEngine
+from nan.agent.failure import FailureKind, Unrecoverable, classify
 from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS, tool_definitions
 from nan.config import settings
 from nan.events import sink
-from nan.llm import Message
-from nan.recovery import (
-    AgentSnapshot,
-    FailureKind,
-    SnapshotStore,
-    Unrecoverable,
-    classify,
-)
+from nan.llm.types import Message
+from nan.persistence import AgentSnapshot, SnapshotStore
 from nan.turn import (
     Death,
     DeltaEvent,
@@ -74,7 +69,7 @@ from nan.turn import (
 )
 
 if TYPE_CHECKING:
-    from nan.agent.sandbox import Sandbox
+    from nan.execution import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
 

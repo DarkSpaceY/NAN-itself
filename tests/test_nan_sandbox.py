@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from nan.agent.sandbox import Sandbox, SandboxUnavailableError, _seatbelt_profile
 from nan.config import settings
 from nan.config.models import DenyRule
+from nan.execution.sandbox import Sandbox, SandboxUnavailableError, _seatbelt_profile
 
 FAKE_SANDBOX_EXEC = """#!/bin/bash
 # fake sandbox-exec: accept an inline profile (-p), then run the command

@@ -12,11 +12,12 @@ from typing import Any
 import pytest
 from nan_fakes import FakeLLM, await_until
 
-from nan.agent.sandbox import Sandbox
+from nan.boot import restore
 from nan.events import sink
+from nan.execution import Sandbox
 from nan.injection import InjectionHub
 from nan.llm import ToolCall
-from nan.recovery import AgentSnapshot, SnapshotStore, restore
+from nan.persistence import AgentSnapshot, SnapshotStore
 from nan.turn import INTERRUPTED, Death, InboxMessage, Turn, freeze_turn
 
 pytestmark = pytest.mark.asyncio

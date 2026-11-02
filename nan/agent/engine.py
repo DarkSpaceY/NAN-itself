@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from nan.events import sink
-from nan.llm import (
+from nan.llm.types import (
     FinishReason,
     LLMRequest,
     LLMResponse,

@@ -12,11 +12,11 @@ from typing import Any
 import pytest
 
 from nan.agent import Agent
-from nan.agent.sandbox import Sandbox
 from nan.config import settings
+from nan.execution import Sandbox
 from nan.injection import InjectionHub
 from nan.llm import ThinkingBlock, ToolCall, Usage
-from nan.recovery import SnapshotStore
+from nan.persistence import SnapshotStore
 
 
 @dataclass

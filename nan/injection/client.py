@@ -13,16 +13,13 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 import httpx
 from loguru import logger
 
 from nan.config import settings
+from nan.injection.types import ServiceEntry
 from nan.turn import Injection, Turn
-
-if TYPE_CHECKING:
-    from nan.injection.hub import ServiceEntry
 
 
 class InjectionClient:

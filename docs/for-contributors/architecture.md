@@ -10,27 +10,29 @@ follows the actual layout.
 
     nan/
     ├── app.py            composition root, process lifecycle
+    ├── boot.py           boot restore (rebuild the tree)
     ├── events.py         process-wide event sink (singleton)
     ├── gateway.py        web UI: HTTP + WebSocket
     ├── agent/
     │   ├── core.py       the Agent loop, persistence, exits
     │   ├── control.py    Status -> Action (the loop's fold)
     │   ├── engine.py     the turn engine (one model call)
-    │   ├── sandbox.py    OS-level execution sandbox
+    │   ├── failure.py    one failure classification
     │   └── verbs/        spawn / sleep / shell / send / kill / finish
     ├── turn/
     │   ├── model.py      the Turn record
     │   └── render.py     deterministic prompt rendering
-    ├── recovery/
-    │   ├── failure.py    one failure classification
-    │   ├── snapshot.py   per-agent snapshots
-    │   └── restore.py    boot restore
+    ├── persistence/
+    │   └── snapshot.py   per-agent snapshots
+    ├── execution/
+    │   └── sandbox.py    OS-level execution sandbox
     ├── llm/
     │   ├── provider.py   the model API transport
     │   └── types.py      protocol vocabulary (DTOs)
     ├── injection/
     │   ├── hub.py        registry + per-turn collection
-    │   └── client.py     the concurrent collector
+    │   ├── client.py     the concurrent collector
+    │   └── types.py      protocol shapes (ServiceEntry)
     ├── utils/
     │   ├── loopback.py   entry guard primitives
     │   └── autostart.py  boot scripts and process groups
@@ -43,10 +45,31 @@ Two boundary facts are settled here rather than per module:
   `LLMResponse`, ...); the runtime stores and renders only these, and
   `provider.py` translates SDK objects into them, so no other module
   ever names an OpenAI or Anthropic type. The module imports nothing
-  from `nan`, so importing it cannot create a cycle.
+  from `nan`, so importing it cannot create a cycle; it is imported as
+  `nan.llm.types`, because the `nan.llm` package pulls the provider
+  (only `app` wants that).
 - **One wiring point.** `app.py` constructs the single `LLMProvider`;
   each `Agent` builds its own `TurnEngine` from it, so the agent runtime
   never depends on which provider is in use.
+
+## Layers
+
+The model is a layered core with adapters at the edge. Import arrows
+point down only:
+
+| # | Layer | Modules | May import |
+| --- | --- | --- | --- |
+| 6 | composition root | `app` | 0-5 |
+| 5 | boot | `boot` | 0-4 |
+| 4 | transports | `llm/provider`, `gateway` | 0-1 |
+| 3 | runtime | `agent` (core / control / engine / failure / verbs) | 0-2, plus `LLMProvider` as a type only |
+| 2 | called adapters | `persistence`, `execution`, `injection` | 0-1 |
+| 1 | records | `turn` | 0 |
+| 0 | vocabulary and infrastructure | `config`, `events`, `llm/types`, `utils` | nothing above |
+
+An import that points up, or that lets a transport reach into the
+runtime, is a bug. `settings` and `sink` are ambient: any layer may
+read them, no layer writes them.
 
 ## One fact, one owner
 
@@ -335,7 +358,7 @@ never interrupts a turn.
 ## Snapshot and restore
 
 One JSON file per agent, named by `agent_id`
-(`recovery/snapshot.py`):
+(`persistence/snapshot.py`):
 
 ```json
 {
@@ -357,7 +380,7 @@ One JSON file per agent, named by `agent_id`
 - Death removes the file (`_dispose`); shutdown rewrites it
   (`_suspend`).
 
-Boot (`recovery/restore.py`), after the sink was reset for this boot:
+Boot (`boot.py`), after the sink was reset for this boot:
 
 ```mermaid
 flowchart TD
@@ -383,7 +406,7 @@ of snapshots reachable from the root.
 
 ## Failure vocabulary
 
-`classify` (`recovery/failure.py`) answers one question -- may this
+`classify` (`agent/failure.py`) answers one question -- may this
 step run again? -- with three answers: `cancelled` (the control path
 owns it), `retryable` (429, 5xx, transport timeouts, broken streams),
 `fatal` (no retry can repair it). It is the only place a failure is

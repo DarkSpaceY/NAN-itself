@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
-    from nan.llm import ToolDefinition
+    from nan.llm.types import ToolDefinition
 
 
 @dataclass(frozen=True)

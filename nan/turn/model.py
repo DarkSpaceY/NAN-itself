@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from nan.llm import Message, ThinkingBlock, ToolCall, Usage
+from nan.llm.types import Message, ThinkingBlock, ToolCall, Usage
 
 InboxKind = Literal["user", "parentagent", "subagent"]
 

@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from nan_fakes import FakeLLM, SlowFakeLLM, await_until, make_agent
 
-from nan.recovery import SnapshotStore
+from nan.persistence import SnapshotStore
 from nan.turn import InboxMessage
 
 pytestmark = pytest.mark.asyncio

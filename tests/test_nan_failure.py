@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from nan.recovery import FailureKind, Unrecoverable, classify
+from nan.agent.failure import FailureKind, Unrecoverable, classify
 
 
 class _Status(Exception):

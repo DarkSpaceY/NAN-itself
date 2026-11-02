@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
-from nan.llm import ToolDefinition
+from nan.llm.types import ToolDefinition
 from nan.turn import InboxMessage
 
 if TYPE_CHECKING:

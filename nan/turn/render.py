@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from nan.llm import Message
+from nan.llm.types import Message
 from nan.turn.model import INTERRUPTED, Turn
 
 

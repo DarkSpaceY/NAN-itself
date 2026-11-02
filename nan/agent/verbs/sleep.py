@@ -4,7 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
-from nan.llm import ToolDefinition
+from nan.llm.types import ToolDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
