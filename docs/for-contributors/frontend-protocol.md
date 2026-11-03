@@ -201,7 +201,7 @@ reads).
 
 | verb | `arguments` | `detail` | renders as |
 |---|---|---|---|
-| `shell` | `{command}` | `{exit_code, timed_out}`; on a deny-list hit `{refused, reason}`, on a timeout only `{timed_out: true}` | terminal block |
+| `shell` | `{command, cwd?, env?, stdin?, background?}` | `{exit_code, timed_out}`; a background job `{job_id, pid, pgid}`; on a deny-list hit `{refused, reason}`, on a timeout only `{timed_out: true}` | terminal block |
 | `spawn` | `{task}` | `{child_id, depth}` | child-agent card linked to `child_id` |
 | `send` | `{direction, child_id?, text}` | `{direction, to?}` -- `to` only for `down` | message bubble, up/down |
 | `kill` | `{child_id}` | `{target_id}` | destructive action marker |

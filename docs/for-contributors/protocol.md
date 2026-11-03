@@ -328,7 +328,7 @@ a JSON Schema with `additionalProperties: false`.
 |------|-----------|--------------|--------|
 | `spawn` | `task` | root, child | create a child; its id returns in the result |
 | `send` | `direction` (`up` \| `down`), `child_id` (down only), `text` | root, child | deliver text to the parent or to a spawned child |
-| `shell` | `command` | root, child | run bash in the workspace with a fixed timeout |
+| `shell` | `command`, `cwd`?, `env`?, `stdin`?, `background`? | root, child | run bash in the workspace; the timeout is fixed by the user, and `background` starts a job whose log later calls poll |
 | `sleep` | `seconds` | root, child | wait before the next step |
 | `kill` | `child_id` | root, child | kill a child; its subtree dies with it |
 | `finish` | `report` | child only | submit the report upstream and die |

@@ -57,6 +57,7 @@ from nan.agent.failure import FailureKind, Unrecoverable, classify
 from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS, verb_definitions
 from nan.config import Settings
 from nan.events import sink
+from nan.execution import JobRegistry
 from nan.llm.types import Message, VerbCall
 from nan.persistence import AgentSnapshot, SnapshotStore
 from nan.turn import (
@@ -93,6 +94,9 @@ class Agent:
         self.injections = injections
         self.parent = parent  # upstream channel for send
         self.sandbox = sandbox  # execution-level sandbox for the shell verb
+        # Background shell jobs: they outlive their turn, so they belong
+        # to the agent and die with it (death or shutdown).
+        self.jobs = JobRegistry()
         self._snapshots = snapshots or SnapshotStore(settings.paths.snapshots)
 
         # --- identity: root or child is ONE fact, `parent` ---
@@ -994,6 +998,10 @@ class Agent:
         # the subtree dies with me.
         await self._cancel_turn_task()
 
+        # Background jobs belong to the agent: their process groups
+        # die with it too.
+        await self.jobs.stop_all()
+
         await self._stop_children(
             lambda child: child.request_death(f"killed by holder {self.agent_id}")
         )
@@ -1031,6 +1039,10 @@ class Agent:
     async def _suspend(self) -> None:
         """Process shutdown: persist the subtree and end quietly."""
         await self._cancel_turn_task()
+
+        # A background job does not survive a shutdown: it is not
+        # part of the snapshot, so nothing could reattach it.
+        await self.jobs.stop_all()
 
         await self._stop_children(lambda child: child.suspend())
 
