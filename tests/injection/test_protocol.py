@@ -23,11 +23,19 @@ from nan.turn import Death, Turn, freeze_turn
 pytestmark = pytest.mark.asyncio
 
 
-def fake_service(service_id: str, endpoint: str, mode: str = "inject") -> Any:
+def fake_service(
+    service_id: str, endpoint: str, mode: str = "inject", timeout: float | None = None
+) -> Any:
     return type(
         "E",
         (),
-        {"service_id": service_id, "endpoint": endpoint, "mode": mode, "last_seen": 9e15},
+        {
+            "service_id": service_id,
+            "endpoint": endpoint,
+            "mode": mode,
+            "last_seen": 9e15,
+            "timeout": timeout,
+        },
     )()
 
 
@@ -294,3 +302,61 @@ async def test_reply_protocol_is_single_shape() -> None:
     assert len(contributions) == 1
     assert contributions[0].ok is False
     assert '{"text": <str>}' in contributions[0].text
+
+
+async def _serve_app(app: FastAPI) -> tuple[uvicorn.Server, asyncio.Task[None], int]:
+    config = uvicorn.Config(app, host="127.0.0.1", port=await _free_port(), log_level="critical")
+
+    server = uvicorn.Server(config)
+
+    task = asyncio.create_task(server.serve())
+
+    for _ in range(100):
+        if server.started:
+            break
+
+        await asyncio.sleep(0.05)
+
+    assert server.started
+
+    return server, task, int(config.port or 0)
+
+
+async def test_a_declared_budget_overrides_the_global_read_timeout(no_sink: None) -> None:
+    """A service that needs longer says so at registration; the
+    global timeout still bounds the rest."""
+    app = FastAPI()
+
+    @app.post("/inject")
+    async def inject() -> dict[str, str]:
+        await asyncio.sleep(0.5)
+
+        return {"text": "SLOW"}
+
+    server, task, port = await _serve_app(app)
+
+    cfg = Settings()
+    cfg.injection.timeout = 0.2
+
+    client = InjectionClient(cfg)
+
+    turn = Turn(agent_id="a1", parent_id=None, depth=0)
+
+    endpoint = f"http://127.0.0.1:{port}/inject"
+
+    try:
+        short = await client.inject(turn, [fake_service("slow", endpoint)])
+        generous = await client.inject(turn, [fake_service("slow", endpoint, timeout=1.5)])
+
+    finally:
+        await client.close()
+
+        await _stop(server, task)
+
+    assert len(short) == 1
+    assert short[0].ok is False
+    assert short[0].text.startswith("ReadTimeout")
+
+    assert len(generous) == 1
+    assert generous[0].ok is True
+    assert generous[0].text == "SLOW"

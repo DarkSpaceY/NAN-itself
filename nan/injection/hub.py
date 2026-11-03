@@ -118,11 +118,17 @@ class InjectionHub:
 
             mode: ServiceMode = "archive" if mode_raw == "archive" else "inject"
 
+            timeout, error = _declared_timeout(body.get("timeout"), mode)
+
+            if error is not None:
+                return {"status": "rejected", "reason": error}
+
             self._services[service_id] = ServiceEntry(
                 service_id=service_id,
                 endpoint=endpoint,
                 mode=mode,
                 last_seen=time.time(),
+                timeout=timeout,
             )
 
             logger.info("{} service registered: {} -> {}", mode, service_id, endpoint)
@@ -161,6 +167,7 @@ class InjectionHub:
                         "endpoint": e.endpoint,
                         "mode": e.mode,
                         "last_seen": e.last_seen,
+                        "timeout": e.timeout,
                     }
                     for e in self._services.values()
                 ]
@@ -293,3 +300,29 @@ class InjectionHub:
         events += [DeltaEvent("service", f"-{s} offline") for s in sorted(offline)]
 
         return events
+
+
+_TIMEOUT_MIN = 0.1
+_TIMEOUT_MAX = 600.0
+
+
+def _declared_timeout(raw: Any, mode: ServiceMode) -> tuple[float | None, str | None]:
+    """
+    The read budget a service declared, or the reason it cannot
+    have one. Omitted means the global ``injection.timeout``.
+    """
+    if raw is None:
+        return None, None
+
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None, "timeout must be a number between 0.1 and 600"
+
+    budget = float(raw)
+
+    if not _TIMEOUT_MIN <= budget <= _TIMEOUT_MAX:
+        return None, "timeout must be a number between 0.1 and 600"
+
+    if mode == "archive":
+        return None, "timeout applies to inject services"
+
+    return budget, None

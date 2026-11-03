@@ -125,3 +125,90 @@ async def test_default_mode_is_inject(no_sink: Any) -> None:
         assert hub._services["plain"].mode == "inject"
     finally:
         await hub.stop()
+
+
+async def test_an_inject_service_declares_its_read_budget(no_sink: Any) -> None:
+    port = _free_port()
+
+    cfg = Settings()
+    cfg.injection.port = port
+
+    hub = InjectionHub(cfg)
+
+    await hub.start()
+
+    try:
+        await _wait_port(port)
+
+        base = f"http://127.0.0.1:{port}"
+
+        async with httpx.AsyncClient(trust_env=False) as client:
+            registered = await client.post(
+                f"{base}/register",
+                json={"service_id": "summary", "endpoint": f"{base}/turn", "timeout": 15},
+            )
+
+            assert registered.json() == {"status": "registered"}
+
+            listed = (await client.get(f"{base}/services")).json()["services"]
+
+            assert [(s["service_id"], s["timeout"]) for s in listed] == [("summary", 15.0)]
+
+            # Re-registering without the field returns it to the
+            # global default.
+            await client.post(
+                f"{base}/register",
+                json={"service_id": "summary", "endpoint": f"{base}/turn"},
+            )
+
+        assert hub._services["summary"].timeout is None
+    finally:
+        await hub.stop()
+
+
+async def test_timeout_is_validated(no_sink: Any) -> None:
+    port = _free_port()
+
+    cfg = Settings()
+    cfg.injection.port = port
+
+    hub = InjectionHub(cfg)
+
+    await hub.start()
+
+    try:
+        await _wait_port(port)
+
+        base = f"http://127.0.0.1:{port}"
+
+        async with httpx.AsyncClient(trust_env=False) as client:
+            for bad in (0, 0.05, 601, "15", True, [15]):
+                rejected = await client.post(
+                    f"{base}/register",
+                    json={"service_id": "x", "endpoint": f"{base}/turn", "timeout": bad},
+                )
+
+                assert rejected.json() == {
+                    "status": "rejected",
+                    "reason": "timeout must be a number between 0.1 and 600",
+                }
+
+            # Only inject services take a read budget.
+            archived = await client.post(
+                f"{base}/register",
+                json={
+                    "service_id": "x",
+                    "endpoint": f"{base}/turn",
+                    "mode": "archive",
+                    "timeout": 5,
+                },
+            )
+
+            assert archived.json() == {
+                "status": "rejected",
+                "reason": "timeout applies to inject services",
+            }
+
+        assert hub._services == {}
+    finally:
+        await hub.stop()

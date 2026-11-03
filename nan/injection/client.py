@@ -31,10 +31,17 @@ class InjectionClient:
     JSON object ``{"text": "<prompt text>"}`` (empty text = no
     contribution). Anything else -- non-JSON, wrong shape, non-2xx
     -- is a failed delivery, recorded as ok=False.
+
+    The read budget is ``injection.timeout`` unless the service
+    declared its own ``timeout`` at registration; the connect
+    budget always stays the global one.
     """
 
     def __init__(self, settings: Settings) -> None:
-        self._client = httpx.AsyncClient(timeout=settings.injection.timeout, trust_env=False)
+        # The global budget is the default and the connect budget; a
+        # service may declare a longer read budget below.
+        self._timeout = settings.injection.timeout
+        self._client = httpx.AsyncClient(timeout=self._timeout, trust_env=False)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -57,8 +64,14 @@ class InjectionClient:
         async def ask(entry: ServiceEntry) -> Injection:
             started = time.time()
 
+            budget = entry.timeout if entry.timeout is not None else self._timeout
+
             try:
-                response = await self._client.post(entry.endpoint, json=payload)
+                response = await self._client.post(
+                    entry.endpoint,
+                    json=payload,
+                    timeout=httpx.Timeout(budget, connect=self._timeout),
+                )
 
                 response.raise_for_status()
 

@@ -12,7 +12,7 @@ sequenceDiagram
     participant H as Injection hub
     participant A as Agent turn
 
-    S->>H: POST /register {service_id, endpoint, mode}
+    S->>H: POST /register {service_id, endpoint, mode, timeout?}
     H-->>S: {"status": "registered"}
 
     loop every few seconds (well under heartbeat_ttl)
@@ -58,6 +58,17 @@ sequenceDiagram
      for services whose work is recording, such as `record`.
      A process may hold both modes as two `service_id`s.
 
+   An `inject` service may also declare `timeout` -- its read budget
+   for one delivery, in seconds: a number between `0.1` and `600`,
+   defaulting to `injection.timeout` (2 s). The connect budget stays at
+   the global default. Declare it when a contribution is sometimes
+   slow, for example a summary that has to be generated: answer
+   instantly with empty `text` on ordinary turns and use the full
+   budget only on the turn whose `origin` is `context_cleared`. The
+   turn waits for the slowest live inject service, so the declared
+   value is a ceiling on that turn's delay, not a grace you get for
+   free. `archive` services may not declare a timeout.
+
 2. **Heartbeat** -- POST periodically (keep the interval well
    under `injection.heartbeat_ttl`, default 15 s):
 
@@ -84,8 +95,9 @@ sequenceDiagram
    stops routing turns to you after the TTL.
 
 Introspection: `GET /services` returns
-`{"services": [{"service_id", "endpoint", "mode", "last_seen"}]}` for
-all registered entries; it is not filtered by the TTL.
+`{"services": [{"service_id", "endpoint", "mode", "last_seen", "timeout"}]}`
+for all registered entries; it is not filtered by the TTL. `timeout`
+is the declared read budget, or `null` for the global default.
 
 ## Optional: your own panel
 

@@ -14,3 +14,6 @@ class ServiceEntry:
     endpoint: str
     mode: ServiceMode
     last_seen: float
+    # Read budget for one delivery, in seconds. None means the
+    # global injection.timeout; only inject services may declare it.
+    timeout: float | None = None

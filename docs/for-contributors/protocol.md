@@ -108,7 +108,7 @@ Services register with the injection hub. Registration is plain HTTP
 on the hub's own port (`injection.port`, default `8901`).
 
 ```
-POST /register     {service_id, endpoint, mode?}
+POST /register     {service_id, endpoint, mode?, timeout?}
 POST /heartbeat    {service_id}
 POST /unregister   {service_id}
 GET  /services
@@ -124,6 +124,7 @@ is `403`.
 | `service_id` | required, non-empty |
 | `endpoint` | required, absolute `http(s)` loopback URL |
 | `mode` | optional, `inject` (default) or `archive` |
+| `timeout` | optional, number in `0.1`–`600` (seconds), `inject` only; read budget for one delivery, default `injection.timeout` |
 
 | Outcome | Body |
 |---------|------|
@@ -131,9 +132,12 @@ is `403`.
 | missing id or endpoint | `{"status": "rejected", "reason": "service_id and endpoint required"}` |
 | unknown mode | `{"status": "rejected", "reason": "mode must be inject or archive"}` |
 | non-loopback endpoint | `{"status": "rejected", "reason": "endpoint must be loopback"}` |
+| malformed `timeout` | `{"status": "rejected", "reason": "timeout must be a number between 0.1 and 600"}` |
+| `timeout` on an archive service | `{"status": "rejected", "reason": "timeout applies to inject services"}` |
 
-Re-registering an existing id replaces its endpoint, mode, and
-freshness in one step.
+Re-registering an existing id replaces its endpoint, mode, timeout,
+and freshness in one step; omitting `timeout` returns the entry to the
+global default.
 
 `POST /heartbeat` refreshes the entry and returns `{"status": "ok"}`,
 or `{"status": "unknown"}` when the id is not registered (it does not
@@ -145,7 +149,7 @@ idempotent, and always returns `{"status": "ok"}`.
 ```json
 { "services": [
   { "service_id": "record", "endpoint": "http://127.0.0.1:9002/turn",
-    "mode": "archive", "last_seen": 1761192000.123 } ] }
+    "mode": "archive", "last_seen": 1761192000.123, "timeout": null } ] }
 ```
 
 Freshness is not applied on read: an entry stays listed until a
@@ -174,7 +178,11 @@ Rules:
 
 - Every live service of the matching mode is called concurrently. One
   slow service does not serialize the rest; the turn waits for all.
-- Both modes share `injection.timeout` (default `2` seconds).
+- Both modes default to `injection.timeout` (default `2` seconds).
+  An `inject` service may declare a longer read budget at registration
+  (`timeout`, at most `600`); the connect budget stays the global one.
+  The turn waits for the slowest live inject service, so a declared
+  budget delays that turn -- not other services, which run concurrently.
 - An `inject` reply must be a `2xx` JSON object whose `text` is a
   string. Anything else is a failed delivery recorded as
   `injections[].ok == false`, with `text` set to the exception. A
