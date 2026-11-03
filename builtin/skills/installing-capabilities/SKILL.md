@@ -11,10 +11,10 @@ description: >-
 
 # Installing a Capability
 
-Your shell is unrestricted in what it can run, but the sandbox limits
-where you can write: **workspace and temp only** (reads and network
-are open). Everything you install must respect that, or go through
-the user.
+Your shell may run arbitrary commands, but a small deny list refuses
+destructive or system-level ones, and the sandbox limits where you can
+write: **workspace and temp only** (reads and network are open).
+Everything you install must respect that, or go through the user.
 
 ## 1. Search before building
 
@@ -67,10 +67,9 @@ Run the tool on a real task, not `--help`. Confirm output, exit
 codes, and that it works under the sandbox (no hidden writes outside
 workspace/temp — those will fail at the worst time).
 
-Then record the capability in your notes file (you keep one —
-location is yours to choose): name, what it's for, where it lives,
-invocation examples, gotchas discovered. An installed tool you
-forget about is dead weight.
+Then record the capability in your notes (a file in your workspace):
+name, what it's for, where it lives, invocation examples, gotchas
+discovered. An installed tool you forget about is dead weight.
 
 ## Before finishing
 

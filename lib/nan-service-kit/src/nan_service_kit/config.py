@@ -59,6 +59,9 @@ class ServiceConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int
     mode: Mode = "inject"
+    # The read budget for one inject delivery, in seconds. None
+    # keeps the hub's global default; archive may not declare it.
+    timeout: float | None = Field(default=None, ge=0.1, le=600)
     hub_url: str = Field(default_factory=_hub_url)
     gateway_url: str = f"http://127.0.0.1:{GATEWAY_PORT}"
     surface: Surface | None = None

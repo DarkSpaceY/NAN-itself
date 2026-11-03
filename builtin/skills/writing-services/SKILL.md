@@ -39,9 +39,9 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 
 - `read_config(YourConfig, HERE / "config.yaml")` — subclass
   `ServiceConfig` for your keys. The kit fills `service_id` (the
-  directory name), `hub_url` (from `NAN_INJECTION_PORT`), `gateway_url`
-  and `mode`, and binds `config.home` / `config.logs_dir` to the
-  directory the config was read from. Keep state in directories you
+  directory name), `hub_url` (from `NAN_INJECTION_PORT`), `gateway_url`,
+  `mode` and `timeout`, and binds `config.home` / `config.logs_dir` to
+  the directory the config was read from. Keep state in directories you
   name under `home`; the kit only owns `logs/`, which is disposable.
 - `async with HubLink(config):` in the lifespan — register, heartbeat,
   re-register if the hub restarted, panel keepalive, unregister.
@@ -56,10 +56,14 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 
    ```json
    POST /register  {"service_id": "<name>", "endpoint": "http://127.0.0.1:<port>/turn",
-                    "mode": "inject"}
+                    "mode": "inject", "timeout": <optional, seconds>}
    ```
 
-   `mode` is `inject` (default) or `archive` (see step 3).
+   `mode` is `inject` (default) or `archive` (see step 3). An `inject`
+   service may also declare `timeout` — its read budget for one
+   delivery, `0.1`–`600` s, defaulting to `injection.timeout` (2 s).
+   It is a ceiling on that turn's delay, not free grace; `archive`
+   may not declare it.
 
 2. Heartbeat `POST /heartbeat {"service_id": "<name>"}` more often
    than every 15 s. After `injection.heartbeat_ttl` (15 s) a stale
@@ -68,10 +72,11 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
    never blocks anything.
 3. Serve the shape your `mode` asks for. An `inject` service
    receives the fresh turn — a flat JSON object — before every
-   prompt assembly and has **2 seconds** to reply
-   `{"text": "<str>"}`; that text rides the turn as an Injection,
-   and plain text or any other shape is a failed delivery
-   (`ok=False`). An `archive` service receives the complete turn
+   prompt assembly and answers within its read budget (2 s by
+   default; declare `timeout` when a contribution is sometimes
+   slow) with exactly `{"text": "<str>"}`: that text rides the turn
+   as an Injection, and plain text or any other shape is a failed
+   delivery (`ok=False`). An `archive` service receives the complete turn
    (adds `rendered`, `reply`, `calls`, `results`, `llm`, `death`,
    `ended_at`) once the turn ends; any 2xx is enough. A non-2xx,
    timeout, or crash is recorded on the Turn for `inject` and

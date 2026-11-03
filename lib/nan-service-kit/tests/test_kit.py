@@ -110,6 +110,42 @@ def test_link_registers_announces_and_unregisters(tmp_path):
     assert stub.deletes == ["/surfaces/weather"]
 
 
+def test_an_inject_timeout_is_declared(tmp_path):
+    config = read_config(ServiceConfig, _write(tmp_path, "weather", "port: 9001\ntimeout: 30\n"))
+
+    stub = StubHub()
+
+    async def run() -> None:
+        link = HubLink(config, transport=stub.transport())
+
+        await link.register()
+
+        await link.stop()
+
+    asyncio.run(run())
+
+    assert stub.bodies("/register")[0]["timeout"] == 30
+
+
+def test_an_archive_timeout_is_not_sent(tmp_path):
+    config = read_config(
+        ServiceConfig, _write(tmp_path, "recorder", "port: 9001\nmode: archive\ntimeout: 30\n")
+    )
+
+    stub = StubHub()
+
+    async def run() -> None:
+        link = HubLink(config, transport=stub.transport())
+
+        await link.register()
+
+        await link.stop()
+
+    asyncio.run(run())
+
+    assert "timeout" not in stub.bodies("/register")[0]
+
+
 def test_a_forgotten_service_registers_again(tmp_path):
     config = read_config(ServiceConfig, _write(tmp_path, "weather", "port: 9001\n"))
 

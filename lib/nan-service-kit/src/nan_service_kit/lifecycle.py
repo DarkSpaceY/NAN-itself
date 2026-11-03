@@ -91,14 +91,17 @@ class HubLink:
         non-loopback endpoint, so a rejection is a real misconfiguration
         and raises an error.
         """
-        reply = await self._post(
-            f"{self.config.hub_url}/register",
-            {
-                "service_id": self.config.service_id,
-                "endpoint": self.config.endpoint,
-                "mode": self.config.mode,
-            },
-        )
+        body: dict[str, Any] = {
+            "service_id": self.config.service_id,
+            "endpoint": self.config.endpoint,
+            "mode": self.config.mode,
+        }
+
+        # Injected turns only; the hub rejects a timeout from archive.
+        if self.config.mode == "inject" and self.config.timeout is not None:
+            body["timeout"] = self.config.timeout
+
+        reply = await self._post(f"{self.config.hub_url}/register", body)
 
         if reply is not None and reply.get("status") == "rejected":
             logger.error(

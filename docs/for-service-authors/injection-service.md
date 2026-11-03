@@ -293,8 +293,9 @@ What it owns, so you do not write it again:
   Defaults are filled by the kit: `service_id` from the directory
   name, `hub_url` from `NAN_INJECTION_PORT` (the core exports its port
   to autostart; a service launched by hand sets it or `hub_url` in the
-  file), `gateway_url` 8765, `mode` `inject`. The file wins wherever
-  it says something. `config.home` and `config.logs_dir` are bound to
+  file), `gateway_url` 8765, `mode` `inject`, and `timeout` (the
+  optional inject read budget; absent means the global default). The
+  file wins wherever it says something. `config.home` and `config.logs_dir` are bound to
   the directory the config was read from: logs go under `logs/`, and
   state is whatever you name under `home`.
 - **Lifecycle** -- `async with HubLink(config):` registers, heartbeats

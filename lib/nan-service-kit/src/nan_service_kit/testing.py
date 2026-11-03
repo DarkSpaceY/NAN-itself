@@ -80,11 +80,16 @@ def assert_registered(stub: StubHub, config: ServiceConfig) -> None:
 
     assert path == "/register", path
 
-    assert body == {
+    expected = {
         "service_id": config.service_id,
         "endpoint": config.endpoint,
         "mode": config.mode,
     }
+
+    if config.mode == "inject" and config.timeout is not None:
+        expected["timeout"] = config.timeout
+
+    assert body == expected
 
 
 def assert_turn_text(client: TestClient, text: str = "") -> None:
