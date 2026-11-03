@@ -19,6 +19,7 @@ injection, and the shell as the universal tool surface.
 | [for-contributors/architecture.md](for-contributors/architecture.md) | How the core is built |
 | [for-contributors/principles.md](for-contributors/principles.md) | The design rules behind it |
 | [for-contributors/frontend-protocol.md](for-contributors/frontend-protocol.md) | The event stream contract for the frontend |
+| [for-contributors/protocol.md](for-contributors/protocol.md) | The backend, model, snapshot, and autostart contracts |
 | [for-contributors/frontend-architecture.md](for-contributors/frontend-architecture.md) | How the frontend renderer is laid out |
 | [for-contributors/develop.md](for-contributors/develop.md) | Test, lint, type-check |
 
