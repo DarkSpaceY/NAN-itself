@@ -37,7 +37,7 @@ class Status:
     """
 
     death: Death | None = None
-    stopping: bool = False  # shutdown: persist, no death
+    suspend: bool = False  # shutdown: persist, no death
     paused: bool = False
     open_turn: bool = False
     owed_step: bool = False
@@ -47,7 +47,7 @@ class Status:
 
 def transition(status: Status, *, interval: float) -> Action:
     """The one place (status, interval) becomes an action."""
-    if status.death is not None or status.stopping:
+    if status.death is not None or status.suspend:
         return "stop"
 
     if status.paused:
@@ -58,7 +58,7 @@ def transition(status: Status, *, interval: float) -> Action:
         return "resume"
 
     # An interval agent is paced entirely by the cadence: sleep, then
-    # run, then sleep again. Pending input never skips the interval.
+    # run, then sleep again. Pending input waits for the interval.
     if interval > 0:
         return "run" if status.paced else "pace"
 

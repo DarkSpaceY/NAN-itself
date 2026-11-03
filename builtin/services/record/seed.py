@@ -75,7 +75,7 @@ TASKS = [
 
 CALLS = ["read", "grep", "shell", "edit", "write", "web_search", "test"]
 
-# The provider-neutral ToolCall shape: an id, a name, the arguments the
+# The provider-neutral verb call shape: an id, a name, the arguments the
 # model produced. The id is what pairs a call with its result.
 ARGS = {
     "read": {"path": "builtin/services/record/store.py", "limit": 120},

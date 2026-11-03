@@ -15,7 +15,7 @@ def test_death_stops_first() -> None:
 
 
 def test_shutdown_stops() -> None:
-    status = Status(stopping=True, paused=True, open_turn=True, input_ready=True)
+    status = Status(suspend=True, paused=True, open_turn=True, input_ready=True)
 
     assert transition(status, interval=0.0) == "stop"
 

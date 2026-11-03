@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
-from nan.llm.types import ToolDefinition
+from nan.llm.types import VerbDefinition
 from nan.turn import InboxMessage
 
 if TYPE_CHECKING:
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 class SendVerb(Verb):
     name = "send"
 
-    def definition(self) -> ToolDefinition:
-        return ToolDefinition(
+    def definition(self) -> VerbDefinition:
+        return VerbDefinition(
             name=self.name,
             description=(
                 "Send text to another agent. direction 'up' delivers to "

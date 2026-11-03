@@ -5,6 +5,7 @@ Provider-neutral streaming LLM adapter (the model boundary).
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -33,7 +34,7 @@ from loguru import logger
 from openai import AsyncOpenAI
 from openai import DefaultAsyncHttpxClient as AsyncHttpxClientOpenAI
 
-from nan.config import settings
+from nan.config import Settings
 
 from .types import (
     FinishReason,
@@ -41,15 +42,15 @@ from .types import (
     LLMStreamEvent,
     Message,
     ThinkingBlock,
-    ToolCall,
     Usage,
+    VerbCall,
 )
 
 
 def _proxy_kwargs(proxy: str) -> dict[str, Any]:
     """
-    Proxy discipline: the endpoint never inherits an ambient proxy
-    unless the configuration asks for it.
+    Proxy discipline: the endpoint passes an explicit proxy and reads
+    an ambient one only when the configuration selects `env`.
     """
     if proxy == "env":
         return {"trust_env": True}
@@ -70,9 +71,11 @@ class LLMProvider:
         - expose one streaming protocol to Agent Runtime
     """
 
-    def __init__(self) -> None:
-        """Build the provider described by the process-wide settings."""
+    def __init__(self, settings: Settings) -> None:
+        """Build the provider described by `settings`."""
         cfg = settings.llm
+
+        self._cfg = cfg
 
         provider = cfg.provider
 
@@ -247,7 +250,7 @@ class LLMProvider:
             choice = chunk.choices[0]
             delta = choice.delta
 
-            if settings.llm.thinking:
+            if self._cfg.thinking:
                 details = getattr(delta, "reasoning_details", None)
 
                 if isinstance(details, list):
@@ -304,7 +307,7 @@ class LLMProvider:
 
             yield LLMStreamEvent(
                 kind="tool_call",
-                tool_call=self._build_tool_call(
+                tool_call=self._build_verb_call(
                     tool_id=buffer["id"],
                     name=buffer["name"],
                     raw_arguments=buffer["arguments"],
@@ -502,13 +505,13 @@ class LLMProvider:
             "messages": messages,
             "system": system_prompt,
             "temperature": request.temperature,
-            "max_tokens": settings.llm.max_tokens,
+            "max_tokens": self._cfg.max_tokens,
         }
 
-        if settings.llm.thinking and settings.llm.thinking_budget > 0:
+        if self._cfg.thinking and self._cfg.thinking_budget > 0:
             # Native extended thinking requires temperature=1 and a
             # budget smaller than max_tokens.
-            budget = min(settings.llm.thinking_budget, settings.llm.max_tokens - 1)
+            budget = min(self._cfg.thinking_budget, self._cfg.max_tokens - 1)
 
             if budget > 0:
                 kwargs["thinking"] = {
@@ -540,7 +543,7 @@ class LLMProvider:
                         current_tool_json = ""
 
                     case RawContentBlockStartEvent(content_block=RedactedThinkingBlock(data=data)):
-                        if settings.llm.thinking:
+                        if self._cfg.thinking:
                             thinking_blocks.append(
                                 ThinkingBlock(
                                     type="encrypted",
@@ -555,7 +558,7 @@ class LLMProvider:
                             signature=signature,
                         )
                     ):
-                        if settings.llm.thinking:
+                        if self._cfg.thinking:
                             current_thinking = ThinkingBlock(
                                 text=thinking or "",
                                 signature=signature or None,
@@ -563,7 +566,7 @@ class LLMProvider:
                             )
 
                     case RawContentBlockDeltaEvent(delta=ThinkingDelta(thinking=thinking)):
-                        if settings.llm.thinking and thinking:
+                        if self._cfg.thinking and thinking:
                             if current_thinking is None:
                                 current_thinking = ThinkingBlock(format="anthropic")
 
@@ -572,7 +575,7 @@ class LLMProvider:
                             yield LLMStreamEvent(kind="thinking", thinking_text=thinking)
 
                     case RawContentBlockDeltaEvent(delta=SignatureDelta(signature=signature)):
-                        if settings.llm.thinking and signature:
+                        if self._cfg.thinking and signature:
                             if current_thinking is None:
                                 current_thinking = ThinkingBlock(format="anthropic")
 
@@ -589,7 +592,7 @@ class LLMProvider:
                         if current_tool_id and current_tool_name:
                             yield LLMStreamEvent(
                                 kind="tool_call",
-                                tool_call=self._build_tool_call(
+                                tool_call=self._build_verb_call(
                                     tool_id=current_tool_id,
                                     name=current_tool_name,
                                     raw_arguments=current_tool_json,
@@ -792,18 +795,34 @@ class LLMProvider:
             completion_tokens=final_message.usage.output_tokens,
         )
 
-    @staticmethod
-    def _build_tool_call(
+    # An id is the provider's to supply: the model may omit one.
+    _INVALID_TOOL_NAME = "_invalid"
+
+    # How much of a malformed argument blob the model gets to see
+    # back; the error must stay bounded.
+    _MAX_ARGUMENT_ECHO = 200
+
+    def _build_verb_call(
+        self,
         *,
         tool_id: str,
         name: str,
         raw_arguments: str,
-    ) -> ToolCall:
+    ) -> VerbCall:
+        """
+        Normalize one model tool call. A malformed call comes back
+        carrying `error`; the runtime reports that text to the model
+        as this call's result, so the model can correct itself.
+        """
         if not tool_id:
-            raise ValueError("Model returned a Tool call without id")
+            tool_id = f"call-{uuid.uuid4().hex[:8]}"
+
+        error: str | None = None
 
         if not name:
-            raise ValueError("Model returned a Tool call without name")
+            name = self._INVALID_TOOL_NAME
+
+            error = "Model returned a Tool call without a name."
 
         if not raw_arguments:
             arguments: dict[str, Any] = {}
@@ -811,20 +830,25 @@ class LLMProvider:
         else:
             try:
                 parsed = json.loads(raw_arguments)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"Model returned invalid Tool arguments for '{name}': {raw_arguments!r}"
-                ) from exc
+            except json.JSONDecodeError:
+                arguments = {}
+                error = (
+                    f"Arguments for '{name}' are not valid JSON: "
+                    f"{raw_arguments[: self._MAX_ARGUMENT_ECHO]!r}"
+                )
 
-            if not isinstance(parsed, dict):
-                raise ValueError(f"Tool arguments for '{name}' must be a JSON object.")
+            else:
+                if isinstance(parsed, dict):
+                    arguments = parsed
+                else:
+                    arguments = {}
+                    error = f"Arguments for '{name}' must be a JSON object."
 
-            arguments = parsed
-
-        return ToolCall(
+        return VerbCall(
             id=tool_id,
             name=name,
             arguments=arguments,
+            error=error,
         )
 
     _OPENAI_FINISH_REASONS: dict[str, FinishReason] = {

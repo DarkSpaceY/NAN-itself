@@ -41,16 +41,16 @@ follows the actual layout.
 Two boundary facts are settled here rather than per module:
 
 - **The provider stops at `provider.py`.** The DTOs in `nan/llm/types.py`
-  are the provider-neutral protocol shapes (`Message`, `ToolCall`,
+  are the provider-neutral protocol shapes (`Message`, `VerbCall`,
   `LLMResponse`, ...); the runtime stores and renders only these, and
-  `provider.py` translates SDK objects into them, so no other module
-  ever names an OpenAI or Anthropic type. The module imports nothing
+  `provider.py` translates SDK objects into them, so every other
+  module handles only these shapes. The module imports nothing
   from `nan`, so importing it cannot create a cycle; it is imported as
   `nan.llm.types`, because the `nan.llm` package pulls the provider
   (only `app` wants that).
 - **One wiring point.** `app.py` constructs the single `LLMProvider`;
   each `Agent` builds its own `TurnEngine` from it, so the agent runtime
-  never depends on which provider is in use.
+  is independent of which provider is in use.
 
 ## Layers
 
@@ -68,8 +68,9 @@ point down only:
 | 0 | vocabulary and infrastructure | `config`, `events`, `llm/types`, `utils` | nothing above |
 
 An import that points up, or that lets a transport reach into the
-runtime, is a bug. `settings` and `sink` are ambient: any layer may
-read them, no layer writes them.
+runtime, is a bug. `sink` is ambient: any layer may emit to it.
+`Settings` is a value the composition root builds once and passes
+down: any layer may read it, the composition root is its only writer.
 
 ## One fact, one owner
 
@@ -86,20 +87,19 @@ give the rules.
 | `Agent._inbox` | messages delivered, not yet observed | `deliver`; drained only by `_open_turn` |
 | `Agent._pending_deltas` | state-change lines not yet attached to a turn | `note_delta`; drained only by `_open_turn` |
 | `Agent._death` | the exit record (first one wins) | `request_death` / `finish` / `_fail_turn` |
-| `Agent._paused` / `_stopping` | the two process latches | `pause`/`resume`/`_park`; `suspend` |
+| `Agent._paused` / `_suspending` | the two process latches | `pause`/`resume`/`_freeze`; `suspend` |
 | `Status` (derived) | everything the fold may read | `core._status`, recomputed each iteration |
 | `AgentSnapshot` (one file per agent) | identity, turns, unobserved inbox | `Agent.persist` (the only writer) |
 | Injection registry | live services and their modes | `InjectionHub` routes |
 | Event ring | the live telemetry stream | `events.sink` |
-| `settings` | every policy value and path | loaded once from YAML at import |
+| `settings` | every policy value and path | built once from YAML by the composition root |
 
 Two corollaries:
 
-- The event stream is an observer, never a source. No runtime decision
-  reads an event; the sink imports no domain module.
-- Nothing infers progress from payload shape. Progress is `phase`;
-  liveness is the tree; cadence is `paced`; open/closed is
-  `phase != "committed"`.
+- The event stream is an observer: runtime decisions read domain state,
+  and the sink imports no domain module.
+- Progress is `phase`; liveness is the tree; cadence is `paced`;
+  open/closed is `phase != "committed"`.
 
 ## Invariants
 
@@ -113,30 +113,30 @@ Each invariant names the single place that keeps it true.
    cancels; only a pause cancel leaves the loop alive.
 2. **The Turn list is the conversation.** `history` is a pure
    projection: the rendered messages of the turns in the last context
-   epoch (`core.history`). No message is stored outside a `Turn`.
+   epoch (`core.history`). Every message is stored on a `Turn`.
 3. **`phase` is the only progress marker, and it is monotone**:
    `observed -> injected -> thought -> acted -> committed`
-   (`turn/model.py`, advanced by `core._advance` / `engine`). A resumed
+   (`turn/model.py`, advanced by `core._complete_turn` / `engine`). A resumed
    turn continues from where its phase stands.
 4. **A committed turn is frozen.** `rendered` is set once
-   (`render.freeze_turn`) and never rewritten; a runtime fact that
+   (`render.freeze_turn`) and stays fixed; a runtime fact that
    arrives after the commit goes to the pending channel instead
-   (`core._note`).
+   (`core._record_delta`).
 5. **Verbs are at-most-once; only the model call retries.**
    `engine.act` records each result before the next call starts, and a
    turn resumed after `thought` closes what never reported as
-   `INTERRUPTED` instead of re-running it (`core._continue`).
+   `INTERRUPTED` instead of re-running it (`core._resume_phases`).
 6. **Durability at four boundaries.** A turn is written at its intent,
    after the model answers, after each verb result, and at commit
-   (`core.persist`, called in `_advance` / `_drive` / `_record_result` /
-   `_commit`).
+   (`core.persist`, called in `_complete_turn` / `_run_phases` /
+   `_record_result` / `_commit`).
 7. **Writes are atomic and whole-state.** Temp file + fsync +
-   `os.replace`, one file per agent, never append
+   `os.replace`, one file per agent, rewritten whole each time
    (`SnapshotStore._write`).
 8. **Identity belongs to the snapshot.** An agent exists as soon as its
    snapshot does; a snapshot with zero turns is a spawned agent that
    observed nothing yet (`AgentSnapshot`; `spawn_child`).
-9. **The root never exits.** `ROOT_VERBS` has no `finish`; a root whose
+9. **The root stays resident.** `ROOT_VERBS` has no `finish`; a root whose
    turn fails parks instead of dying (`core._fail_turn`).
 10. **Death disposes, shutdown persists.** `_dispose` removes the
     snapshot and cascades death; `_suspend` rewrites it and cascades
@@ -147,7 +147,7 @@ Each invariant names the single place that keeps it true.
 12. **An exit is announced exactly once.** A finish report rides the
     parent's inbox, a bare death rides its `<delta>` ledger, and the
     child slot is released in the same step (`core._dispose`).
-13. **Snapshot writes never kill an agent.** `persist` is the one
+13. **Snapshot writes leave the agent running.** `persist` is the one
     writer and swallows I/O errors: the last good snapshot stands
     (`core.persist`).
 14. **Cross-task mutation is one synchronous step.** `deliver`,
@@ -171,12 +171,12 @@ flowchart LR
     U --> S
 ```
 
-`Status` (`agent/control.py`) is derived, never stored:
+`Status` (`agent/control.py`) is derived on each iteration:
 
 | Field | True when |
 | --- | --- |
 | `death` | `_death` holds an exit record |
-| `stopping` | `_stopping` was set by shutdown |
+| `suspend` | `_suspending` was set by shutdown |
 | `paused` | `_paused` was set by pause (or by a root's failed turn) |
 | `open_turn` | the last turn exists and its phase is not `committed` |
 | `owed_step` | the last committed turn called verbs and carries no death |
@@ -187,7 +187,7 @@ flowchart LR
 
 | # | Condition | Action |
 | --- | --- | --- |
-| 1 | `death` or `stopping` | `stop` |
+| 1 | `death` or `suspend` | `stop` |
 | 2 | `paused` | `wait` |
 | 3 | `open_turn` | `resume` |
 | 4 | `interval > 0` and `paced` | `run` |
@@ -201,7 +201,7 @@ Behaviour that follows from the table alone:
   that called verbs opens the next one so the model can read its
   results; otherwise the loop waits.
 - **Interval-driven** (`interval > 0`): one turn per interval. Pending
-  input never skips the interval, and `pace` is entered only after a
+  input waits for the interval, and `pace` is entered only after a
   turn has spent the token -- a resumed turn counts as a turn.
 - **Pause** cancels the in-flight turn where it stands and parks the
   tree; a resume lifts it and the fold returns `resume`.
@@ -229,8 +229,8 @@ record. It is self-contained: identity (`agent_id` / `parent_id` /
 | --- | --- | --- | --- |
 | `observed` | `_open_turn` | identity, epoch, origin, inbox, deltas | re-runs inject and the model call |
 | `injected` | `engine.inject` | service contributions, service deltas | re-runs the model call |
-| `thought` | `engine.think` | reply, thinking, calls, `llm` | **never** re-runs a verb: unreported calls close as `INTERRUPTED` |
-| `acted` | `engine.act` | one `ToolResult` per call | commit only |
+| `thought` | `engine.think` | reply, thinking, verb calls, `llm` | **never** re-runs a verb: unreported calls close as `INTERRUPTED` |
+| `acted` | `engine.act` | one `VerbResult` per call | commit only |
 | `committed` | `_commit` | `ended_at`, death if any, frozen `rendered` | terminal |
 
 Persistence boundaries, per turn:
@@ -242,7 +242,7 @@ Persistence boundaries, per turn:
 | 3 | after **each** verb result | plus that result; a crash mid-batch loses only the call in flight |
 | 4 | at commit | the complete, frozen turn |
 
-A cancelled turn is parked where it stands (`_park_turn`); a failed
+A cancelled turn is parked where it stands (`_persist_paused_turn`); a failed
 turn parks on the root and ends the child that owned it. Whatever
 survives stays resident, so a later `resume` continues it from its phase.
 
@@ -251,7 +251,7 @@ exceeds `history_char_limit`, the turn list is cleared and the epoch
 increments, so the next turn is `context_cleared`. `origin` is a wire
 label (`first` / `normal` / `context_cleared`); behaviour reads
 `epoch`. A persona content change is the one legal system-prompt
-invalidation and rides the turn as `persona` (`_persona_for_turn`).
+invalidation and rides the turn as `persona` (`_refresh_persona`).
 
 ## Tree and exits
 
@@ -267,8 +267,7 @@ The edge is the only address, in both directions: `children[child_id]`
 is the way down (`send` down, `kill`), `parent` is the way up (`send`
 up, `finish` report). The sender names the edge, so the message kind is
 decided at the sender (`InboxMessage.from_user` / `from_parent` /
-`from_child`). A missing id is a verb error the model reads, never an
-exception.
+`from_child`). A missing id returns a verb error the model reads.
 
 `spawn_child` is the whole birth protocol, in this order:
 
@@ -281,8 +280,8 @@ exception.
 6. pause it if the parent is frozen, then `start()`.
 
 Step 6 runs in a `finally`: a pause or shutdown that cancels the spawn
-mid-write still starts (frozen) children, so a registered child is
-never a zombie.
+mid-write still starts (frozen) children, so every registered child
+gets started.
 
 ```mermaid
 flowchart TD
@@ -300,8 +299,8 @@ flowchart TD
   `request_death` is idempotent.
 - **Shutdown** suspends: every agent persists its in-flight turn, no
   snapshot is removed, no notice is sent.
-- **Pause** is a latch, not an exit: nothing dies, nothing is written
-  except the parked turn, and a restart lifts it (it is process-scoped).
+- **Pause** is a latch: the tree stays alive, only the parked turn's
+  snapshot is written, and a restart lifts it (it is process-scoped).
 
 ## The three channel types
 
@@ -342,18 +341,16 @@ report text
 
 A turn that observed nothing renders `(no input this turn)`; an
 in-flight turn renders its observation alone. `render_turn` is a pure
-function of the turn, so the same turn always renders to the same
-bytes, and a failed service's body is prefixed with
-`[service error] `.
+function of the turn, so the same turn renders to the same bytes,
+and a failed service's body is prefixed with `[service error] `.
 
 Runtime facts about this agent that land outside a turn (a pause, a
 failure, a `resumed` marker) go through `_note`: into the open turn
 when there is one, otherwise into `_pending_deltas`, which the next
-observation drains. A committed turn is never mutated, so a fact that
-arrives after the commit waits for the next turn instead of
-disappearing. A parent's view of its children (`+id spawned`,
-`-id died`) is passive and always deferred (`note_delta`), so it
-never interrupts a turn.
+observation drains. A committed turn stays frozen, so a fact that
+arrives after the commit waits for the next turn. A parent's view of
+its children (`+id spawned`, `-id died`) is passive and deferred
+(`note_delta`), so it lands between turns.
 
 ## Snapshot and restore
 
@@ -401,7 +398,7 @@ flowchart TD
 An agent whose depth disagrees with the tree it hangs off keeps the
 tree's depth (a warning is logged): the tree is the authority, the
 snapshot's depth is a hint. A snapshot whose parent has no snapshot is
-an orphan and is discarded, so the live tree is always exactly the set
+an orphan and is discarded, so the live tree is exactly the set
 of snapshots reachable from the root.
 
 ## Failure vocabulary
@@ -414,15 +411,17 @@ classified.
 
 - **Only the model call retries**, along `settings.agent.backoff`.
   A retry re-runs the same turn's call and counts up `LLMCall.retries`.
-- **A verb never fails a turn.** A throwing verb returns its error as
-  that call's result (`_run_call`), so the model can correct it.
+- **A verb's failure stays on its call.** A throwing verb returns
+  its error as that call's result (`_execute_call`), so the model can
+  correct it.
 - **An exhausted ladder is `Unrecoverable`**: a child dies
   (`unrecoverable: <reason>`), the root parks.
-- **A pause or shutdown cancel is not a failure.** It parks the turn
-  (pause) or persists it (shutdown); only the control path reads it.
+- **A pause or shutdown cancel belongs to the control path.** It parks
+  the turn (pause) or persists it (shutdown); only the control path
+  reads it.
 
-Telemetry and record both exist and never conflict: `verb_done` carries
-a live `duration_s`, the turn carries the authoritative `ToolResult`
+Telemetry and record both exist: `verb_done` carries
+a live `duration_s`, the turn carries the authoritative `VerbResult`
 interval; `turn_done` carries usage and latency, `LLMCall` is the
 record. Where both exist, the turn wins.
 
@@ -474,26 +473,26 @@ carries the envelope `t` / `id` / `seq` / `ts` / `boot_id` plus a
 | `t` | Content | Emitted by |
 | --- | --- | --- |
 | `agent_started` | `agent_id`, `depth`, `parent_id`, `pacing` | `Agent.loop` |
-| `agent_paused` / `agent_resumed` | `agent_id` | `_park` / `resume` |
+| `agent_paused` / `agent_resumed` | `agent_id` | `_freeze` / `resume` |
 | `agent_exited` | `agent_id`, `reason`, `report` | `_dispose` |
-| `turn_started` | `agent_id`, `turn_index`, `inbox_count` | `_advance` |
+| `turn_started` | `agent_id`, `turn_index`, `inbox_count` | `_complete_turn` |
 | `turn_done` | `agent_id`, `turn_index`, `usage`, `latency_s`, `retries`, `calls`, `history_chars` | `_commit` |
-| `turn_interrupted` | `agent_id`, `turn_index`, `reason` | `_continue` / `_fail_turn` |
+| `turn_interrupted` | `agent_id`, `turn_index`, `reason` | `_resume_phases` / `_fail_turn` |
 | `turn_failed` | `agent_id`, `error`, `backoff_s`, `retry_index` | `_think` |
 | `injections_collected` | `agent_id`, `services[]` (`service_id`, `ok`, `duration_s`, `text_len`) | `engine.inject` |
 | `thinking_started` / `thinking_delta` / `thinking_done` | stream `id`, `text` (delta), `agent_id`, `depth` | `engine.generate` |
 | `output_started` / `output_delta` / `output_done` / `output_cancelled` | stream `id`, `text` (delta), `agent_id`, `depth` | `engine.generate` |
-| `verb_started` | `agent_id`, `verb`, `arguments` | `_run_call` |
-| `verb_result` | `agent_id`, `verb`, `text`, optional `detail` | `_run_call` |
-| `verb_done` | `agent_id`, `verb`, `duration_s` | `_run_call` |
-| `verb_failed` | `agent_id`, `verb`, `error{type,message}` | `_verb_error` |
-| `snapshot_restored` | `agent_id`, `parent_id`, `depth`, `turns`, `in_flight` | `restore._recover` |
-| `user_input` | `text`, optional `mid` | `Core._ingest` |
+| `verb_started` | `agent_id`, `verb`, `arguments` | `_execute_call` |
+| `verb_result` | `agent_id`, `verb`, `text`, optional `detail` | `_execute_call` |
+| `verb_done` | `agent_id`, `verb`, `duration_s` | `_execute_call` |
+| `verb_failed` | `agent_id`, `verb`, `error{type,message}` | `_report_verb_error` |
+| `snapshot_restored` | `agent_id`, `parent_id`, `depth`, `turns`, `in_flight` | `restore._restore_turns` |
+| `user_input` | `text`, optional `mid` | `Core._on_input` |
 
 The sink keeps a bounded ring (`HISTORY_LIMIT`), where streaming
 deltas are coalesced into one entry per stream, and fans out to
-subscriber queues that drop their oldest entry when full. Nothing
-reads the ring back into a decision.
+subscriber queues that drop their oldest entry when full. The ring is
+output-only.
 
 ## Gateway
 
@@ -539,8 +538,8 @@ stateDiagram-v2
    close the gateway, stop the hub, close the provider, remove the
    signal handlers, `STOPPED`.
 
-Each step is best-effort and logged: one failing component never
-prevents the rest of the shutdown.
+Each step is best-effort and logged: one failing component leaves
+the rest of the shutdown running.
 
 ## What a stop or a crash can lose
 
@@ -560,7 +559,7 @@ remaining gaps are closed and enumerated:
 | Crash between a spawn and the child's write | the spawn intent (the parent's turn is requeued or closed interrupted) | a false child: a claim can only be committed after the child's write |
 | Crash between the child's write and the spawn's result | the child id in the parent's turn (it closes `INTERRUPTED`) | the child itself: it is restored and runs its task |
 
-`<delta>` is deliberately not durable: it is the live ledger that
+`<delta>` is transient: it is the live ledger that
 re-renders itself from what happens next (a dead child is gone from the
 tree; a service that comes back re-announces itself). Every durable
 fact lives on a `Turn`.

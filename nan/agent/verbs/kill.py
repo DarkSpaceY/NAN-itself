@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
-from nan.llm.types import ToolDefinition
+from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 class KillVerb(Verb):
     name = "kill"
 
-    def definition(self) -> ToolDefinition:
-        return ToolDefinition(
+    def definition(self) -> VerbDefinition:
+        return VerbDefinition(
             name=self.name,
             description=(
                 "Kill a child you spawned (by child_id). Its own "

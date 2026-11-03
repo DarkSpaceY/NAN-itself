@@ -2,8 +2,8 @@
 # Every probe failure degrades to null; the service never dies
 # from a missing binary or a missing sensor.
 #
-# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
-# at launch, 8901 otherwise).
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT,
+# exported to autostart).
 
 service_id: "system"
 host: "127.0.0.1"

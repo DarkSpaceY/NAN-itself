@@ -9,7 +9,8 @@ Agent verbs: the six cognitive actions.
     finish   report upstream and die
 
 The verb set IS the agent's capability: a root runs ROOT_VERBS
-(no finish -- the root never exits), a child runs CHILD_VERBS.
+(no finish verb: the root stays resident), a child runs
+CHILD_VERBS.
 
 Tools and skills are plain files the agent reaches through
 shell.
@@ -22,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
-    from nan.llm.types import ToolDefinition
+    from nan.llm.types import VerbDefinition
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class Verb:
 
     name: ClassVar[str]
 
-    def definition(self) -> ToolDefinition:
+    def definition(self) -> VerbDefinition:
         raise NotImplementedError
 
     async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
@@ -71,7 +72,7 @@ def _build_registry() -> dict[str, Verb]:
     }
 
 
-def truncate_output(output: str, returncode: int | None, limit: int) -> str:
+def format_shell_output(output: str, returncode: int | None, limit: int) -> str:
     """Head+tail truncation for shell output, exit code first."""
     output = output.rstrip("\n")
 
@@ -87,12 +88,12 @@ def truncate_output(output: str, returncode: int | None, limit: int) -> str:
 
 VERBS: dict[str, Verb] = _build_registry()
 
-# A root never exits, so it cannot finish; a child can.
+# A root stays resident, so its verb set has no finish; a child has one.
 CHILD_VERBS: dict[str, Verb] = dict(VERBS)
 
 ROOT_VERBS: dict[str, Verb] = {name: verb for name, verb in VERBS.items() if name != "finish"}
 
 
-def tool_definitions(verbs: dict[str, Verb]) -> list[ToolDefinition]:
+def verb_definitions(verbs: dict[str, Verb]) -> list[VerbDefinition]:
     """The verb protocol handed to the model: exactly `verbs`."""
     return [verb.definition() for verb in verbs.values()]

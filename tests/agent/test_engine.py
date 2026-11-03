@@ -14,9 +14,9 @@ from nan.events import sink
 from nan.llm.types import (
     Message,
     ThinkingBlock,
-    ToolCall,
-    ToolDefinition,
     Usage,
+    VerbCall,
+    VerbDefinition,
 )
 from nan.turn import DeltaEvent, InboxMessage, Injection, Turn
 
@@ -69,13 +69,13 @@ async def test_think_builds_persona_history_then_observation() -> None:
 
     turn = _turn(inbox=(InboxMessage(kind="user", source="user", text="now"),))
 
-    tools = [ToolDefinition(name="sleep", description="wait", input_schema={})]
+    verbs = [VerbDefinition(name="sleep", description="wait", input_schema={})]
 
     thought = await engine.think(
         turn,
         persona="PERSONA",
         history=[Message(role="assistant", content="past")],
-        tools=tools,
+        verbs=verbs,
         retries=2,
     )
 
@@ -85,7 +85,7 @@ async def test_think_builds_persona_history_then_observation() -> None:
     assert request.messages[0].content == "PERSONA"
     assert request.messages[1].content == "past"
     assert "now" in (request.messages[2].content or "")
-    assert request.tools == tools
+    assert request.tools == verbs
 
     assert thought.phase == "thought"
     assert thought.reply == "ok"
@@ -107,37 +107,37 @@ async def test_think_records_calls_and_thinking() -> None:
         turn,
         persona="P",
         history=[],
-        tools=[],
+        verbs=[],
         retries=0,
     )
 
     assert thought.reply == ""
-    assert [call.name for call in thought.calls] == ["sleep"]
+    assert [call.name for call in thought.verb_calls] == ["sleep"]
     assert [block.text for block in thought.thinking] == ["REASONING"]
 
 
 async def test_act_runs_calls_in_order_and_records_each_result() -> None:
-    first = ToolCall(id="a", name="sleep", arguments={"seconds": 0})
-    second = ToolCall(id="b", name="send", arguments={"text": "hi"})
+    first = VerbCall(id="a", name="sleep", arguments={"seconds": 0})
+    second = VerbCall(id="b", name="send", arguments={"text": "hi"})
 
-    turn = _turn(phase="thought", calls=(first, second))
+    turn = _turn(phase="thought", verb_calls=(first, second))
 
     executed: list[str] = []
     recorded: list[list[str]] = []
 
-    async def execute(call: ToolCall) -> str:
+    async def execute(call: VerbCall) -> str:
         executed.append(call.id)
 
         return f"result-{call.id}"
 
     async def record(current: Turn) -> None:
-        recorded.append([result.call_id for result in current.results])
+        recorded.append([result.call_id for result in current.verb_results])
 
     acted = await TurnEngine(FakeLLM()).act(turn, execute=execute, record=record)
 
     assert executed == ["a", "b"]
     assert recorded == [["a"], ["a", "b"]]
-    assert [result.output for result in acted.results] == ["result-a", "result-b"]
+    assert [result.output for result in acted.verb_results] == ["result-a", "result-b"]
     assert acted.phase == "acted"
 
 
@@ -179,7 +179,7 @@ async def test_generate_emits_the_stream_lifecycle(no_sink: Any) -> None:
 
 
 async def test_generate_tool_answer_cancels_the_output_stream(no_sink: Any) -> None:
-    call = ToolCall(id="c1", name="sleep", arguments={})
+    call = VerbCall(id="c1", name="sleep", arguments={})
 
     llm = StreamingLLM(
         [
@@ -201,7 +201,7 @@ async def test_generate_tool_answer_cancels_the_output_stream(no_sink: Any) -> N
 
 
 async def test_generate_tool_only_answer_streams_no_output(no_sink: Any) -> None:
-    call = ToolCall(id="c1", name="sleep", arguments={})
+    call = VerbCall(id="c1", name="sleep", arguments={})
 
     llm = StreamingLLM(
         [FakeStreamEvent("tool_call", tool_call=call), FakeStreamEvent("done", usage=Usage())]
@@ -248,13 +248,13 @@ async def test_act_with_no_calls_still_advances_the_phase() -> None:
     )
 
     assert acted.phase == "acted"
-    assert acted.results == ()
+    assert acted.verb_results == ()
 
 
 async def test_think_reports_the_model_name_and_finish_reason() -> None:
     llm = FakeLLM()
 
-    thought = await TurnEngine(llm).think(_turn(), persona="P", history=[], tools=[], retries=0)
+    thought = await TurnEngine(llm).think(_turn(), persona="P", history=[], verbs=[], retries=0)
 
     assert thought.llm is not None
     assert thought.llm.model == llm.model

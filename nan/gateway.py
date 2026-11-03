@@ -41,7 +41,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from .config import settings
+from .config import Settings
 from .events import sink
 from .utils.loopback import entry_allowed, is_local_asset, is_loopback_url
 
@@ -50,12 +50,14 @@ class Gateway:
     def __init__(
         self,
         *,
+        settings: Settings,
         on_input: Callable[[str, Any], None] | None = None,
         on_pause: Callable[[bool], None] | None = None,
         state_provider: Callable[[], dict] | None = None,
     ) -> None:
-        # Endpoint and layout come from the process-wide settings;
+        # Endpoint and layout come from the settings handed in;
         # callbacks are injected.
+        self._settings = settings
         self.on_input = on_input
         self.on_pause = on_pause
         self.state_provider = state_provider
@@ -73,31 +75,31 @@ class Gateway:
         self._seen_mids: dict[str, None] = {}
 
     # ------------------------------------------------------------------
-    # Endpoint / layout (live reads of the global settings)
+    # Endpoint / layout
     # ------------------------------------------------------------------
 
     @property
     def host(self) -> str:
-        return settings.gateway.host
+        return self._settings.gateway.host
 
     @property
     def port(self) -> int:
-        return settings.gateway.port
+        return self._settings.gateway.port
 
     @property
     def dedup_cache_size(self) -> int:
-        return settings.gateway.dedup_cache_size
+        return self._settings.gateway.dedup_cache_size
 
     @property
     def surface_ttl(self) -> float:
-        return settings.gateway.surface_ttl
+        return self._settings.gateway.surface_ttl
 
     @property
     def frontend_dir(self) -> Path | None:
         """
         The built desktop at frontend/dist; None when index.html is missing.
         """
-        built = settings.paths.frontend
+        built = self._settings.paths.frontend
 
         if (built / "index.html").is_file():
             return built
@@ -112,6 +114,30 @@ class Gateway:
 
     async def serve(self, open_browser: bool = True) -> None:
         """Start the HTTP + WebSocket server; open the browser when asked."""
+        app = self._build_app()
+
+        self._server = uvicorn.Server(
+            uvicorn.Config(app, host=self.host, port=self.port, log_level="warning")
+        )
+
+        server_task = asyncio.create_task(self._server.serve())
+
+        reaper = asyncio.create_task(self._reap_surfaces(), name="surface-reaper")
+
+        try:
+            if open_browser:
+                await self._open_browser_when_ready()
+
+            await server_task
+
+        finally:
+            reaper.cancel()
+
+            with contextlib.suppress(asyncio.CancelledError):
+                await reaper
+
+    def _build_app(self) -> FastAPI:
+        """The HTTP surface: entry guard, WS, panels, static desktop."""
         app = FastAPI()
 
         # ---------- Entry guard (loopback policy) ----------
@@ -179,61 +205,60 @@ class Gateway:
 
         if frontend_dir is not None:
             assets_dir = frontend_dir / "assets"
+
             if assets_dir.exists():
                 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
             @app.get("/{full_path:path}")
             async def serve_spa(full_path: str):
                 index_path = frontend_dir / "index.html"
+
                 if index_path.exists():
                     return FileResponse(str(index_path))
+
                 return {"error": "Frontend not built"}
 
             logger.info(f"Frontend static files served from {frontend_dir}")
+
         else:
             logger.warning("Frontend directory not found, skipping static file serving")
 
-        # ---------- Server start ----------
-        config = uvicorn.Config(
-            app,
-            host=self.host,
-            port=self.port,
-            log_level="warning",
-        )
-        self._server = uvicorn.Server(config)
+        return app
 
-        server_task = asyncio.create_task(self._server.serve())
+    async def _open_browser_when_ready(self) -> None:
+        """Wait for the port to accept, then open the desktop."""
+        deadline = asyncio.get_running_loop().time() + 10
 
-        reaper = asyncio.create_task(self._reap_surfaces(), name="surface-reaper")
+        while asyncio.get_running_loop().time() < deadline:
+            if await self._port_is_open():
+                self._open_browser()
 
+                return
+
+            await asyncio.sleep(0.2)
+
+        logger.warning("Server did not start in time, browser not opened")
+
+    async def _port_is_open(self) -> bool:
         try:
-            if open_browser:
-                start = asyncio.get_event_loop().time()
-                connected = False
-                while not connected and (asyncio.get_event_loop().time() - start) < 10:
-                    try:
-                        reader, writer = await asyncio.open_connection(self.host, self.port)
-                        writer.close()
-                        await writer.wait_closed()
-                        connected = True
-                    except Exception:
-                        await asyncio.sleep(0.2)
-                if connected:
-                    url = f"http://{self.host}:{self.port}/"
-                    if webbrowser.open(url):
-                        logger.info(f"🌐 Opened browser at {url}")
-                    else:
-                        logger.warning(f"Could not open browser, please navigate to {url}")
-                else:
-                    logger.warning("Server did not start in time, browser not opened")
+            _, writer = await asyncio.open_connection(self.host, self.port)
 
-            await server_task
+            writer.close()
+            await writer.wait_closed()
 
-        finally:
-            reaper.cancel()
+            return True
 
-            with contextlib.suppress(asyncio.CancelledError):
-                await reaper
+        except Exception:
+            return False
+
+    def _open_browser(self) -> None:
+        url = f"http://{self.host}:{self.port}/"
+
+        if webbrowser.open(url):
+            logger.info(f"🌐 Opened browser at {url}")
+
+        else:
+            logger.warning(f"Could not open browser, please navigate to {url}")
 
     async def close(self) -> None:
         """Shut the server down."""
@@ -306,7 +331,7 @@ class Gateway:
 
             try:
                 async for raw in websocket.iter_text():
-                    reply = self._handle_message(raw)
+                    reply = self._route_message(raw)
 
                     if reply is not None:
                         await self._send(websocket, reply)
@@ -375,36 +400,50 @@ class Gateway:
         except Exception as e:
             logger.error(f"Monitor error for {client_id}: {e}")
 
-    def _handle_message(self, raw: str) -> dict | None:
+    def _route_message(self, raw: str) -> dict | None:
         """Parse one client message and return the reply, if any."""
         try:
             data = json.loads(raw)
+
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {raw[:100]}")
+
             return None
 
         if not isinstance(data, dict):
             return None
 
         kind = data.get("t")
-        if kind == "input":
-            text = str(data.get("text") or "").strip()
-            mid = data.get("mid")
-            mid = mid if isinstance(mid, str) else None
 
-            if text and self.on_input is not None:
-                if not self._accept_mid(mid):
-                    return None
+        match kind:
+            case "input":
+                self._accept_input(data)
 
-                self.on_input(text, mid)
-            elif not text:
-                logger.debug("Empty input ignored")
-        elif kind == "ping":
-            return {"t": "pong", "content": {}}
-        elif kind in ("pause", "resume") and self.on_pause is not None:
-            self.on_pause(kind == "pause")
+            case "ping":
+                return {"t": "pong", "content": {}}
+
+            case "pause" | "resume":
+                if self.on_pause is not None:
+                    self.on_pause(kind == "pause")
 
         return None
+
+    def _accept_input(self, data: dict) -> None:
+        """Deliver one input line; a duplicate mid is dropped."""
+        text = str(data.get("text") or "").strip()
+
+        if not text:
+            logger.debug("Empty input ignored")
+
+            return
+
+        mid = data.get("mid")
+        mid = mid if isinstance(mid, str) else None
+
+        if self.on_input is None or not self._accept_mid(mid):
+            return
+
+        self.on_input(text, mid)
 
     # ------------------------------------------------------------------
     # Helpers

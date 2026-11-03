@@ -12,10 +12,10 @@ from typing import Any
 import pytest
 
 from nan.agent import Agent
-from nan.config import settings
+from nan.config import Settings
 from nan.execution import Sandbox
 from nan.injection import InjectionHub
-from nan.llm import ThinkingBlock, ToolCall, Usage
+from nan.llm import ThinkingBlock, Usage, VerbCall
 from nan.persistence import SnapshotStore
 
 
@@ -25,7 +25,7 @@ class FakeStreamEvent:
     text: str | None = None
     thinking_text: str | None = None
     thinking: list[ThinkingBlock] | None = None
-    tool_call: ToolCall | None = None
+    tool_call: VerbCall | None = None
     usage: Usage | None = None
     finish_reason: str | None = None
 
@@ -52,7 +52,7 @@ class FakeLLM:
     def script(self, marker: str, calls: list[tuple[Any, ...]]) -> None:
         self.scripts[marker] = list(calls)
 
-    async def _respond(self, request: Any) -> tuple[str | None, list[ToolCall]]:
+    async def _respond(self, request: Any) -> tuple[str | None, list[VerbCall]]:
         blob = " ".join((m.content or "") for m in request.messages)
 
         for marker, queue in self.scripts.items():
@@ -62,7 +62,7 @@ class FakeLLM:
                 if step[0] == "text":
                     return "ok", []
 
-                call = ToolCall(id=f"t{len(self.requests)}", name=step[1], arguments=step[2])
+                call = VerbCall(id=f"t{len(self.requests)}", name=step[1], arguments=step[2])
 
                 return None, [call]
 
@@ -106,7 +106,7 @@ class SlowFakeLLM(FakeLLM):
 
         self._first_consumed = False
 
-    async def _respond(self, request: Any) -> tuple[str | None, list[ToolCall]]:
+    async def _respond(self, request: Any) -> tuple[str | None, list[VerbCall]]:
         if not self._first_consumed and not self.release_first.is_set():
             self._first_consumed = True
 
@@ -139,8 +139,11 @@ def make_agent(
 
         persona_path.write_text(persona, encoding="utf-8")
 
-    # Components read the live global settings; stamp this test's
-    # layout and policy in (the autouse fixture restores them).
+    # One settings instance per agent under test; the layout it
+    # exposes is the installation's fixed PATHS object, which the
+    # autouse fixture restores.
+    settings = kwargs.pop("settings", None) or Settings()
+
     settings.paths.workspace = workspace
 
     settings.paths.persona = persona_path
@@ -149,12 +152,14 @@ def make_agent(
         setattr(settings.agent, key, value)
 
     # The sandbox is a required Agent dependency; tests that don't
-    # care about isolation get the process-wide one.
-    sandbox = kwargs.pop("sandbox", Sandbox())
+    # care about isolation get an instance built from the same
+    # settings.
+    sandbox = kwargs.pop("sandbox", Sandbox(settings))
 
     return Agent(
+        settings=settings,
         llm=llm or FakeLLM(),  # type: ignore[arg-type]
-        injections=InjectionHub(),
+        injections=InjectionHub(settings),
         sandbox=sandbox,
         snapshots=SnapshotStore(tmp_path / "snapshots"),
         **kwargs,

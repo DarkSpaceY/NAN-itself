@@ -3,6 +3,33 @@
 The design rules the codebase is written against. When a change
 feels ambiguous, these decide.
 
+## Glossary
+
+One name per concept. The aliases noted in the last column are
+transport or prompt labels and stay as they are.
+
+| Term | Meaning | In code |
+| --- | --- | --- |
+| Agent | one independent loop, root or child | `Agent` |
+| root / child | agent without / with a parent | `parent is None`; `ROOT_VERBS` / `CHILD_VERBS` |
+| Turn | one observation -> one model call -> verb run | `Turn` |
+| Phase | where a turn stands | `TurnPhase`: observed -> injected -> thought -> acted -> committed |
+| Epoch | one continuous context; cleared when history outgrows the limit | `Turn.epoch`, `origin="context_cleared"` |
+| Observation | the per-turn user message built from delta / injection / inbox | `render._observation_message` |
+| Inbox | messages delivered, not yet observed | `InboxMessage`, `Agent._inbox` |
+| Delta | system-state lines (services, children, pause/resume) | `DeltaEvent`, `note_delta`, `_record_delta` |
+| Injection | service prompt contributions for this turn | `Injection` |
+| Archive | whole-turn record sent to a service after commit, never written back | `mode="archive"` |
+| Verb | an action the model may call | `Verb`, `VerbCall`, `VerbResult`, `VerbDefinition` |
+| Death | terminal record: reason + optional finish report | `Death` |
+| Suspend | silent save on shutdown, not a death | `Agent.suspend`, `Status.suspend` |
+| Surface | a service's panel in the front end | `/surfaces`, `Gateway._surfaces` |
+| Sink | the in-process event bus | `events.sink` |
+
+Wire/prompt aliases that stay: `<parentagent>` / `<subagent>` tags,
+the delta section `subagent`, and the model API's `tools` /
+`tool_calls`.
+
 ## Shell-first
 
 The model already knows the shell. Tools, skills, data
@@ -13,9 +40,8 @@ processing, service management -- all of it is reachable through
 ## Import direction
 
 The runtime module graph is acyclic and points downward: a module
-imports from its own package or a lower layer, never from a layer
-above it. `TYPE_CHECKING` blocks are the one place a module may
-name a type from above.
+imports from its own package or a lower layer. `TYPE_CHECKING` blocks
+are the one place a module may name a type from above.
 
     app.py               composition root
     ├── gateway          HTTP + WS; formats the stream, owns no agent state
@@ -23,7 +49,7 @@ name a type from above.
     └── agent            loop, turn engine, verbs, handles, sandbox
         ├── turn         the Turn record and prompt rendering
         ├── llm          DTOs (types.py) + transport (provider.py)
-        ├── config       settings singleton
+        ├── config       Settings schema + YAML source
         ├── events       sink singleton
         └── utils        loopback policy
 
@@ -33,13 +59,14 @@ The layers, bottom up:
    `config/models.py`, `llm/types.py` import nothing else from
    `nan`. `agent/handle.py` belongs here too: its `Agent`
    reference is type-only. Any layer may import these.
-2. **Singletons.** `config` (reads `config/nan.yaml` at import)
-   and `events` (builds the sink) are imported by every layer and
-   import nothing upward. Both set up their state at import time.
+2. **Runtime infrastructure.** `config` (the schema; the
+   composition root builds the one `Settings` instance) and
+   `events` (the process-wide sink) are imported by every layer and
+   import only downward.
 3. **Model layer.** `llm/provider.py` imports `config` and
    `llm/types`. `app.py` constructs it, and `agent/engine.py`
    makes the calls. `turn/` reads DTOs from `llm`; the dependency
-   runs one way, so `llm` does not import `turn`.
+   runs one way, from `turn` to `llm`.
 4. **Agent.** `agent/` imports `config`, `events`, `llm`, `turn`.
    It does not import `gateway`, `injection` or `app`: the
    injection hub arrives as a constructor argument and is named
@@ -68,7 +95,7 @@ Three rules cover the cases that do not fit the ladder:
 - **Intra-package loading order.** `agent/verbs/__init__.py`
   imports the six verb classes inside `_build_registry()`, after
   `Verb` and `VerbOutcome` exist. Verb modules import the
-  package, never each other.
+  package only.
 - **Package re-exports.** `nan/llm/__init__.py` exports the DTOs
   and the provider, so `from nan.llm import Message` also loads
   `provider` and `config`. A module that wants only DTOs imports

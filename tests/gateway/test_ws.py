@@ -13,7 +13,8 @@ from typing import Any
 import pytest
 import websockets
 
-from nan.config import settings
+from nan.config import Settings
+from nan.config.models import PATHS
 from nan.events import sink
 from nan.gateway import Gateway
 
@@ -50,7 +51,7 @@ async def _until(ws: Any, kind: str) -> dict:
 
 
 async def _serve(gateway: Gateway, port: int) -> tuple[asyncio.Task[None], str]:
-    settings.paths.frontend = Path("/nonexistent/nan-frontend")
+    PATHS.frontend = Path("/nonexistent/nan-frontend")
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     await _wait_port(port)
@@ -60,13 +61,15 @@ async def _serve(gateway: Gateway, port: int) -> tuple[asyncio.Task[None], str]:
 
 async def test_hello_carries_state_and_history_replays(no_sink: Any) -> None:
     port = _free_port()
-    settings.gateway.port = port
+    cfg = Settings()
+    cfg.gateway.port = port
 
     sink.reset(boot_id="test-boot")
     sink.emit("agent_started", content={"agent_id": "r0"})
 
     gateway = Gateway(
-        state_provider=lambda: {"boot": "test-boot", "model": "fake", "paused": False}
+        settings=cfg,
+        state_provider=lambda: {"boot": "test-boot", "model": "fake", "paused": False},
     )
     task, url = await _serve(gateway, port)
 
@@ -89,11 +92,12 @@ async def test_hello_carries_state_and_history_replays(no_sink: Any) -> None:
 
 async def test_input_carries_the_text_and_the_mid(no_sink: Any) -> None:
     port = _free_port()
-    settings.gateway.port = port
+    cfg = Settings()
+    cfg.gateway.port = port
 
     received: list[tuple[str, str | None]] = []
 
-    gateway = Gateway(on_input=lambda text, mid: received.append((text, mid)))
+    gateway = Gateway(settings=cfg, on_input=lambda text, mid: received.append((text, mid)))
     task, url = await _serve(gateway, port)
 
     try:
@@ -129,11 +133,12 @@ async def test_input_carries_the_text_and_the_mid(no_sink: Any) -> None:
 
 async def test_ping_pong_and_pause_resume(no_sink: Any) -> None:
     port = _free_port()
-    settings.gateway.port = port
+    cfg = Settings()
+    cfg.gateway.port = port
 
     paused: list[bool] = []
 
-    gateway = Gateway(on_pause=paused.append)
+    gateway = Gateway(settings=cfg, on_pause=paused.append)
     task, url = await _serve(gateway, port)
 
     try:
@@ -166,11 +171,16 @@ async def test_ping_pong_and_pause_resume(no_sink: Any) -> None:
 
 async def test_unknown_message_type_is_ignored(no_sink: Any) -> None:
     port = _free_port()
-    settings.gateway.port = port
+    cfg = Settings()
+    cfg.gateway.port = port
 
     called: list[Any] = []
 
-    gateway = Gateway(on_input=lambda text, mid: called.append(text), on_pause=called.append)
+    gateway = Gateway(
+        settings=cfg,
+        on_input=lambda text, mid: called.append(text),
+        on_pause=called.append,
+    )
     task, url = await _serve(gateway, port)
 
     try:

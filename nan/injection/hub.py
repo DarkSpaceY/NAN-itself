@@ -8,7 +8,7 @@ then heartbeats. Two modes exist:
     inject    the turn arrives fresh before every prompt assembly;
               the service answers with prompt text
     archive   each turn arrives complete when it ends; the reply
-              is an acknowledgement and is never recorded
+              is an acknowledgement, recorded nowhere in the turn
 
 Both deliveries carry one turn as a flat JSON body.
 Both modes appear in the per-agent service delta.
@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from nan.config import settings
+from nan.config import Settings
 from nan.turn import DeltaEvent, Injection, Turn
 from nan.utils.loopback import entry_allowed, is_loopback_url
 
@@ -45,35 +45,36 @@ class InjectionHub:
     boundary, archive() once the turn ends.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
         self._services: dict[str, ServiceEntry] = {}
 
         # agent_id -> live service ids seen at its last turn boundary
         self._last_reported: dict[str, set[str]] = {}
 
-        self._client = InjectionClient()
+        self._client = InjectionClient(settings)
         self._server: uvicorn.Server | None = None
         self._server_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
-    # Endpoint / policy (live reads of the global settings)
+    # Endpoint / policy
     # ------------------------------------------------------------------
 
     @property
     def host(self) -> str:
-        return settings.injection.host
+        return self._settings.injection.host
 
     @property
     def port(self) -> int:
-        return settings.injection.port
+        return self._settings.injection.port
 
     @property
     def request_timeout(self) -> float:
-        return settings.injection.timeout
+        return self._settings.injection.timeout
 
     @property
     def heartbeat_ttl(self) -> float:
-        return settings.injection.heartbeat_ttl
+        return self._settings.injection.heartbeat_ttl
 
     # ------------------------------------------------------------------
     # Registry server
@@ -226,16 +227,12 @@ class InjectionHub:
     # Collection
     # ------------------------------------------------------------------
 
-    def forget(self, agent_id: str) -> None:
+    def forget_agent(self, agent_id: str) -> None:
         """Drop per-agent tracking; called when the agent exits."""
         self._last_reported.pop(agent_id, None)
 
-    def _live_services(self) -> list[ServiceEntry]:
-        """
-        The registered services whose heartbeat is still fresh. The
-        single read point, so it also evicts: a service that stopped
-        beating is forgotten here and never accumulates.
-        """
+    def _evict_stale_services(self) -> None:
+        """Drop entries whose heartbeat stopped beating."""
         now = time.time()
 
         for service_id, entry in list(self._services.items()):
@@ -243,6 +240,10 @@ class InjectionHub:
                 logger.info("Injection service expired: {}", service_id)
 
                 del self._services[service_id]
+
+    def _live_services(self) -> list[ServiceEntry]:
+        """The registered services whose heartbeat is still fresh."""
+        self._evict_stale_services()
 
         return list(self._services.values())
 
@@ -278,13 +279,15 @@ class InjectionHub:
         """
         prev = self._last_reported.get(agent_id)
 
-        online = live_ids - (prev or set())
-        offline = (prev or set()) - live_ids
-
         self._last_reported[agent_id] = live_ids
 
         if prev is None and not live_ids:
             return []  # no services registered yet
+
+        known = prev or set()
+
+        online = live_ids - known
+        offline = known - live_ids
 
         events = [DeltaEvent("service", f"+{s} online") for s in sorted(online)]
         events += [DeltaEvent("service", f"-{s} offline") for s in sorted(offline)]

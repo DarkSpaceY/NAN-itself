@@ -197,8 +197,8 @@ message run this turn contributed to the prompt, in the same
 `origin` says why the turn began: `first` (the agent's first turn),
 `normal`, or `context_cleared` (the first turn after the rendered
 history was cleared wholesale -- rendered sequences do not cross
-this boundary). It says nothing about whether the turn ended;
-`ended_at` and the delivery channel do.
+this boundary). Whether the turn ended is carried by `ended_at` and
+the delivery channel.
 
 A completed turn carries `death` when that turn ended the agent:
 `reason` is the exit reason, `report` the finish report when the
@@ -247,7 +247,7 @@ flowchart TD
 ```
 
 - The hub allows `injection.timeout` (default 2 s) per service
-  per turn. There is no retry.
+  per turn. Each delivery gets one attempt.
 - A failure or timeout becomes an `Injection` with `ok: false`
   and the error text, recorded in the turn -- the agent sees it.
 - An empty reply contributes nothing.
@@ -279,21 +279,21 @@ What it owns, so you do not write it again:
 - **Config** -- subclass `ServiceConfig` with your own keys, then
   `read_config(YourConfig, Path(__file__).parent / "config.yaml")`.
   Defaults are filled by the kit: `service_id` from the directory
-  name, `hub_url` from `NAN_INJECTION_PORT` (falling back to 8901),
-  `gateway_url` 8765, `mode` `inject`. The file wins wherever it
-  says something. `config.home` and `config.logs_dir` are bound to
+  name, `hub_url` from `NAN_INJECTION_PORT` (the core exports its port
+  to autostart; a service launched by hand sets it or `hub_url` in the
+  file), `gateway_url` 8765, `mode` `inject`. The file wins wherever
+  it says something. `config.home` and `config.logs_dir` are bound to
   the directory the config was read from: logs go under `logs/`, and
   state is whatever you name under `home`.
 - **Lifecycle** -- `async with HubLink(config):` registers, heartbeats
   every 5 s, re-registers when the hub answers `{"status": "unknown"}`
   (it forgot you after a restart), re-posts your panel when
   `config.surface` is set, and unregisters on exit. Every post is
-  best effort: an absent hub costs a warning line, not a failed
-  request.
+  best effort: an absent hub costs only a warning line.
 - **Logging** -- `setup_logging(config)` sends loguru to
   `logs/<service_id>.log` (10 MB, 3 kept). The boot scripts capture
   only what is printed before that, in `logs/<name>.boot.log`, so
-  neither file has two writers.
+  each file has one writer.
 - **Tests** -- `StubHub` stands in for the hub and gateway with a
   recorder; `assert_registered`, `assert_turn_text`,
   `assert_turn_ack` state the contract once:

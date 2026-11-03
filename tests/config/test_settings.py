@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
-from nan.config import Settings, settings
+from nan.config import Settings
 from nan.config.models import Paths
 from nan.llm.provider import _proxy_kwargs
 
@@ -118,28 +118,30 @@ def test_snapshots_live_outside_the_agent_workspace() -> None:
 
 
 def test_live_config_and_committed_template_agree() -> None:
-    """The process-wide settings load config/nan.yaml at import.
+    """A Settings instance loads config/nan.yaml on construction.
 
     The live file is git-ignored (it holds the key); the template is
     what a checkout actually carries, so it must stay loadable and
     keep the same non-secret defaults."""
-    assert settings.paths.config.is_file()
-    assert settings.llm.provider == "openai"
-    assert settings.gateway.host == "127.0.0.1"
-    assert settings.gateway.port == 8765
-    assert settings.injection.host == "127.0.0.1"
-    assert settings.injection.port == 8901
-    assert settings.sandbox.required is True
-    assert settings.agent.autonomous_interval == 0.0
-    assert settings.autostart.enabled is True
+    cfg = Settings()
 
-    template = settings.paths.config.with_name("nan.yaml.example")
+    assert cfg.paths.config.is_file()
+    assert cfg.llm.provider == "openai"
+    assert cfg.gateway.host == "127.0.0.1"
+    assert cfg.gateway.port == 8765
+    assert cfg.injection.host == "127.0.0.1"
+    assert cfg.injection.port == 8901
+    assert cfg.sandbox.required is True
+    assert cfg.agent.autonomous_interval == 0.0
+    assert cfg.autostart.enabled is True
+
+    template = cfg.paths.config.with_name("nan.yaml.example")
     assert template.is_file()
     loaded = yaml.safe_load(template.read_text(encoding="utf-8"))
     assert loaded["llm"]["api_key"] == ""
-    assert loaded["gateway"]["port"] == settings.gateway.port
+    assert loaded["gateway"]["port"] == cfg.gateway.port
     assert loaded["sandbox"]["deny"] == [
-        {"pattern": rule.pattern, "reason": rule.reason} for rule in settings.sandbox.deny
+        {"pattern": rule.pattern, "reason": rule.reason} for rule in cfg.sandbox.deny
     ]
 
 

@@ -11,8 +11,8 @@
 #   env      optional extra environment variables for the server process
 #   cwd      optional working directory
 
-# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
-# at launch, 8901 otherwise).
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT,
+# exported to autostart).
 
 service_id: mcp
 host: 127.0.0.1

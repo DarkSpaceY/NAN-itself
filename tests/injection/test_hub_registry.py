@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from nan.config import settings
+from nan.config import Settings
 from nan.injection import InjectionHub
 
 pytestmark = pytest.mark.asyncio
@@ -40,9 +40,10 @@ async def _wait_port(port: int) -> None:
 async def test_registry_round_trip(no_sink: Any) -> None:
     port = _free_port()
 
-    settings.injection.port = port
+    cfg = Settings()
+    cfg.injection.port = port
 
-    hub = InjectionHub()
+    hub = InjectionHub(cfg)
 
     await hub.start()
 
@@ -103,9 +104,10 @@ async def test_registry_round_trip(no_sink: Any) -> None:
 async def test_default_mode_is_inject(no_sink: Any) -> None:
     port = _free_port()
 
-    settings.injection.port = port
+    cfg = Settings()
+    cfg.injection.port = port
 
-    hub = InjectionHub()
+    hub = InjectionHub(cfg)
 
     await hub.start()
 

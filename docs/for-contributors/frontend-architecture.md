@@ -6,9 +6,9 @@ document is the other half -- how the renderer consuming that
 stream is laid out, which module owns which state, and which
 invariants hold the renderer together.
 
-The frontend has no build-time knowledge of the agent: it imports
-nothing from `nan/`, and turns and replies exist only as events on
-the stream. Everything on screen arrived as an event.
+The frontend imports nothing from `nan/`: turns and replies reach it
+as events on the stream, and everything on screen arrived as an
+event.
 
 ## Layout
 

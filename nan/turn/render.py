@@ -1,8 +1,9 @@
 """
 Rendering: the ONLY place a turn becomes model messages.
 
-Deterministic by contract: the same Turn always renders to the
-same bytes. A frozen turn keeps its rendered run.
+Deterministic by contract: rendering depends only on the Turn, so
+the same Turn yields the same bytes. A frozen turn keeps its
+rendered run.
 """
 
 from __future__ import annotations
@@ -17,9 +18,9 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
     """
     One turn as its message run: the observation (injections,
     inbox, task), then the assistant's reply or calls, then one
-    tool message per call -- paired by call id, so a call whose
-    result never landed renders as interrupted. An in-flight turn
-    renders as its observation alone.
+    tool message per call -- paired by call id, so a call with no
+    result renders as interrupted. An in-flight turn renders as
+    its observation alone.
     """
     messages: list[Message] = [_observation_message(turn)]
 
@@ -33,13 +34,13 @@ def render_turn(turn: Turn) -> tuple[Message, ...]:
             role="assistant",
             content=turn.reply or "",
             thinking=list(turn.thinking),
-            tool_calls=list(turn.calls),
+            tool_calls=list(turn.verb_calls),
         )
     )
 
-    results = {result.call_id: result for result in turn.results}
+    results = {result.call_id: result for result in turn.verb_results}
 
-    for call in turn.calls:
+    for call in turn.verb_calls:
         result = results.get(call.id)
 
         messages.append(
@@ -73,42 +74,66 @@ def _observation_message(turn: Turn) -> Message:
         <injection>  service contributions this turn
         <inbox>      messages, tagged by the SENDER'S role
     """
-    parts: list[str] = []
+    sections = [
+        section
+        for section in (
+            _delta_section(turn),
+            _injection_section(turn),
+            _inbox_section(turn),
+        )
+        if section is not None
+    ]
 
-    # -- delta ----------------------------------------------------------
-    # Group events by section, sections ordered by first appearance.
-    # A pure function of turn.delta: same list, same bytes.
+    return Message(
+        role="user",
+        content="\n\n".join(sections) or "(no input this turn)",
+    )
+
+
+def _delta_section(turn: Turn) -> str | None:
+    """System state changes, grouped by section in first-seen order.
+    A pure function of turn.delta: same list, same bytes."""
     grouped: dict[str, list[str]] = {}
 
     for event in turn.delta:
         grouped.setdefault(event.section, []).append(event.line)
 
-    if grouped:
-        delta_inner = [
-            f"<{section}>{'\n'.join(lines)}</{section}>" for section, lines in grouped.items()
-        ]
+    if not grouped:
+        return None
 
-        parts.append("<delta>\n" + "\n".join(delta_inner) + "\n</delta>")
+    inner = [f"<{section}>{'\n'.join(lines)}</{section}>" for section, lines in grouped.items()]
 
-    # -- injections -----------------------------------------------------
-    if turn.injections:
-        sections = []
-        for injection in turn.injections:
-            body = injection.text if injection.ok else f"[service error] {injection.text}"
-            sections.append(f'<service id="{injection.service_id}">\n{body}\n</service>')
-        parts.append("<injection>\n" + "\n\n".join(sections) + "\n</injection>")
+    return "<delta>\n" + "\n".join(inner) + "\n</delta>"
 
-    # -- inbox ----------------------------------------------------------
-    if turn.inbox:
-        sections = []
-        for message in turn.inbox:
-            attrs = f' id="{message.source}"' if message.kind == "subagent" else ""
-            if message.event != "send":
-                attrs += f' event="{message.event}"'
-            sections.append(f"<{message.kind}{attrs}>\n{message.text}\n</{message.kind}>")
-        parts.append("<inbox>\n" + "\n\n".join(sections) + "\n</inbox>")
 
-    return Message(
-        role="user",
-        content="\n\n".join(parts) or "(no input this turn)",
-    )
+def _injection_section(turn: Turn) -> str | None:
+    """Service contributions; a failed service keeps its error."""
+    if not turn.injections:
+        return None
+
+    services: list[str] = []
+
+    for injection in turn.injections:
+        body = injection.text if injection.ok else f"[service error] {injection.text}"
+
+        services.append(f'<service id="{injection.service_id}">\n{body}\n</service>')
+
+    return "<injection>\n" + "\n\n".join(services) + "\n</injection>"
+
+
+def _inbox_section(turn: Turn) -> str | None:
+    """Inbox messages, tagged by the sender's role."""
+    if not turn.inbox:
+        return None
+
+    messages: list[str] = []
+
+    for message in turn.inbox:
+        attrs = f' id="{message.source}"' if message.kind == "subagent" else ""
+
+        if message.event != "send":
+            attrs += f' event="{message.event}"'
+
+        messages.append(f"<{message.kind}{attrs}>\n{message.text}\n</{message.kind}>")
+
+    return "<inbox>\n" + "\n\n".join(messages) + "\n</inbox>"

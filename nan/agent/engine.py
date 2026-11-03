@@ -11,9 +11,9 @@ The engine owns no agent state: it reads only what rides the
 parameters and writes nothing back. The Agent persists the turn
 between phases.
 
-Streaming always runs and is always emitted to the `sink`
-singleton; without subscribers the events simply land in the
-history ring. Agent identity rides the emit calls as plain keys.
+Streaming runs on every turn and emits to the `sink` singleton;
+with no subscribers the events land in the history ring. Agent
+identity rides the emit calls as plain keys.
 """
 
 from __future__ import annotations
@@ -32,11 +32,11 @@ from nan.llm.types import (
     LLMResponse,
     Message,
     ThinkingBlock,
-    ToolCall,
-    ToolDefinition,
     Usage,
+    VerbCall,
+    VerbDefinition,
 )
-from nan.turn import DeltaEvent, Injection, LLMCall, ToolResult, Turn, render_turn
+from nan.turn import DeltaEvent, Injection, LLMCall, Turn, VerbResult, render_turn
 
 if TYPE_CHECKING:
     from nan.llm import LLMProvider
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 InjectFn = Callable[..., Awaitable[tuple[tuple[Injection, ...], list[DeltaEvent]]]]
 
 # Verb execution: one call in, its string result out.
-ExecuteFn = Callable[[ToolCall], Awaitable[str]]
+ExecuteFn = Callable[[VerbCall], Awaitable[str]]
 
 # Progress hook: the turn as it stands, made durable by the Agent.
 RecordFn = Callable[[Turn], Awaitable[None]]
@@ -98,7 +98,7 @@ class TurnEngine:
         *,
         persona: str,
         history: Sequence[Message],
-        tools: Sequence[ToolDefinition],
+        verbs: Sequence[VerbDefinition],
         retries: int,
     ) -> Turn:
         messages = [
@@ -112,7 +112,7 @@ class TurnEngine:
         response = await self.generate(
             agent_id=turn.agent_id,
             depth=turn.depth,
-            request=LLMRequest(messages=messages, tools=list(tools)),
+            request=LLMRequest(messages=messages, tools=list(verbs)),
         )
 
         return _with_response(
@@ -127,9 +127,9 @@ class TurnEngine:
         """
         Run the calls in order. Every result is recorded before the
         next call starts, so a stop mid-batch loses only the call in
-        flight -- never a reported one, and no call runs twice.
+        flight; recorded results ride the resumed turn.
         """
-        for call in turn.calls:
+        for call in turn.verb_calls:
             logger.info("[{}] verb {} {}", turn.agent_id, call.name, call.arguments)
 
             started_at = time.time()
@@ -138,9 +138,9 @@ class TurnEngine:
 
             turn = replace(
                 turn,
-                results=(
-                    *turn.results,
-                    ToolResult(
+                verb_results=(
+                    *turn.verb_results,
+                    VerbResult(
                         call_id=call.id,
                         name=call.name,
                         output=output,
@@ -164,7 +164,7 @@ class TurnEngine:
         text_parts: list[str] = []
         thinking_text_parts: list[str] = []
         thinking_blocks: list[ThinkingBlock] = []
-        tool_calls: list[ToolCall] = []
+        verb_calls: list[VerbCall] = []
         usage = Usage()
         finish_reason: FinishReason = "unknown"
 
@@ -205,7 +205,7 @@ class TurnEngine:
                 )
 
             elif event.kind == "tool_call" and event.tool_call is not None:
-                tool_calls.append(event.tool_call)
+                verb_calls.append(event.tool_call)
 
             elif event.kind == "done":
                 if event.usage is not None:
@@ -232,7 +232,7 @@ class TurnEngine:
         # orphans on replay either way.
         if stream_id is not None:
             sink.emit(
-                "output_done" if not tool_calls else "output_cancelled",
+                "output_done" if not verb_calls else "output_cancelled",
                 id=stream_id,
                 content={"agent_id": agent_id, "depth": depth},
             )
@@ -240,7 +240,7 @@ class TurnEngine:
         return LLMResponse(
             content=("".join(text_parts) or None),
             thinking=thinking_blocks,
-            tool_calls=tool_calls,
+            tool_calls=verb_calls,
             model=self.llm.model,
             usage=usage,
             finish_reason=finish_reason,
@@ -261,7 +261,7 @@ def _with_response(
         phase="thought",
         reply=response.content or "",
         thinking=tuple(response.thinking),
-        calls=tuple(response.tool_calls),
+        verb_calls=tuple(response.tool_calls),
         llm=LLMCall(
             model=response.model,
             started_at=started_at,

@@ -12,9 +12,9 @@ from .types import (
     LLMStreamEvent,
     Message,
     ThinkingBlock,
-    ToolCall,
-    ToolDefinition,
     Usage,
+    VerbCall,
+    VerbDefinition,
 )
 
 __all__ = [
@@ -26,7 +26,7 @@ __all__ = [
     "Message",
     "ProviderName",
     "ThinkingBlock",
-    "ToolCall",
-    "ToolDefinition",
     "Usage",
+    "VerbCall",
+    "VerbDefinition",
 ]

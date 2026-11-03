@@ -4,8 +4,8 @@ Delivery to local services, in two shapes.
 Injection services receive the fresh turn and answer with prompt
 text; archive services receive the completed turn and only
 acknowledge it. Injection outcomes land on the turn record;
-archive failures are logged and dropped, because the archive is
-an observer and never fails a turn.
+archive failures are logged and dropped: the archive is an
+observer whose outcome leaves the turn unchanged.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections.abc import Sequence
 import httpx
 from loguru import logger
 
-from nan.config import settings
+from nan.config import Settings
 from nan.injection.types import ServiceEntry
 from nan.turn import Injection, Turn
 
@@ -33,7 +33,7 @@ class InjectionClient:
     -- is a failed delivery, recorded as ok=False.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings) -> None:
         self._client = httpx.AsyncClient(timeout=settings.injection.timeout, trust_env=False)
 
     async def close(self) -> None:

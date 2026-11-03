@@ -2,12 +2,13 @@
 Composition root: core process = agents + injection registry +
 gateway + execution sandbox.
 
-Every component reads the process-wide `settings`; this module wires
-input and pause and owns the process lifecycle.
+This module builds the one `Settings` instance and hands it to every
+component; it also wires input and pause and owns the process
+lifecycle.
 
 One instance drives one process; `run` may be called once. Shutdown
-is persistence, not death: `root.suspend()` saves the snapshot and
-the next boot restores from it.
+persists: `root.suspend()` saves the snapshot and the next boot
+restores from it.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from loguru import logger
 
 from nan.agent import Agent
 from nan.boot import restore
-from nan.config import settings
+from nan.config import Settings
 from nan.events import sink
 from nan.execution import Sandbox
 from nan.gateway import Gateway
@@ -54,6 +55,7 @@ class Core:
         self._boot_id = uuid.uuid4().hex[:12]
         self._stop: asyncio.Event | None = None
 
+        self._settings: Settings | None = None
         self._llm: LLMProvider | None = None
         self._hub: InjectionHub | None = None
         self._sandbox: Sandbox | None = None
@@ -83,19 +85,21 @@ class Core:
     async def _initialize(self) -> None:
         self._stop = asyncio.Event()
 
-        self._llm = LLMProvider()
-        self._hub = InjectionHub()
+        self._settings = Settings()
+        self._llm = LLMProvider(self._settings)
+        self._hub = InjectionHub(self._settings)
 
-        settings.paths.workspace.mkdir(parents=True, exist_ok=True)
+        self._settings.paths.workspace.mkdir(parents=True, exist_ok=True)
 
-        self._sandbox = Sandbox()
+        self._sandbox = Sandbox(self._settings)
 
         # Reset before restore: its events must belong to this boot.
         sink.reset(boot_id=self._boot_id)
 
-        self._snapshots = SnapshotStore(settings.paths.snapshots)
+        self._snapshots = SnapshotStore(self._settings.paths.snapshots)
 
         self._root = await restore(
+            settings=self._settings,
             llm=self._llm,
             injections=self._hub,
             sandbox=self._sandbox,
@@ -104,6 +108,7 @@ class Core:
 
         if self._root is None:
             self._root = Agent(
+                settings=self._settings,
                 llm=self._llm,
                 injections=self._hub,
                 sandbox=self._sandbox,
@@ -111,18 +116,20 @@ class Core:
             )
 
         self._gateway = Gateway(
-            on_input=self._ingest,
+            settings=self._settings,
+            on_input=self._on_input,
             on_pause=self._on_pause,
             state_provider=self._state_provider,
         )
 
     async def _serve(self) -> None:
+        assert self._settings is not None
         assert self._hub is not None and self._root is not None
         assert self._gateway is not None and self._sandbox is not None
 
         await self._hub.start()
 
-        if settings.autostart.enabled:
+        if self._settings.autostart.enabled:
             self._start_autostart()
 
         # Restored agents were started by restore; a fresh root starts here.
@@ -139,10 +146,10 @@ class Core:
 
         logger.info(
             "nan running: gateway http://{}:{}, injection registry :{}, workspace {}, sandbox {}",
-            settings.gateway.host,
-            settings.gateway.port,
-            settings.injection.port,
-            settings.paths.workspace,
+            self._settings.gateway.host,
+            self._settings.gateway.port,
+            self._settings.injection.port,
+            self._settings.paths.workspace,
             "on" if self._sandbox.available else "degraded",
         )
 
@@ -350,7 +357,7 @@ class Core:
     # gateway callbacks
     # ------------------------------------------------------------------
 
-    def _ingest(self, text: str, mid: str | None = None) -> None:
+    def _on_input(self, text: str, mid: str | None = None) -> None:
         if self._state is not CoreState.RUNNING or self._root is None:
             logger.warning("Input dropped: core state is {}", self._state.value)
 
@@ -391,18 +398,18 @@ class Core:
 
     def _start_autostart(self) -> None:
         sandbox = self._sandbox
-        assert sandbox is not None
+        assert sandbox is not None and self._settings is not None
 
         self._autostart = Autostart(
             (
-                ("user", settings.paths.autostart, False),
-                ("agent", settings.paths.agent_autostart, True),
+                ("user", self._settings.paths.autostart, False),
+                ("agent", self._settings.paths.agent_autostart, True),
             ),
             env={
                 **os.environ,
-                "NAN_CORE_HOME": str(settings.paths.package),
-                "NAN_WORKSPACE": str(settings.paths.workspace),
-                "NAN_INJECTION_PORT": str(settings.injection.port),
+                "NAN_CORE_HOME": str(self._settings.paths.package),
+                "NAN_WORKSPACE": str(self._settings.paths.workspace),
+                "NAN_INJECTION_PORT": str(self._settings.injection.port),
                 "NAN_CORE_PID": str(os.getpid()),
             },
             wrap=sandbox.wrap,

@@ -13,7 +13,7 @@ import httpx
 import pytest
 import websockets
 
-from nan.config import settings
+from nan.config import Settings
 from nan.gateway import Gateway
 
 pytestmark = pytest.mark.asyncio
@@ -51,8 +51,9 @@ async def _until(ws: Any, kind: str) -> dict:
 
 async def test_surface_registration_broadcast_and_replay(no_sink: None) -> None:
     port = _free_port()
-    settings.gateway.port = port
-    gateway = Gateway()
+    cfg = Settings()
+    cfg.gateway.port = port
+    gateway = Gateway(settings=cfg)
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     try:
@@ -111,8 +112,9 @@ async def test_surface_update_replaces_without_removal(no_sink: None) -> None:
     """A different spec under the same service_id is an update: the
     desktop swaps the window in place."""
     port = _free_port()
-    settings.gateway.port = port
-    gateway = Gateway()
+    cfg = Settings()
+    cfg.gateway.port = port
+    gateway = Gateway(settings=cfg)
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     try:
@@ -157,10 +159,10 @@ async def test_surface_update_replaces_without_removal(no_sink: None) -> None:
 
 async def test_surface_expires_without_heartbeat(no_sink: None) -> None:
     port = _free_port()
-    original_ttl = settings.gateway.surface_ttl
-    settings.gateway.port = port
-    settings.gateway.surface_ttl = 1.0
-    gateway = Gateway()
+    cfg = Settings()
+    cfg.gateway.port = port
+    cfg.gateway.surface_ttl = 1.0
+    gateway = Gateway(settings=cfg)
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     try:
@@ -187,7 +189,6 @@ async def test_surface_expires_without_heartbeat(no_sink: None) -> None:
             }
 
     finally:
-        settings.gateway.surface_ttl = original_ttl
         await gateway.close()
 
         with contextlib.suppress(asyncio.CancelledError):

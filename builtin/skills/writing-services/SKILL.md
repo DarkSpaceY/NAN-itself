@@ -51,7 +51,8 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 
 ## The protocol (nan/injection/hub.py is the source of truth)
 
-1. On startup, POST to the hub (default `http://127.0.0.1:8901`):
+1. On startup, POST to the hub (the core's hub; `NAN_INJECTION_PORT`
+   names its port):
 
    ```json
    POST /register  {"service_id": "<name>", "endpoint": "http://127.0.0.1:<port>/turn",

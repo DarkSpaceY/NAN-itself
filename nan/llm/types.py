@@ -1,6 +1,6 @@
 """
 LLM protocol vocabulary: the shared DTOs every layer speaks --
-messages, tool calls, usage, the streaming event contract. Pure
+messages, verb calls, usage, the streaming event contract. Pure
 data, no I/O.
 """
 
@@ -23,9 +23,9 @@ class Usage(BaseModel):
     completion_tokens: int = 0
 
 
-class ToolDefinition(BaseModel):
+class VerbDefinition(BaseModel):
     """
-    Model-facing tool definition.
+    Model-facing verb definition.
     """
 
     name: str
@@ -33,14 +33,19 @@ class ToolDefinition(BaseModel):
     input_schema: dict[str, Any]
 
 
-class ToolCall(BaseModel):
+class VerbCall(BaseModel):
     """
-    One complete model-generated Tool call.
+    One complete model-generated verb call.
+
+    `error` carries the adapter's reason when parsing fails: the
+    runtime returns that text as this call's result. It lives one
+    run and is excluded from snapshots.
     """
 
     id: str
     name: str
     arguments: dict[str, Any]
+    error: str | None = Field(default=None, exclude=True)
 
 
 class ThinkingBlock(BaseModel):
@@ -87,7 +92,7 @@ class Message(BaseModel):
         default_factory=list,
     )
 
-    tool_calls: list[ToolCall] = Field(
+    tool_calls: list[VerbCall] = Field(
         default_factory=list,
     )
 
@@ -99,7 +104,7 @@ class LLMRequest(BaseModel):
 
     temperature: float = 0.7
 
-    tools: list[ToolDefinition] = Field(
+    tools: list[VerbDefinition] = Field(
         default_factory=list,
     )
 
@@ -115,7 +120,7 @@ class LLMResponse(BaseModel):
         default_factory=list,
     )
 
-    tool_calls: list[ToolCall] = Field(
+    tool_calls: list[VerbCall] = Field(
         default_factory=list,
     )
 
@@ -149,7 +154,7 @@ class LLMStreamEvent(BaseModel):
 
     text: str | None = None
 
-    tool_call: ToolCall | None = None
+    tool_call: VerbCall | None = None
 
     usage: Usage | None = None
 

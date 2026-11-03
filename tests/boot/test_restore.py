@@ -13,10 +13,11 @@ import pytest
 from nan_fakes import FakeLLM, await_until
 
 from nan.boot import restore
+from nan.config import Settings
 from nan.events import sink
 from nan.execution import Sandbox
 from nan.injection import InjectionHub
-from nan.llm import ToolCall
+from nan.llm import VerbCall
 from nan.persistence import AgentSnapshot, SnapshotStore
 from nan.turn import INTERRUPTED, Death, InboxMessage, Turn, freeze_turn
 
@@ -40,10 +41,13 @@ def _done(agent_id: str, parent_id: str | None, depth: int, reply: str) -> Turn:
 async def _restore(store: SnapshotStore) -> Any:
     sink.reset(boot_id="test-boot")
 
+    cfg = Settings()
+
     return await restore(
+        settings=cfg,
         llm=FakeLLM(),
-        injections=InjectionHub(),
-        sandbox=Sandbox(),
+        injections=InjectionHub(cfg),
+        sandbox=Sandbox(cfg),
         snapshots=store,
     )
 
@@ -81,7 +85,7 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
                     origin="first",
                     phase="thought",
                     reply="",
-                    calls=(ToolCall(id="k1", name="sleep", arguments={"seconds": 0}),),
+                    verb_calls=(VerbCall(id="k1", name="sleep", arguments={"seconds": 0}),),
                 ),
             ),
         )
@@ -108,7 +112,7 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
     turn = child.turns[0]
 
     assert turn.ended_at is not None
-    assert [result.output for result in turn.results] == [INTERRUPTED]
+    assert [result.output for result in turn.verb_results] == [INTERRUPTED]
     assert turn.rendered is not None
     assert child.history[: len(turn.rendered)] == list(turn.rendered)
 

@@ -10,9 +10,9 @@ so each Turn stays self-contained for observers.
 The spawn tree is not stored: `parent_id` names the edge, so
 restore rebuilds the tree from the files on disk.
 
-The store is whole-state, never append: the state is serialized to
-a temp file and atomically replaced over the target, so a crash
-leaves either the old snapshot or the new one, never a torn one.
+The store writes whole state rather than appending: the state is
+serialized to a temp file and atomically replaced over the target,
+so a crash leaves either the old snapshot or the new one.
 Every write is fsynced: the agent is durable at each phase
 boundary.
 """
@@ -120,11 +120,11 @@ class InFlight:
 
     @property
     def unobserved(self) -> bool:
-        """Nothing was observed: the turn cannot resume, only requeue."""
+        """The turn is still unobserved: restore drops it and requeues it."""
         return self.turn.phase == "observed"
 
     @property
-    def requeue(self) -> tuple[InboxMessage, ...]:
+    def inbox_to_requeue(self) -> tuple[InboxMessage, ...]:
         return self.turn.inbox if self.unobserved else ()
 
 
@@ -180,30 +180,33 @@ class SnapshotStore:
         Every readable snapshot, keyed by agent id. An unreadable
         file is logged and skipped: its agent cannot come back.
         """
+        if not self._directory.is_dir():
+            return {}
+
         snapshots: dict[str, AgentSnapshot] = {}
 
-        if not self._directory.is_dir():
-            return snapshots
-
         for path in sorted(self._directory.glob("*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+            snapshot = self._read_snapshot(path)
 
-                snapshot = AgentSnapshot.from_json(data)
-
-                if snapshot.agent_id != path.stem:
-                    raise ValueError(
-                        f"snapshot id {snapshot.agent_id} does not match file {path.name}"
-                    )
-
-            except (OSError, ValueError, TypeError, AttributeError) as exc:
-                logger.error("snapshot {} unreadable; agent not restored: {}", path.name, exc)
-
-                continue
-
-            snapshots[snapshot.agent_id] = snapshot
+            if snapshot is not None:
+                snapshots[snapshot.agent_id] = snapshot
 
         return snapshots
+
+    def _read_snapshot(self, path: Path) -> AgentSnapshot | None:
+        """One snapshot file; None (logged) when it cannot be read."""
+        try:
+            snapshot = AgentSnapshot.from_json(json.loads(path.read_text(encoding="utf-8")))
+
+            if snapshot.agent_id != path.stem:
+                raise ValueError(f"snapshot id {snapshot.agent_id} does not match file {path.name}")
+
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            logger.error("snapshot {} unreadable; agent not restored: {}", path.name, exc)
+
+            return None
+
+        return snapshot
 
     def remove(self, agent_id: str) -> None:
         with contextlib.suppress(FileNotFoundError):

@@ -2,8 +2,8 @@
 The configuration schema: the shape of config/nan.yaml, plus the
 fixed filesystem layout.
 
-`nan.config` builds the process-wide `settings` instance from
-these models.
+The composition root builds one `Settings` instance from these
+models and passes it explicitly to every component.
 """
 
 from __future__ import annotations
@@ -44,7 +44,8 @@ class Paths(BaseModel):
     agent_autostart: Path = _REPO_ROOT / "workspace" / "autostart.sh"  # agent-writable, sandboxed
 
 
-# The one layout instance; components read it via settings.paths.
+# The one layout instance (fixed by the installation); components
+# read it via `settings.paths`.
 PATHS = Paths()
 
 
@@ -120,7 +121,7 @@ class Settings(BaseSettings):
 
     @property
     def paths(self) -> Paths:
-        """Not a config field: the layout never comes from the file."""
+        """The layout comes from `PATHS`; the file carries policy only."""
         return PATHS
 
     @classmethod

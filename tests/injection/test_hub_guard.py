@@ -9,7 +9,7 @@ import socket
 import httpx
 import pytest
 
-from nan.config import settings
+from nan.config import Settings
 from nan.injection import InjectionHub
 
 pytestmark = pytest.mark.asyncio
@@ -39,9 +39,10 @@ async def _wait_port(port: int) -> None:
 async def test_hub_rejects_non_loopback_endpoint_and_hostile_entry(no_sink: None) -> None:
     port = _free_port()
 
-    settings.injection.port = port
+    cfg = Settings()
+    cfg.injection.port = port
 
-    hub = InjectionHub()
+    hub = InjectionHub(cfg)
 
     await hub.start()
 

@@ -3,8 +3,8 @@
 # The archive is best-effort: it observes completed turns, never
 # contributes to the prompt, and never fails a turn.
 #
-# hub_url defaults to the core's injection port (NAN_INJECTION_PORT
-# at launch, 8901 otherwise); gateway_url defaults to 8765. Set either
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT,
+# exported to autostart); gateway_url defaults to 8765. Set either
 # here to pin it.
 
 service_id: "record"

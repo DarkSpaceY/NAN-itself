@@ -8,6 +8,60 @@ from nan.llm import Message, ThinkingBlock
 from nan.llm.provider import LLMProvider
 
 
+def _provider() -> LLMProvider:
+    """The mapping seams need no SDK clients, so skip the constructor."""
+    return LLMProvider.__new__(LLMProvider)
+
+
+def test_a_well_formed_tool_call_carries_no_error() -> None:
+    call = _provider()._build_verb_call(
+        tool_id="k1", name="shell", raw_arguments='{"command": "ls"}'
+    )
+
+    assert call.id == "k1"
+    assert call.name == "shell"
+    assert call.arguments == {"command": "ls"}
+    assert call.error is None
+
+    # The error is a run-time marker only: snapshots keep their shape.
+    assert "error" not in call.model_dump()
+
+
+def test_broken_json_is_returned_as_the_call_error() -> None:
+    call = _provider()._build_verb_call(tool_id="k1", name="shell", raw_arguments="{oops")
+
+    assert call.arguments == {}
+    assert call.error is not None and "not valid JSON" in call.error
+
+
+def test_the_error_echo_is_bounded() -> None:
+    blob = "{" + "x" * 1000
+
+    call = _provider()._build_verb_call(tool_id="k1", name="shell", raw_arguments=blob)
+
+    assert call.error is not None
+    assert len(call.error) < LLMProvider._MAX_ARGUMENT_ECHO + 100
+
+
+def test_non_object_arguments_are_an_error() -> None:
+    call = _provider()._build_verb_call(tool_id="k1", name="shell", raw_arguments="[1, 2]")
+
+    assert call.arguments == {}
+    assert call.error is not None and "JSON object" in call.error
+
+
+def test_missing_id_and_name_are_normalized() -> None:
+    provider = _provider()
+
+    unnamed = provider._build_verb_call(tool_id="", name="", raw_arguments="")
+
+    # An id is the provider's to supply, so it is synthesized silently;
+    # a nameless call is the model's mistake and is reported.
+    assert unnamed.id.startswith("call-")
+    assert unnamed.name == LLMProvider._INVALID_TOOL_NAME
+    assert unnamed.error is not None and "without a name" in unnamed.error
+
+
 def test_openai_replays_structured_reasoning() -> None:
     message = Message(
         role="assistant",

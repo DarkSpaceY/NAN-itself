@@ -11,7 +11,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nan.config import settings
+from nan.config import Settings
+from nan.config.models import PATHS
 from nan.gateway import Gateway
 
 pytestmark = pytest.mark.asyncio
@@ -40,10 +41,11 @@ async def _wait_port(port: int) -> None:
 
 async def test_entry_guard_rejects_forged_host_and_origin() -> None:
     port = _free_port()
-    settings.gateway.port = port
+    cfg = Settings()
+    cfg.gateway.port = port
 
-    settings.paths.frontend = Path("/nonexistent/nan-frontend")
-    gateway = Gateway()
+    PATHS.frontend = Path("/nonexistent/nan-frontend")
+    gateway = Gateway(settings=cfg)
     task = asyncio.create_task(gateway.serve(open_browser=False))
 
     try:

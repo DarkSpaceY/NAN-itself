@@ -251,7 +251,7 @@ async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sin
     assert [m.role for m in llm.requests[1].messages].count("tool") == 1
 
     # turn 2 had no calls: the loop parks here
-    assert root.last_turn is not None and root.last_turn.calls == ()
+    assert root.last_turn is not None and root.last_turn.verb_calls == ()
 
     root.request_death("test cleanup")
 

@@ -1,8 +1,9 @@
 # Configuration
 
-Configuration lives in `config/nan.yaml`, read at startup into the
-process-wide `nan.config.settings` object; restart the core after
-editing it. The file is git-ignored (it holds your key);
+Configuration lives in `config/nan.yaml`, read at startup into one
+`Settings` instance that the composition root hands to every
+component; restart the core after editing it. The file is git-ignored
+(it holds your key);
 `config/nan.yaml.example` is the committed template, and a fresh
 checkout starts by copying it. NAN itself reads this file; the
 provider SDKs may fall back to their own env vars when
@@ -92,7 +93,7 @@ failure in either script does not block the core.
 
 ## Paths
 
-Paths are fixed (`nan.config.Paths`), not configuration.
+Paths are fixed in `nan.config.Paths`.
 
 | Key | Value | Meaning |
 |-----|---------|---------|

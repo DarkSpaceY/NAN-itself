@@ -6,12 +6,14 @@ contract is LIST self-containment: a list of Turns is enough to
 reconstruct the whole conversation (each completed Turn freezes
 its own rendered messages); history lives in the Turn list.
 
-    identity   agent_id / parent_id / depth
-    inputs     inbox (up messages: user input, child sends,
-               finish reports) / injections (per-turn service
-               contributions, errors included)
-    flow       reply / calls / results, written back as the
-               turn completes; `death` when this turn ended the agent
+    identity   agent_id / parent_id / depth / epoch / origin
+    time       started_at / ended_at
+    inputs     persona (when it changed) / inbox (up messages: user
+               input, child sends, finish reports) / injections
+               (per-turn service contributions, errors included) /
+               delta (system-state lines)
+    flow       phase / reply / thinking / verb_calls / verb_results / llm;
+               `death` when this turn ended the agent
     frozen     rendered -- the turn's message run, frozen after the
                first render (byte-stable for prefix caching)
 """
@@ -22,7 +24,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from nan.llm.types import Message, ThinkingBlock, ToolCall, Usage
+from nan.llm.types import Message, ThinkingBlock, Usage, VerbCall
 
 InboxKind = Literal["user", "parentagent", "subagent"]
 
@@ -42,7 +44,7 @@ TurnPhase = Literal["observed", "injected", "thought", "acted", "committed"]
 
 # What the model sees for a call whose verb never ran or never
 # reported back (a pause, a crash mid-act, a restored turn). Also
-# recorded in turn.results, so the turn stays self-contained.
+# recorded in turn.verb_results, so the turn stays self-contained.
 INTERRUPTED = "interrupted: agent stopped during execution"
 
 
@@ -148,9 +150,9 @@ class Injection:
 
 
 @dataclass(frozen=True)
-class ToolResult:
+class VerbResult:
     """
-    One executed tool call, positional with Turn.calls: `output`
+    One executed verb call, positional with Turn.verb_calls: `output`
     is the text the model saw, the interval is the verb's wall
     time.
     """
@@ -182,33 +184,42 @@ class DeltaEvent:
 
 @dataclass(frozen=True)
 class Turn:
+    # -- identity --------------------------------------------------------
     agent_id: str
     parent_id: str | None
     depth: int
 
-    inbox: tuple[InboxMessage, ...] = ()
-    injections: tuple[Injection, ...] = ()
-    delta: tuple[DeltaEvent, ...] = ()  # grouped into <delta><section> at render
-
     # The context epoch this turn belongs to. Clearing the context
-    # opens the next epoch; history never crosses it.
+    # opens the next epoch; history renders within one epoch.
     epoch: int = 0
 
     # Why the turn began, for observers (see TurnOrigin).
     origin: TurnOrigin = "normal"
 
-    # How far the turn has run (see TurnPhase). The only stage
-    # marker: no caller infers progress from the payload shape.
-    phase: TurnPhase = "observed"
+    # -- time ------------------------------------------------------------
+    started_at: float = field(default_factory=time.time)
+    ended_at: float | None = None
 
+    # -- inputs ----------------------------------------------------------
     # The new persona text when it changed before this turn: the
     # epoch marker for the system prompt. Null when unchanged.
     persona: str | None = None
 
+    inbox: tuple[InboxMessage, ...] = ()
+    injections: tuple[Injection, ...] = ()
+
+    # System-state lines, grouped into <delta><section> at render.
+    delta: tuple[DeltaEvent, ...] = ()
+
+    # -- flow ------------------------------------------------------------
+    # How far the turn has run (see TurnPhase). The only stage
+    # marker: no caller infers progress from the payload shape.
+    phase: TurnPhase = "observed"
+
     reply: str | None = None
     thinking: tuple[ThinkingBlock, ...] = ()
-    calls: tuple[ToolCall, ...] = ()
-    results: tuple[ToolResult, ...] = ()
+    verb_calls: tuple[VerbCall, ...] = ()
+    verb_results: tuple[VerbResult, ...] = ()
 
     llm: LLMCall | None = None
 
@@ -216,10 +227,8 @@ class Turn:
     # does not begin another one.
     death: Death | None = None
 
+    # -- frozen ----------------------------------------------------------
     rendered: tuple[Message, ...] | None = None
-
-    started_at: float = field(default_factory=time.time)
-    ended_at: float | None = None
 
     def to_json(self) -> dict[str, Any]:
         """
@@ -249,7 +258,7 @@ class Turn:
             "delta": [{"section": e.section, "line": e.line} for e in self.delta],
             "reply": self.reply,
             "thinking": [b.model_dump() for b in self.thinking],
-            "calls": [c.model_dump() for c in self.calls],
+            "calls": [c.model_dump() for c in self.verb_calls],
             "results": [
                 {
                     "call_id": r.call_id,
@@ -258,7 +267,7 @@ class Turn:
                     "started_at": r.started_at,
                     "ended_at": r.ended_at,
                 }
-                for r in self.results
+                for r in self.verb_results
             ],
             "llm": (
                 {
@@ -324,9 +333,9 @@ class Turn:
             thinking=tuple(
                 ThinkingBlock.model_validate(block) for block in data.get("thinking", ())
             ),
-            calls=tuple(ToolCall.model_validate(call) for call in data.get("calls", ())),
-            results=tuple(
-                ToolResult(
+            verb_calls=tuple(VerbCall.model_validate(call) for call in data.get("calls", ())),
+            verb_results=tuple(
+                VerbResult(
                     call_id=result["call_id"],
                     name=result["name"],
                     output=result["output"],
@@ -376,29 +385,29 @@ class Turn:
 
     def close_interrupted(self, *, ended_at: float | None = None) -> Turn:
         """
-        End a turn whose verbs never all reported: every call
+        End a turn with verbs still missing results: every call
         without a result gets an interrupted placeholder, then the
         turn closes. Rendering pairs by call id, so the fill makes
         the model see exactly what happened.
         """
-        finished = {result.call_id for result in self.results}
+        finished = {result.call_id for result in self.verb_results}
 
         now = time.time() if ended_at is None else ended_at
 
         return replace(
             self,
-            results=tuple(
+            verb_results=tuple(
                 [
-                    *self.results,
+                    *self.verb_results,
                     *(
-                        ToolResult(
+                        VerbResult(
                             call_id=call.id,
                             name=call.name,
                             output=INTERRUPTED,
                             started_at=now,
                             ended_at=now,
                         )
-                        for call in self.calls
+                        for call in self.verb_calls
                         if call.id not in finished
                     ),
                 ]
@@ -411,7 +420,7 @@ class Turn:
         """
         The static arrival shape: exactly the fields known when a
         turn is delivered to injection services (before the model
-        call). reply / calls / results / llm / death / ended_at /
+        call). reply / verb_calls / verb_results / llm / death / ended_at /
         rendered are absent from the shape.
         """
         return {

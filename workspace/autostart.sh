@@ -30,7 +30,8 @@ note "boot at $(date)"
 
 # --- default components -------------------------------------------------
 # Add your always-on services below (memory, search, ...).
-# Registration target: http://127.0.0.1:${NAN_INJECTION_PORT:-8901}/register
+# Registration target: http://127.0.0.1:${NAN_INJECTION_PORT}/register
+# (the core exports that port to this script).
 
 # The launcher creates only logs/: <name>.boot.log holds what it
 # printed before loguru took over -- uv failures, import errors,

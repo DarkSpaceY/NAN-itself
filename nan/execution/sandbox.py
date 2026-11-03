@@ -42,7 +42,7 @@ from typing import Literal
 
 from loguru import logger
 
-from nan.config import settings
+from nan.config import DenyRule, Settings
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -56,13 +56,14 @@ class Sandbox:
     """
     Wraps shell-verb commands. Value-ish object: one per core
     process, shared by every agent (the profile is global).
-    Reads the layout and policy from the process-wide settings.
+    Reads the layout and policy from the settings handed in.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
         self._tool: Literal["sandbox-exec", "bwrap"] | None = self._detect_tool()
         self._warned = False
-        self._rules = _compile_deny_rules()
+        self._rules = _compile_deny_rules(settings.sandbox.deny)
 
         if self.required and self._tool is None:
             raise SandboxUnavailableError(
@@ -71,24 +72,24 @@ class Sandbox:
             )
 
     # ------------------------------------------------------------------
-    # Policy / layout (live reads of the global settings)
+    # Policy / layout
     # ------------------------------------------------------------------
 
     @property
     def workspace(self) -> Path:
-        return settings.paths.workspace
+        return self._settings.paths.workspace
 
     @property
     def package_dir(self) -> Path:
-        return settings.paths.package
+        return self._settings.paths.package
 
     @property
     def builtin_dir(self) -> Path:
-        return settings.paths.builtin
+        return self._settings.paths.builtin
 
     @property
     def required(self) -> bool:
-        return settings.sandbox.required
+        return self._settings.sandbox.required
 
     # ------------------------------------------------------------------
     # Detection
@@ -111,7 +112,7 @@ class Sandbox:
     # Deny rules
     # ------------------------------------------------------------------
 
-    def check(self, command: str) -> str | None:
+    def refusal_reason(self, command: str) -> str | None:
         """
         The reason this command is refused, or None when it may
         run. Matching is case-sensitive and over the raw text.
@@ -164,14 +165,14 @@ class Sandbox:
 # ----------------------------------------------------------------------
 
 
-def _compile_deny_rules() -> list[tuple[re.Pattern[str], str]]:
+def _compile_deny_rules(rules: list[DenyRule]) -> list[tuple[re.Pattern[str], str]]:
     """
-    Compile settings.sandbox.deny once. A broken pattern is a
-    config error and stops startup.
+    Compile `sandbox.deny` once. A broken pattern is a config error
+    and stops startup.
     """
     compiled: list[tuple[re.Pattern[str], str]] = []
 
-    for index, rule in enumerate(settings.sandbox.deny):
+    for index, rule in enumerate(rules):
         try:
             compiled.append((re.compile(rule.pattern), rule.reason))
 

@@ -8,10 +8,17 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from loguru import logger
 from nan_service_kit import HubLink, ServiceConfig, Surface, setup_logging
-from nan_service_kit.config import HUB_PORT, read_config
+from nan_service_kit.config import read_config
 from nan_service_kit.testing import StubHub
+
+
+@pytest.fixture(autouse=True)
+def _core_env(monkeypatch):
+    """The core exports its injection port to autostart."""
+    monkeypatch.setenv("NAN_INJECTION_PORT", "8901")
 
 
 def _write(tmp_path: Path, name: str, text: str) -> Path:
@@ -39,12 +46,11 @@ def test_defaults_fill_what_the_file_omits(tmp_path, monkeypatch):
     assert config.logs_dir == tmp_path / "weather" / "logs"
 
 
-def test_hub_url_without_the_core_env(tmp_path, monkeypatch):
+def test_hub_url_requires_the_core_env(tmp_path, monkeypatch):
     monkeypatch.delenv("NAN_INJECTION_PORT", raising=False)
 
-    config = read_config(ServiceConfig, _write(tmp_path, "weather", "port: 9001\n"))
-
-    assert config.hub_url == f"http://127.0.0.1:{HUB_PORT}"
+    with pytest.raises(ValueError, match="NAN_INJECTION_PORT"):
+        read_config(ServiceConfig, _write(tmp_path, "weather", "port: 9001\n"))
 
 
 def test_the_file_wins(tmp_path):

@@ -48,7 +48,7 @@ async def test_run_refuses_a_second_call() -> None:
         await core.run()
 
 
-async def test_ingest_drops_input_until_running(no_sink: Any) -> None:
+async def test_on_input_drops_input_until_running(no_sink: Any) -> None:
     core = Core()
 
     root = FakeRoot()
@@ -56,13 +56,13 @@ async def test_ingest_drops_input_until_running(no_sink: Any) -> None:
     core._root = root  # type: ignore[assignment]
     core._state = CoreState.INIT
 
-    core._ingest("early")
+    core._on_input("early")
 
     assert root.delivered == []
 
     core._state = CoreState.RUNNING
 
-    core._ingest("hello", mid="m1")
+    core._on_input("hello", mid="m1")
 
     assert [message.text for message in root.delivered] == ["hello"]
     assert root.delivered[0].kind == "user"
@@ -72,7 +72,7 @@ async def test_ingest_drops_input_until_running(no_sink: Any) -> None:
     assert echoed["content"] == {"text": "hello", "mid": "m1"}
 
 
-async def test_ingest_without_mid_emits_text_only(no_sink: Any) -> None:
+async def test_on_input_without_mid_emits_text_only(no_sink: Any) -> None:
     core = Core()
 
     root = FakeRoot()
@@ -80,7 +80,7 @@ async def test_ingest_without_mid_emits_text_only(no_sink: Any) -> None:
     core._root = root  # type: ignore[assignment]
     core._state = CoreState.RUNNING
 
-    core._ingest("hello")
+    core._on_input("hello")
 
     echoed = next(event for event in no_sink.history() if event["t"] == "user_input")
 

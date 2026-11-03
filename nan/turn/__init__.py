@@ -10,9 +10,9 @@ from .model import (
     InboxMessage,
     Injection,
     LLMCall,
-    ToolResult,
     Turn,
     TurnOrigin,
+    VerbResult,
 )
 from .render import freeze_turn, render_turn
 
@@ -24,7 +24,7 @@ __all__ = [
     "InboxKind",
     "InboxMessage",
     "LLMCall",
-    "ToolResult",
+    "VerbResult",
     "Turn",
     "TurnOrigin",
     "freeze_turn",

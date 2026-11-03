@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from nan.llm.types import ThinkingBlock, ToolCall
+from nan.llm.types import ThinkingBlock, VerbCall
 from nan.turn import (
     INTERRUPTED,
     DeltaEvent,
     InboxMessage,
     Injection,
-    ToolResult,
     Turn,
+    VerbResult,
     freeze_turn,
     render_turn,
 )
@@ -92,15 +92,15 @@ def test_observed_turn_renders_only_the_observation() -> None:
 
 
 def test_thought_turn_renders_assistant_then_tools_by_call_id() -> None:
-    call = ToolCall(id="c1", name="sleep", arguments={"seconds": 1})
+    call = VerbCall(id="c1", name="sleep", arguments={"seconds": 1})
 
     turn = _turn(
         phase="acted",
         reply="done",
         thinking=(ThinkingBlock(text="reasoning"),),
-        calls=(call,),
-        results=(
-            ToolResult(call_id="c1", name="sleep", output="ok", started_at=1.0, ended_at=2.0),
+        verb_calls=(call,),
+        verb_results=(
+            VerbResult(call_id="c1", name="sleep", output="ok", started_at=1.0, ended_at=2.0),
         ),
     )
 
@@ -119,9 +119,9 @@ def test_thought_turn_renders_assistant_then_tools_by_call_id() -> None:
 
 
 def test_a_call_without_a_result_renders_interrupted() -> None:
-    call = ToolCall(id="c1", name="sleep", arguments={})
+    call = VerbCall(id="c1", name="sleep", arguments={})
 
-    turn = _turn(phase="thought", calls=(call,), results=())
+    turn = _turn(phase="thought", verb_calls=(call,), verb_results=())
 
     tool = render_turn(turn)[2]
 
@@ -135,7 +135,7 @@ def test_freeze_is_idempotent_and_carries_the_run() -> None:
         inbox=(InboxMessage(kind="user", source="user", text="hi"),),
         reply="answer",
         phase="acted",
-        calls=(),
+        verb_calls=(),
     )
 
     frozen = freeze_turn(turn)

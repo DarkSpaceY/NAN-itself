@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nan.llm import Message, ThinkingBlock, ToolCall, Usage
+from nan.llm import Message, ThinkingBlock, Usage, VerbCall
 from nan.persistence import AgentSnapshot, InFlight, SnapshotStore
 from nan.turn import (
     Death,
@@ -14,8 +14,8 @@ from nan.turn import (
     InboxMessage,
     Injection,
     LLMCall,
-    ToolResult,
     Turn,
+    VerbResult,
 )
 
 
@@ -27,7 +27,7 @@ def _turn(
     death: Death | None = None,
 ) -> Turn:
     thinking = ThinkingBlock(text="reasoning", signature="sig", format="anthropic")
-    call = ToolCall(id="c1", name="shell", arguments={"command": "ls"})
+    call = VerbCall(id="c1", name="shell", arguments={"command": "ls"})
 
     return Turn(
         agent_id=agent_id,
@@ -44,9 +44,9 @@ def _turn(
         persona="new persona",
         reply="answer",
         thinking=(thinking,),
-        calls=(call,),
-        results=(
-            ToolResult(call_id="c1", name="shell", output="ok", started_at=3.0, ended_at=3.1),
+        verb_calls=(call,),
+        verb_results=(
+            VerbResult(call_id="c1", name="shell", output="ok", started_at=3.0, ended_at=3.1),
         ),
         llm=LLMCall(
             model="m",
@@ -223,7 +223,7 @@ def test_in_flight_without_an_answer_is_requeued() -> None:
 
     assert flight is not None
     assert flight.turn is open_turn
-    assert flight.requeue == open_turn.inbox
+    assert flight.inbox_to_requeue == open_turn.inbox
 
 
 def test_in_flight_with_an_answer_is_resumed() -> None:
@@ -233,7 +233,7 @@ def test_in_flight_with_an_answer_is_resumed() -> None:
         depth=0,
         phase="thought",
         reply="partial",
-        calls=(ToolCall(id="c1", name="shell", arguments={}),),
+        verb_calls=(VerbCall(id="c1", name="shell", arguments={}),),
         started_at=1.0,
     )
 
@@ -242,4 +242,4 @@ def test_in_flight_with_an_answer_is_resumed() -> None:
     )
 
     assert flight is not None
-    assert flight.requeue == ()
+    assert flight.inbox_to_requeue == ()

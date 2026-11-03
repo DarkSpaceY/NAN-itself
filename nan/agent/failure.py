@@ -11,7 +11,7 @@ three answers:
 
 Only the model call is retried: a verb is at-most-once, and a verb
 that throws returns its error as the model-visible result instead of
-failing the turn (see Agent._run_call). A retry ladder that runs out
+failing the turn (see Agent._execute_call). A retry ladder that runs out
 is fatal by definition (`Unrecoverable`).
 
 `classify` is the one place exception types are interpreted. It reads

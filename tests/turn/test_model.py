@@ -3,7 +3,7 @@ interrupted closing and delta noting."""
 
 from __future__ import annotations
 
-from nan.llm.types import Message, ThinkingBlock, ToolCall, Usage
+from nan.llm.types import Message, ThinkingBlock, Usage, VerbCall
 from nan.turn import (
     INTERRUPTED,
     Death,
@@ -11,14 +11,14 @@ from nan.turn import (
     InboxMessage,
     Injection,
     LLMCall,
-    ToolResult,
     Turn,
+    VerbResult,
 )
 
 
 def _full_turn(*, death: Death | None = None) -> Turn:
     thinking = ThinkingBlock(text="reasoning", signature="sig", format="anthropic")
-    call = ToolCall(id="c1", name="shell", arguments={"command": "ls"})
+    call = VerbCall(id="c1", name="shell", arguments={"command": "ls"})
 
     return Turn(
         agent_id="a1",
@@ -35,9 +35,9 @@ def _full_turn(*, death: Death | None = None) -> Turn:
         persona="new persona",
         reply="answer",
         thinking=(thinking,),
-        calls=(call,),
-        results=(
-            ToolResult(call_id="c1", name="shell", output="ok", started_at=3.0, ended_at=3.1),
+        verb_calls=(call,),
+        verb_results=(
+            VerbResult(call_id="c1", name="shell", output="ok", started_at=3.0, ended_at=3.1),
         ),
         llm=LLMCall(
             model="m",
@@ -94,28 +94,28 @@ def test_fresh_shape_carries_only_arrival_fields() -> None:
 
 
 def test_close_interrupted_fills_only_the_missing_results() -> None:
-    call_a = ToolCall(id="a", name="shell", arguments={})
-    call_b = ToolCall(id="b", name="shell", arguments={})
+    call_a = VerbCall(id="a", name="shell", arguments={})
+    call_b = VerbCall(id="b", name="shell", arguments={})
 
-    reported = ToolResult(call_id="a", name="shell", output="done", started_at=1.0, ended_at=2.0)
+    reported = VerbResult(call_id="a", name="shell", output="done", started_at=1.0, ended_at=2.0)
 
     turn = Turn(
         agent_id="a1",
         parent_id=None,
         depth=0,
         phase="thought",
-        calls=(call_a, call_b),
-        results=(reported,),
+        verb_calls=(call_a, call_b),
+        verb_results=(reported,),
     )
 
     closed = turn.close_interrupted(ended_at=9.0)
 
     assert closed.phase == "committed"
     assert closed.ended_at == 9.0
-    assert [result.call_id for result in closed.results] == ["a", "b"]
-    assert closed.results[0] == reported
-    assert closed.results[1].output == INTERRUPTED
-    assert closed.results[1].started_at == 9.0
+    assert [result.call_id for result in closed.verb_results] == ["a", "b"]
+    assert closed.verb_results[0] == reported
+    assert closed.verb_results[1].output == INTERRUPTED
+    assert closed.verb_results[1].started_at == 9.0
 
 
 def test_noted_appends_one_delta_line() -> None:

@@ -19,13 +19,19 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 Mode = Literal["inject", "archive"]
 
-HUB_PORT = 8901
+HUB_ENV = "NAN_INJECTION_PORT"
 GATEWAY_PORT = 8765
 
 
 def _hub_url() -> str:
-    """The hub the core runs on; it exports its port to autostart."""
-    port = os.environ.get("NAN_INJECTION_PORT") or HUB_PORT
+    """The hub the core runs on; the core exports its port to autostart."""
+    port = os.environ.get(HUB_ENV)
+
+    if not port:
+        raise ValueError(
+            f"{HUB_ENV} is not set: launch the service through the core's "
+            "autostart, or set hub_url in config.yaml"
+        )
 
     return f"http://127.0.0.1:{port}"
 

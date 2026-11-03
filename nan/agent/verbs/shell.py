@@ -6,9 +6,8 @@ import os
 import signal
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb, VerbOutcome, truncate_output
-from nan.config import settings
-from nan.llm.types import ToolDefinition
+from nan.agent.verbs import Verb, VerbOutcome, format_shell_output
+from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
@@ -28,8 +27,8 @@ def _kill_group(proc: asyncio.subprocess.Process, sig: int) -> None:
 class ShellVerb(Verb):
     name = "shell"
 
-    def definition(self) -> ToolDefinition:
-        return ToolDefinition(
+    def definition(self) -> VerbDefinition:
+        return VerbDefinition(
             name=self.name,
             description=(
                 "Run a bash command in your workspace (the command's "
@@ -58,7 +57,7 @@ class ShellVerb(Verb):
 
         # Command-level deny list: a hit is reported back as the
         # verb result so the model can rewrite the command.
-        refused = agent.sandbox.check(command)
+        refused = agent.sandbox.refusal_reason(command)
 
         if refused is not None:
             return VerbOutcome(
@@ -66,7 +65,7 @@ class ShellVerb(Verb):
                 {"refused": True, "reason": refused},
             )
 
-        timeout = settings.agent.shell_timeout
+        timeout = agent.settings.agent.shell_timeout
 
         # Execution-level sandbox: the command the model wrote is
         # wrapped by the sandbox profile. wrap() may raise when
@@ -76,7 +75,7 @@ class ShellVerb(Verb):
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
-                cwd=str(settings.paths.workspace),
+                cwd=str(agent.settings.paths.workspace),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 # Own session: the whole tree can be signalled.
@@ -114,6 +113,6 @@ class ShellVerb(Verb):
 
         output = stdout.decode("utf-8", errors="replace")
 
-        text = truncate_output(output, proc.returncode, settings.agent.shell_output_limit)
+        text = format_shell_output(output, proc.returncode, agent.settings.agent.shell_output_limit)
 
         return VerbOutcome(text, {"exit_code": proc.returncode, "timed_out": False})

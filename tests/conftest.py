@@ -9,27 +9,21 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _restore_settings() -> Iterator[None]:
+def _restore_paths() -> Iterator[None]:
     """
-    Snapshot the process-wide settings and restore them after each
-    test: components read the live object, so a test that retunes
-    it must not leak into the next one.
-    """
-    from nan.config import settings
-    from nan.config.models import PATHS, Paths
+    Snapshot the fixed layout and restore it after each test.
 
-    snapshot = {
-        name: getattr(settings, name).model_copy(deep=True) for name in type(settings).model_fields
-    }
+    `Settings` instances are per-test values, but the layout they
+    expose (`paths`) is the installation's one `PATHS` object, so a
+    test that relocates it must not leak into the next one.
+    """
+    from nan.config.models import PATHS
 
     paths = PATHS.model_copy(deep=True)
 
     yield
 
-    for name, value in snapshot.items():
-        setattr(settings, name, value)
-
-    for name in Paths.model_fields:
+    for name in type(paths).model_fields:
         setattr(PATHS, name, getattr(paths, name))
 
 

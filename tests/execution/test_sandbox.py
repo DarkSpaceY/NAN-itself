@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from nan.config import settings
+from nan.config import Settings
 from nan.config.models import DenyRule
 from nan.execution.sandbox import Sandbox, SandboxUnavailableError, _seatbelt_profile
 
@@ -47,16 +47,18 @@ def with_sandbox_exec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 def _sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> Sandbox:
-    settings.paths.workspace = kwargs.pop("workspace", tmp_path / "workspace")
-    settings.paths.package = kwargs.pop("package", tmp_path / "pkg" / "nan")
-    settings.paths.builtin = kwargs.pop("builtin", tmp_path / "builtin")
-    settings.sandbox.required = kwargs.pop("required", False)
+    cfg = kwargs.pop("settings", None) or Settings()
+
+    cfg.paths.workspace = kwargs.pop("workspace", tmp_path / "workspace")
+    cfg.paths.package = kwargs.pop("package", tmp_path / "pkg" / "nan")
+    cfg.paths.builtin = kwargs.pop("builtin", tmp_path / "builtin")
+    cfg.sandbox.required = kwargs.pop("required", False)
 
     monkeypatch.setattr(sys, "platform", kwargs.pop("platform", "darwin"))
 
     assert not kwargs, f"unexpected sandbox arguments: {kwargs}"
 
-    return Sandbox()
+    return Sandbox(cfg)
 
 
 def test_seatbelt_profile_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -155,10 +157,11 @@ async def test_shell_verb_runs_wrapped(
 
     class Call:
         name = "shell"
+        error = None
 
         arguments = {"command": "echo sandbox-ok"}
 
-    result = await agent._run_call(Call())
+    result = await agent._execute_call(Call())
 
     assert "sandbox-ok" in result
 
@@ -209,29 +212,33 @@ def test_deny_rules_refuse(
 ) -> None:
     sb = _sandbox(tmp_path, monkeypatch)
 
-    assert sb.check(command) == reason
+    assert sb.refusal_reason(command) == reason
 
 
 @pytest.mark.parametrize("command", ALLOWED)
 def test_deny_rules_allow(command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sb = _sandbox(tmp_path, monkeypatch)
 
-    assert sb.check(command) is None
+    assert sb.refusal_reason(command) is None
 
 
 def test_broken_regex_stops_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.sandbox, "deny", [DenyRule(pattern="(", reason="broken")])
+    cfg = Settings()
+
+    cfg.sandbox.deny = [DenyRule(pattern="(", reason="broken")]
 
     with pytest.raises(ValueError, match=r"sandbox\.deny\[0\] invalid regex"):
-        _sandbox(tmp_path, monkeypatch)
+        _sandbox(tmp_path, monkeypatch, settings=cfg)
 
 
 def test_empty_deny_list_allows_everything(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.sandbox, "deny", [])
+    cfg = Settings()
 
-    sb = _sandbox(tmp_path, monkeypatch)
+    cfg.sandbox.deny = []
 
-    assert sb.check("rm -rf /") is None
+    sb = _sandbox(tmp_path, monkeypatch, settings=cfg)
+
+    assert sb.refusal_reason("rm -rf /") is None
 
 
 @pytest.mark.asyncio
@@ -253,10 +260,11 @@ async def test_shell_verb_refuses_blacklisted_command(
 
     class Call:
         name = "shell"
+        error = None
 
         arguments = {"command": f"rm -rf . ; touch {marker}"}
 
-    result = await agent._run_call(Call())
+    result = await agent._execute_call(Call())
 
     assert result.startswith("Refused by sandbox rule")
 

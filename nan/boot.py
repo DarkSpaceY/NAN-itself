@@ -26,6 +26,7 @@ from nan.events import sink
 from nan.persistence import AgentSnapshot, InFlight, SnapshotStore
 
 if TYPE_CHECKING:
+    from nan.config import Settings
     from nan.execution import Sandbox
     from nan.injection import InjectionHub
     from nan.llm import LLMProvider
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 async def restore(
     *,
+    settings: Settings,
     llm: LLMProvider,
     injections: InjectionHub,
     sandbox: Sandbox,
@@ -102,6 +104,7 @@ async def restore(
         parent = agents.get(snapshot.parent_id) if snapshot.parent_id is not None else None
 
         agent = Agent(
+            settings=settings,
             llm=llm,
             injections=injections,
             sandbox=sandbox,
@@ -132,7 +135,7 @@ async def restore(
         agents[agent.agent_id] = agent
 
     for agent in agents.values():
-        await _recover(agent, reachable[agent.agent_id])
+        await _restore_turns(agent, reachable[agent.agent_id])
 
     for agent in agents.values():
         agent.start()
@@ -161,7 +164,7 @@ def _subtree(root: AgentSnapshot, tree: dict[str, list[AgentSnapshot]]) -> list[
     return ordered
 
 
-async def _recover(agent: Agent, snapshot: AgentSnapshot) -> None:
+async def _restore_turns(agent: Agent, snapshot: AgentSnapshot) -> None:
     """
     Resolve the last open turn and persist the result. Only a turn
     whose inputs were never seen is dropped (its inbox rides into
@@ -179,7 +182,7 @@ async def _recover(agent: Agent, snapshot: AgentSnapshot) -> None:
 
             outcome = "requeued"
 
-            for message in inflight.requeue:
+            for message in inflight.inbox_to_requeue:
                 agent.deliver(message)
 
         else:

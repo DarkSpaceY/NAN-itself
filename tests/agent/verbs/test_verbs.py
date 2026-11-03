@@ -21,7 +21,28 @@ pytestmark = pytest.mark.asyncio
 
 
 def _call(name: str, **arguments: object) -> SimpleNamespace:
-    return SimpleNamespace(name=name, arguments=arguments)
+    return SimpleNamespace(name=name, arguments=arguments, error=None)
+
+
+async def test_a_malformed_tool_call_never_runs_and_returns_its_error(
+    tmp_path: Path, no_sink: None
+) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    marker = tmp_path / "workspace" / "ran"
+
+    result = await root._execute_call(
+        SimpleNamespace(
+            name="shell",
+            arguments={"command": f"touch {marker}"},
+            error="Arguments for 'shell' are not valid JSON",
+        )
+    )
+
+    # The adapter's complaint is this call's result: the model reads
+    # it and corrects itself on the next pass. Nothing executes.
+    assert result == "Arguments for 'shell' are not valid JSON"
+    assert not marker.exists()
 
 
 async def _cleanup(*agents: object) -> None:
@@ -251,7 +272,7 @@ async def test_a_finished_child_reports_into_the_parent_inbox(
 async def test_the_root_does_not_own_the_finish_verb(tmp_path: Path, no_sink: None) -> None:
     root = make_agent(tmp_path=tmp_path)
 
-    result = await root._run_call(_call("finish", report="nope"))
+    result = await root._execute_call(_call("finish", report="nope"))
 
     assert result.startswith("Unknown action 'finish'.")
     assert root._death is None

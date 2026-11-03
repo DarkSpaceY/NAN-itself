@@ -76,9 +76,9 @@ async def test_autostart_group_stays_anchored_and_is_stopped(tmp_path: Path) -> 
 
     await asyncio.gather(*autostart._tasks)
 
-    assert len(autostart._pids) == 1
+    assert len(autostart._pgids) == 1
 
-    pgid = autostart._pids[0]
+    pgid = autostart._pgids[0]
 
     for _ in range(100):
         if marker.is_file() and marker.read_text().strip():

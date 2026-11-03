@@ -144,24 +144,25 @@ async def test_root_death_cascades_and_tree_empties(tmp_path: Path, no_sink: Non
 async def test_finish_verb_scope(tmp_path: Path, no_sink: None) -> None:
     root = make_agent(tmp_path=tmp_path)
 
-    assert "finish" not in [tool.name for tool in root.tools]
+    assert "finish" not in [tool.name for tool in root.verb_definitions]
 
     child, _ = await root.spawn_child("FINISHTASK")
 
     assert child is not None
 
-    assert "finish" in [tool.name for tool in child.tools]
+    assert "finish" in [tool.name for tool in child.verb_definitions]
 
     # The capability set is enforced at execution too: the root
     # does not own the finish verb at all.
     class Call:
         name = "finish"
+        error = None
 
         arguments = {"report": "nope"}
 
-    assert "Unknown action" in await root._run_call(Call())
+    assert "Unknown action" in await root._execute_call(Call())
 
-    assert "finished" in await child._run_call(Call())
+    assert "finished" in await child._execute_call(Call())
 
     assert child._death == Death("finished", "nope")
 
@@ -181,7 +182,7 @@ class RecordingHub:
     async def archive(self, turn: Any) -> None:
         self.archives.append(turn)
 
-    def forget(self, agent_id: str) -> None:
+    def forget_agent(self, agent_id: str) -> None:
         pass
 
 

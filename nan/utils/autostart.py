@@ -9,7 +9,7 @@ the lifetime it owns afterwards.
 
 Each script is launched in its own session, so everything it starts
 shares one process group. The core keeps that group and stops it on
-exit: a boot never inherits a listener from the boot before it.
+exit, so each boot starts with no listener from the previous boot.
 
 The group leader has to stay alive for as long as the core does (see
 ANCHOR_SECONDS), or its pid -- which is the group id the core signals
@@ -58,7 +58,7 @@ class Autostart:
 
         # Process-group ids, in launch order. Each is the pid of its
         # session leader, which also carries the group id.
-        self._pids: list[int] = []
+        self._pgids: list[int] = []
         self._tasks: list[asyncio.Task[None]] = []
 
     # ------------------------------------------------------------------
@@ -66,7 +66,7 @@ class Autostart:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Schedule every script that exists; failures never block the core."""
+        """Schedule every script that exists; a launch failure is logged."""
         loop = asyncio.get_running_loop()
 
         for label, script, wrapped in self._scripts:
@@ -105,7 +105,7 @@ class Autostart:
         # With start_new_session the pid is also the group id. The
         # anchor sleep keeps that leader alive for the core's whole
         # life, so the id cannot be recycled under us.
-        self._pids.append(proc.pid)
+        self._pgids.append(proc.pid)
 
         logger.info("Autostart launched: {} (pid {})", script, proc.pid)
 
@@ -123,20 +123,20 @@ class Autostart:
 
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
-        if not self._pids:
+        if not self._pgids:
             return
 
-        for pgid in self._pids:
+        for pgid in self._pgids:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pgid, signal.SIGTERM)
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + 5.0
 
-        while loop.time() < deadline and any(_group_alive(pgid) for pgid in self._pids):
+        while loop.time() < deadline and any(_group_alive(pgid) for pgid in self._pgids):
             await asyncio.sleep(0.1)
 
-        for pgid in self._pids:
+        for pgid in self._pgids:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pgid, signal.SIGKILL)
 

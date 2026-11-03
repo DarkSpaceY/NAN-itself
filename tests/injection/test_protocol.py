@@ -15,7 +15,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI, Request
 
-from nan.config import settings
+from nan.config import Settings
 from nan.injection import InjectionHub
 from nan.injection.client import InjectionClient
 from nan.turn import Death, Turn, freeze_turn
@@ -75,7 +75,7 @@ async def test_injection_and_delta(no_sink: None) -> None:
     server, serve_task, port = await _serve_stub()
 
     try:
-        hub = InjectionHub()
+        hub = InjectionHub(Settings())
 
         turn = Turn(agent_id="a1", parent_id="root", depth=1)
         turn_b = Turn(agent_id="b2", parent_id="root", depth=1)
@@ -115,9 +115,10 @@ async def test_injection_and_delta(no_sink: None) -> None:
 
 
 async def test_heartbeat_ttl_expiry(no_sink: None) -> None:
-    settings.injection.heartbeat_ttl = 0.05
+    cfg = Settings()
+    cfg.injection.heartbeat_ttl = 0.05
 
-    hub = InjectionHub()
+    hub = InjectionHub(cfg)
 
     hub._services["ghost"] = fake_service("ghost", "http://127.0.0.1:1/inject")
 
@@ -181,7 +182,7 @@ async def test_delivery_shapes(no_sink: None) -> None:
     server, task, port, injected, archived = await _serve_recorder()
 
     try:
-        hub = InjectionHub()
+        hub = InjectionHub(Settings())
 
         hub._services["live"] = fake_service("live", f"http://127.0.0.1:{port}/inject")
 
@@ -223,7 +224,7 @@ async def test_archive_carries_the_death(no_sink: None) -> None:
     server, task, port, _, archived = await _serve_recorder()
 
     try:
-        hub = InjectionHub()
+        hub = InjectionHub(Settings())
 
         hub._services["sink"] = fake_service(
             "sink", f"http://127.0.0.1:{port}/archive", mode="archive"
@@ -247,7 +248,7 @@ async def test_archive_carries_the_death(no_sink: None) -> None:
 
 
 async def test_archive_failure_is_dropped(no_sink: None) -> None:
-    hub = InjectionHub()
+    hub = InjectionHub(Settings())
 
     hub._services["gone"] = fake_service("gone", "http://127.0.0.1:1/archive", mode="archive")
 
@@ -278,7 +279,7 @@ async def test_reply_protocol_is_single_shape() -> None:
 
         await asyncio.sleep(0.05)
 
-    client = InjectionClient()
+    client = InjectionClient(Settings())
 
     try:
         contributions = await client.inject(

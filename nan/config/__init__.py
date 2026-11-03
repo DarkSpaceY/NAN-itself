@@ -1,12 +1,11 @@
 """
-Configuration: one process-wide object.
+Configuration: the schema, and the one live object its owner builds.
 
-`settings` is loaded once at import from config/nan.yaml and read
-directly by every component. Paths live in the same object
-(`paths`), fixed by the installation.
+The schema is in models.py. The composition root constructs one
+`Settings` instance at startup and hands it to every component.
 
-The schema is in models.py; this module owns the live instance and
-is the single import point.
+Paths live in the installation's fixed layout (`models.PATHS`) and are
+read through the instance's `paths` property.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from __future__ import annotations
 from .models import (
     AgentSettings,
     AutostartSettings,
+    DenyRule,
     GatewaySettings,
     InjectionSettings,
     LLMSettings,
@@ -23,12 +23,10 @@ from .models import (
     Settings,
 )
 
-# The single configuration object: loaded once, read everywhere.
-settings = Settings()
-
 __all__ = [
     "AgentSettings",
     "AutostartSettings",
+    "DenyRule",
     "GatewaySettings",
     "InjectionSettings",
     "LLMSettings",
@@ -36,5 +34,4 @@ __all__ = [
     "ProviderName",
     "SandboxSettings",
     "Settings",
-    "settings",
 ]
