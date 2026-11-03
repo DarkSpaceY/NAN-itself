@@ -7,24 +7,25 @@
 # the formatter cannot disagree with the one committed to the repo.
 #
 # Hooks are scoped by path: a Python-only commit never pays for the
-# frontend type checker and vice versa. Full run is ~8s.
+# frontend build and vice versa.
 repos:
   - repo: local
     hooks:
       # ---- Python ----
+      # ruff's own extend-exclude (pyproject) decides the scope, so the
+      # files checked here are exactly `ruff check .` in CI -- a new
+      # top-level package cannot silently fall outside.
       - id: ruff-check
         name: ruff check
         entry: uv run --frozen ruff check --fix --force-exclude
         language: system
         types: [python]
-        files: ^(nan|builtin|tests)/
 
       - id: ruff-format
         name: ruff format
         entry: uv run --frozen ruff format --force-exclude
         language: system
         types: [python]
-        files: ^(nan|builtin|tests)/
 
       - id: mypy
         name: mypy
@@ -39,6 +40,54 @@ repos:
         language: system
         pass_filenames: false
         files: ^(nan|builtin|tests)/
+
+      # --frozen installs from the lock and never complains that
+      # pyproject moved on; CI's `uv sync --locked` does. Catch it here.
+      - id: uv-lock
+        name: uv lock check
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      # ---- Services ----
+      # Each service is its own uv project with its own lock. --directory
+      # selects the project and makes its folder the cwd, which is what
+      # `cd <service> && uv run --frozen pytest -q` does in CI.
+      - id: pytest-system
+        name: pytest (system service)
+        entry: uv run --directory workspace/services/system --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/system/
+
+      - id: pytest-network
+        name: pytest (network service)
+        entry: uv run --directory workspace/services/network --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/network/
+
+      - id: pytest-mcp
+        name: pytest (mcp service)
+        entry: uv run --directory workspace/services/mcp --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/mcp/
+
+      - id: pytest-record
+        name: pytest (record service)
+        entry: uv run --directory builtin/services/record --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^builtin/services/record/
+
+      - id: pytest-service-kit
+        name: pytest (service kit)
+        entry: uv run --directory lib/nan-service-kit --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^lib/nan-service-kit/
 
       # ---- Frontend ----
       # npm --prefix runs the script with frontend/ as its cwd, so the
@@ -56,3 +105,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^frontend/.*\.(ts|tsx)$
+
+      # CI runs the production build; a CSS import or vite config
+      # mistake is invisible to tsc and vitest alone.
+      - id: build
+        name: build
+        entry: npm --prefix frontend run build
+        language: system
+        pass_filenames: false
+        files: ^frontend/
