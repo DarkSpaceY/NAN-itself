@@ -78,7 +78,7 @@ The registry that external prompt-contributor services talk to.
 | `host` | `127.0.0.1` | Listen address |
 | `port` | `8765` | HTTP + WebSocket port |
 | `surface_ttl` | `30.0` | Seconds without a panel re-declaration before the window is dropped |
-| `dedup_cache_size` | `256` | Inbound mid dedup cache entries (oldest evicted first) |
+| `dedup_cache_size` | `256` | Inbound mid dedup cache entries (when full, the oldest half is evicted) |
 
 ## autostart
 

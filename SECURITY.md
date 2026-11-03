@@ -61,9 +61,9 @@ elsewhere.
 the workspace and temp locations; the nan package (persona),
 `config/` and builtin resources read-only. Reads and network access
 stay open. When the sandbox tool is present, every shell command runs
-inside it; without one, `sandbox.required: true` refuses to start,
-and the default (`false`) runs commands unwrapped with a one-time
-warning.
+inside it. `sandbox.required: true` (the default) refuses to start
+without one; setting it to `false` runs commands unwrapped with a
+one-time warning.
 
 Before wrapping, a configurable regex list (`sandbox.deny`) rejects
 known destructive command shapes: root deletes, raw disk writes,

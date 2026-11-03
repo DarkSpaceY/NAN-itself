@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from nan_fakes import FakeLLM, await_until, make_agent
 
+from nan.events import sink
 from nan.persistence import SnapshotStore
 from nan.turn import InboxMessage
 
@@ -229,3 +230,43 @@ async def test_kind_is_named_by_the_edge(tmp_path: Path, no_sink: None) -> None:
 
     assert message.kind == "subagent"
     assert message.source == child.agent_id
+
+
+async def test_agent_exited_reason_is_the_death_reason(tmp_path: Path, no_sink: Any) -> None:
+    """The exit event carries the death record verbatim."""
+    sink.reset(boot_id="test-boot")
+
+    llm = FakeLLM()
+
+    llm.script("finish now", [("tool", "finish", {"report": "done"})])
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.0})
+
+    child, err = await root.spawn_child("finish now")
+
+    assert err is None and child is not None
+
+    if child.task is not None:
+        with contextlib.suppress(asyncio.CancelledError):
+            await child.task
+
+    killed, err = await root.spawn_child("wait here")
+
+    assert err is None and killed is not None
+
+    killed.request_death(f"killed by holder {root.agent_id}")
+
+    if killed.task is not None:
+        with contextlib.suppress(asyncio.CancelledError):
+            await killed.task
+
+    exits = {
+        event["content"]["agent_id"]: event["content"]
+        for event in sink.history()
+        if event["t"] == "agent_exited"
+    }
+
+    assert exits[child.agent_id]["reason"] == "finished"
+    assert exits[child.agent_id]["report"] == "done"
+    assert exits[killed.agent_id]["reason"] == f"killed by holder {root.agent_id}"
+    assert exits[killed.agent_id]["report"] is None

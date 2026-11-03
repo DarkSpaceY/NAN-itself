@@ -150,7 +150,7 @@ Conventions:
 | `agent_started` | `{agent_id, depth, parent_id, pacing}` -- `parent_id` is always present, null for the root; pacing ∈ `event-driven` \| `interval` |
 | `agent_paused` | `{agent_id}` |
 | `agent_resumed` | `{agent_id}` |
-| `agent_exited` | `{agent_id, reason, report}` -- reason ∈ `finished` \| `killed by holder <id>` \| `cancelled` \| `shutdown`; `report` is always present, null unless finished |
+| `agent_exited` | `{agent_id, reason, report}` -- reason ∈ `finished` \| `killed by holder <id>` \| `unrecoverable: <reason>`; `report` is always present, null unless finished. Shutdown suspends instead and emits no `agent_exited` |
 
 ### Turn
 
@@ -161,7 +161,7 @@ Conventions:
 | `turn_done` | `{agent_id, turn_index, usage?, latency_s, retries, calls, history_chars}` -- usage = `{prompt_tokens, completion_tokens}` |
 | `turn_failed` | `{agent_id, error, backoff_s, retry_index}` |
 | `turn_interrupted` | `{agent_id, turn_index, reason}` -- the turn was parked (retries exhausted, pause, or a restored open turn); it is kept, not discarded |
-| `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `closed` \| `requeued` \| `resumed` \| null |
+| `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `requeued` \| `resumed` \| null |
 
 ### Model stream (correlated by envelope `id`)
 
@@ -203,8 +203,8 @@ reads).
 |---|---|---|---|
 | `shell` | `{command}` | `{exit_code, timed_out}`; on a deny-list hit `{refused, reason}`, on a timeout only `{timed_out: true}` | terminal block |
 | `spawn` | `{task}` | `{child_id, depth}` | child-agent card linked to `child_id` |
-| `send` | `{direction, handle_id?, text}` | `{direction, to?}` -- `to` only for `down` | message bubble, up/down |
-| `kill` | `{handle_id}` | `{target_id}` | destructive action marker |
+| `send` | `{direction, child_id?, text}` | `{direction, to?}` -- `to` only for `down` | message bubble, up/down |
+| `kill` | `{child_id}` | `{target_id}` | destructive action marker |
 | `sleep` | `{seconds}` | `{seconds}` | timer |
 | `finish` | `{report}` | -- (the report travels in `agent_exited`) | report card |
 

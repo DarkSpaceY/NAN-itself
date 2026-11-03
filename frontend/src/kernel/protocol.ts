@@ -89,7 +89,7 @@ export interface SnapshotRestored extends AgentIdentity {
   parent_id: string | null;
   depth: number;
   turns: number;
-  in_flight: "closed" | "requeued" | "resumed" | null;
+  in_flight: "requeued" | "resumed" | null;
 }
 
 /** One verb invocation: name + structured arguments. */

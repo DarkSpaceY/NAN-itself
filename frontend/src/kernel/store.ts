@@ -55,7 +55,7 @@ export function reduceGlobal(state: GlobalState, env: Envelope): GlobalState {
 
   switch (env.t) {
     case "agent_paused":
-      // Pausing is cooperative: only the root stopping counts as a
+      // Pausing is cooperative: only the root suspending counts as a
       // machine-wide pause. The root's agent_id is a random string;
       // identity cannot be matched by string.
       if (isRoot(state, env)) next.paused = true;

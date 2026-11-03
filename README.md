@@ -91,6 +91,7 @@ conversations across turns.
 | [Architecture](docs/for-contributors/architecture.md) | How the core is built |
 | [Principles](docs/for-contributors/principles.md) | The design rules |
 | [Frontend protocol](docs/for-contributors/frontend-protocol.md) | The event stream contract |
+| [Backend protocol](docs/for-contributors/protocol.md) | HTTP/WS contracts for services and snapshots |
 | [Developing](docs/for-contributors/develop.md) | Test, lint, type-check |
 
 ## Repository layout

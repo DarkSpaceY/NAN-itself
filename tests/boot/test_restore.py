@@ -124,6 +124,15 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
     assert "snapshot_restored" in restored
     assert "turn_interrupted" in restored
 
+    in_flight = {
+        event["content"]["agent_id"]: event["content"]["in_flight"]
+        for event in sink.history()
+        if event["t"] == "snapshot_restored"
+    }
+
+    assert in_flight["r0"] is None
+    assert in_flight["c0"] == "resumed"
+
     await _stop(root)
 
 
@@ -143,6 +152,11 @@ async def test_restore_drops_an_unanswered_turn_and_requeues_its_inbox(tmp_path:
 
     assert root is not None
     assert root.turns == []
+
+    restored = next(event for event in sink.history() if event["t"] == "snapshot_restored")
+
+    assert restored["content"]["agent_id"] == "r0"
+    assert restored["content"]["in_flight"] == "requeued"
 
     # The agent itself stays live: its snapshot is rewritten with
     # no turns, which is a spawned agent that observed nothing yet.

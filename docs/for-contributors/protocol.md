@@ -50,8 +50,9 @@ applied `seq` and treats a gap as a reason to reconnect. The history
 ring holds the last 4000 events; streamed deltas are coalesced there,
 so the ring holds one entry per stream.
 
-The gateway builds `hello` and `surface_*` itself. They carry no `seq`
-and no `id`; `hello` carries `seq` because it also reports the cursor.
+The gateway builds `hello` and `surface_*` itself. `surface_*` events
+carry no `seq` and no `id`; `hello` carries `seq` because it also
+reports the cursor.
 
 ### Connection
 
@@ -61,7 +62,7 @@ ws://127.0.0.1:8765/ws
 
 Opening sequence, in order:
 
-1. `hello` -- `{"t": "hello", "seq": <current>, "content": {"boot", "model", "paused"}}`
+1. `hello` -- `{"t": "hello", "seq": <current>, "content": {"boot": "<boot_id>", "model": "<name>", "paused": <bool>}}`
 2. one `surface_added` per registered panel
 3. the history ring
 4. live events
@@ -182,8 +183,10 @@ Rules:
   changes.
 - A service that stops heartbeating is excluded after `heartbeat_ttl`,
   without an unregister call.
-- The archive sees every turn that ended, in the order it ended. A turn
-  cut short by death never reaches it.
+- The archive sees every turn that commits, in the order it commits.
+  A turn that never commits (kill, pause, shutdown, unrecoverable
+  failure) never reaches it; a finished turn is archived with its death
+  record.
 
 ### Service delta
 
@@ -197,8 +200,9 @@ appends `DeltaEvent("service", line)` entries:
 ```
 
 Both modes appear here. The diff and the live set come from one
-snapshot: a service reported online in a turn is a service that
-received that turn.
+snapshot: an `inject` service reported online received the fresh turn;
+an `archive` service reported online receives that turn only if it
+commits.
 
 ## Surface registration
 
