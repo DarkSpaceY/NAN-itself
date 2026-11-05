@@ -1,7 +1,7 @@
 [project]
 name = "nan-itself"
 version = "0.1.0"
-description = "A self-contained, local-first agent core: one loop per agent, handles for multi-agent, external services for injection"
+description = "A self-contained, local-first agent core: one asyncio task per agent, parent/child spawning, external services for injection"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

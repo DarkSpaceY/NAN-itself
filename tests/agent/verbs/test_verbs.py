@@ -209,7 +209,7 @@ async def test_kill_requests_the_child_death(tmp_path: Path, no_sink: None) -> N
     await await_until(lambda: child._death is not None)
 
     assert child._death is not None
-    assert child._death.reason == f"killed by holder {root.agent_id}"
+    assert child._death.reason == f"killed by parent {root.agent_id}"
 
     await _cleanup(root)
 

@@ -75,9 +75,10 @@ sequenceDiagram
        POST /heartbeat
        {"service_id": "weather"}
 
-   A service silent longer than the TTL simply stops receiving
-   turns; the entry is not deleted, and a heartbeat brings it
-   back (no re-registration needed).
+   A service silent longer than the TTL stops receiving turns: the
+   entry is evicted at the hub's next delivery pass (`inject` or
+   `archive`). A later heartbeat answers `{"status": "unknown"}`,
+   and you register again -- the kit does this for you.
 
 3. **Serve turns** -- an `inject` service receives the fresh turn
    before every prompt assembly, concurrently across all live
@@ -112,9 +113,10 @@ request.
     DELETE http://127.0.0.1:8765/surfaces/weather   # optional, on shutdown
 
 - `url` must be loopback, served by the service itself.
-- `icon` is optional; when present it must be a full loopback URL
-  (e.g. `http://127.0.0.1:9001/icon.svg`). A relative path resolves
-  against the gateway and 404s.
+- `icon` is optional: a local path (`/...`), resolved against the
+  gateway, or a full loopback URL (e.g.
+  `http://127.0.0.1:9001/icon.svg`). To serve your own asset, use the
+  full URL.
 - An entry expires after `gateway.surface_ttl` (30 s) without a
   POST: the desktop removes the window. Re-posting also covers
   boot order and core restarts.
@@ -143,8 +145,8 @@ A delivery body is one turn, flat:
 - `inject` services receive it in its **fresh shape**: exactly the
   fields known before the model call.
 - `archive` services receive it **complete**, when the turn ends:
-  the fresh fields plus `injections`, `reply`, `calls`, `results`,
-  `llm`, `death`, `rendered` and `ended_at`.
+  the fresh fields plus `phase`, `thinking`, `reply`, `calls`,
+  `results`, `llm`, `death`, `rendered` and `ended_at`.
 - When an agent stops, the archive receives the completed turns:
   the last completed turn is the last thing it sees, and a turn
   cut short by death does not reach it.
@@ -157,6 +159,7 @@ A delivery body is one turn, flat:
       "agent_id":   "root",        # who is assembling a prompt
       "parent_id":  null,          # null for the root agent
       "depth":      0,
+      "epoch":      0,             # context epoch this turn belongs to
       "origin":     "first",       # first | normal |
                                    # context_cleared
       "persona":    null,          # new persona text when it changed
@@ -168,7 +171,7 @@ A delivery body is one turn, flat:
       "injections": [],            # empty on arrival; see below
       "delta":      [              # state changes since last turn
         {"section": "service", "line": "+weather online"},
-        {"section": "subagent", "line": "spawned a1: researching"}
+        {"section": "subagent", "line": "+a1 spawned"}
       ],
       "started_at": 1760000000.0
     }
@@ -177,6 +180,7 @@ A delivery body is one turn, flat:
 
     {
       "agent_id": "root", "parent_id": null, "depth": 0,
+      "epoch": 0, "phase": "committed",
       "origin": "normal", "persona": null,
       "inbox": [...], "delta": [...],
       "injections": [              # this turn's own contributions,
@@ -185,6 +189,7 @@ A delivery body is one turn, flat:
          "started_at": 1760000000.5, "ended_at": 1760000000.6}
       ],
       "reply":   "checking the forecast now",
+      "thinking": [],
       "calls":   [{"id": "t1", "name": "shell",
                    "arguments": {"command": "..."}}],
       "results": [{"call_id": "t1", "name": "shell",
@@ -215,8 +220,8 @@ the delivery channel.
 A completed turn carries `death` when that turn ended the agent:
 `reason` is the exit reason, `report` the finish report when the
 model ended it itself (null for external deaths). A turn cut short
-before it completes is discarded, so the archive learns of a stop
-from the turn that ended it.
+before it commits is discarded: the archive learned nothing of it,
+and a kill leaves no death record behind.
 
 `persona` is the epoch marker for the system prompt: the new
 persona text on the one turn where the file content changed
@@ -258,8 +263,9 @@ flowchart TD
     N --> NEXT
 ```
 
-- The hub allows `injection.timeout` (default 2 s) per service
-  per turn. Each delivery gets one attempt.
+- The hub allows one attempt per delivery, bounded by the
+  service's declared read budget (`inject` only) or
+  `injection.timeout` (default 2 s).
 - A failure or timeout becomes an `Injection` with `ok: false`
   and the error text, recorded in the turn -- the agent sees it.
 - An empty reply contributes nothing.

@@ -10,7 +10,7 @@
 
     uv run pytest tests/ -q
 
-The suite (214 tests) is organized one directory per core feature:
+The suite (249 tests) is organized one directory per core feature:
 
     tests/agent/        the loop (control fold, pause/resume, epochs,
                         persona, pacing, failed-turn terminal), the spawn
@@ -62,6 +62,6 @@ Line length 100; isort-style import order enforced by ruff.
 - Docstrings state behavior contracts. Absolute marketing voice
   ("never", "always" as defense of a design) is avoided; state
   the actual mechanism.
-- New configuration keys go into `config/nan.yaml` with a
+- New configuration keys go into `config/nan.yaml.example` with a
   comment, the matching pydantic model in `nan/config/`, and the
   configuration reference in `docs/for-users/configuration.md`.

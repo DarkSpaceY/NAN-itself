@@ -254,7 +254,7 @@ async def test_agent_exited_reason_is_the_death_reason(tmp_path: Path, no_sink: 
 
     assert err is None and killed is not None
 
-    killed.request_death(f"killed by holder {root.agent_id}")
+    killed.request_death(f"killed by parent {root.agent_id}")
 
     if killed.task is not None:
         with contextlib.suppress(asyncio.CancelledError):
@@ -268,5 +268,5 @@ async def test_agent_exited_reason_is_the_death_reason(tmp_path: Path, no_sink: 
 
     assert exits[child.agent_id]["reason"] == "finished"
     assert exits[child.agent_id]["report"] == "done"
-    assert exits[killed.agent_id]["reason"] == f"killed by holder {root.agent_id}"
+    assert exits[killed.agent_id]["reason"] == f"killed by parent {root.agent_id}"
     assert exits[killed.agent_id]["report"] is None

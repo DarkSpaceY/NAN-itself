@@ -24,6 +24,7 @@ FRESH_TURN: dict[str, Any] = {
     "parent_id": None,
     "depth": 0,
     "origin": "first",
+    "epoch": 0,
     "persona": None,
     "inbox": [],
     "injections": [],

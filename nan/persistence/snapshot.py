@@ -13,8 +13,8 @@ restore rebuilds the tree from the files on disk.
 The store writes whole state rather than appending: the state is
 serialized to a temp file and atomically replaced over the target,
 so a crash leaves either the old snapshot or the new one.
-Every write is fsynced: the agent is durable at each phase
-boundary.
+Every write is fsynced twice -- the file contents, then the
+directory -- so the agent is durable at each phase boundary.
 """
 
 from __future__ import annotations
@@ -168,6 +168,16 @@ class SnapshotStore:
                 os.fsync(handle.fileno())
 
             os.replace(tmp_name, target)
+
+            # The replacement is atomic, but its directory entry is
+            # durable only once the directory itself is synced.
+            directory_fd = os.open(self._directory, os.O_RDONLY)
+
+            try:
+                os.fsync(directory_fd)
+
+            finally:
+                os.close(directory_fd)
 
         except BaseException:
             with contextlib.suppress(FileNotFoundError):

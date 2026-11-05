@@ -12,7 +12,7 @@ llm:
   base_url: ""              # empty = provider default endpoint
   api_key: ""               # anything OpenAI-compatible: OpenAI, OpenRouter, llama.cpp...
   model: ""
-  max_tokens: 8192          # Anthropic requires it; must exceed thinking_budget
+  max_tokens: 8192          # Anthropic output cap; thinking_budget is clamped below it
   thinking: true            # capture reasoning and replay it into history
   thinking_budget: 4096     # Anthropic extended-thinking budget; 0 = no native thinking request
   timeout: 120.0
@@ -26,11 +26,11 @@ agent:
   shell_output_limit: 20000 # shell verb output truncation (head+tail)
   backoff: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]  # turn-failure backoff ladder (s)
   max_depth: 3              # -1: unlimited
-  max_children: 5            # -1: unlimited, per agent
+  max_children: 5           # -1: unlimited, per agent
 
 sandbox:
   required: true            # true: refuse to start when no sandbox tool exists
-  # Command-level deny list, checked before the OS sandbox wraps the
+  # Command-level deny list, checked before the OS sandbox wraps the command
   deny:
     - pattern: '\brm\s+(?:-[^\s]+\s+)*(?:/|~|\$HOME|\$\{HOME\})/?\*?(?=\s|$|[;&|])'
       reason: 'recursive delete of the root or home directory'
@@ -56,7 +56,8 @@ injection:
 gateway:
   host: 127.0.0.1
   port: 8765
-  surface_ttl: 30.0        # seconds without a panel heartbeat before the window is dropped
+  surface_ttl: 30.0         # seconds without a panel heartbeat before the window is dropped
+  dedup_cache_size: 256     # inbound `mid` dedup entries; overflow evicts the oldest half
 
 autostart:
   enabled: true

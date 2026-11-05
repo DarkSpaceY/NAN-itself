@@ -46,7 +46,9 @@ are the one place a module may name a type from above.
     app.py               composition root
     ├── gateway          HTTP + WS; formats the stream, owns no agent state
     ├── injection        registry + per-turn collection
-    └── agent            loop, turn engine, verbs, handles, sandbox
+    └── agent            loop, turn engine, verbs, spawning, sandbox
+        ├── execution    sandbox + background jobs
+        ├── persistence  snapshot store
         ├── turn         the Turn record and prompt rendering
         ├── llm          DTOs (types.py) + transport (provider.py)
         ├── config       Settings schema + YAML source
@@ -57,8 +59,7 @@ The layers, bottom up:
 
 1. **Leaves.** `events.py`, `utils/loopback.py`,
    `config/models.py`, `llm/types.py` import nothing else from
-   `nan`. `agent/handle.py` belongs here too: its `Agent`
-   reference is type-only. Any layer may import these.
+   `nan`. Any layer may import these.
 2. **Runtime infrastructure.** `config` (the schema; the
    composition root builds the one `Settings` instance) and
    `events` (the process-wide sink) are imported by every layer and
@@ -67,10 +68,10 @@ The layers, bottom up:
    `llm/types`. `app.py` constructs it, and `agent/engine.py`
    makes the calls. `turn/` reads DTOs from `llm`; the dependency
    runs one way, from `turn` to `llm`.
-4. **Agent.** `agent/` imports `config`, `events`, `llm`, `turn`.
-   It does not import `gateway`, `injection` or `app`: the
-   injection hub arrives as a constructor argument and is named
-   only under `TYPE_CHECKING`.
+4. **Agent.** `agent/` imports `config`, `events`, `llm`, `turn`,
+   `execution` and `persistence` (the last two are lower layers). It does not import `gateway`,
+   `injection` or `app`: the injection hub arrives as a constructor
+   argument and is named only under `TYPE_CHECKING`.
 5. **Injection.** `injection/` imports `config`, `turn` and
    `utils/loopback`. Delivery leaves as an outbound HTTP call,
    and the agent loop pulls results from the hub; the dependency
@@ -88,8 +89,8 @@ Three rules cover the cases that do not fit the ladder:
 
 - **Type-only cycles** go inside `if TYPE_CHECKING:` with
   `from __future__ import annotations`. Current pairs:
-  `handle` <-> `core`, `verbs` -> `core`,
-  `injection/client` -> `injection/hub`. A cycle needed at
+  `verbs` -> `core`, `agent/core` -> `injection`,
+  `boot` -> `injection`. A cycle needed at
   runtime points at the ownership boundary: redraw it rather than
   defer the import.
 - **Intra-package loading order.** `agent/verbs/__init__.py`

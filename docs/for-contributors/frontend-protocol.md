@@ -88,7 +88,7 @@ spec stay in step.
 - Re-post every 10-15 s. An entry without a POST for
   `gateway.surface_ttl` (30 s) is dropped and `surface_removed` is
   broadcast.
-- Both registry calls answer `{"status": "ok"}`; a non-loopback
+- A successful registry call answers `{"status": "ok"}`; a non-loopback
   panel `url` is rejected with 400, and a DELETE of an unknown
   `service_id` answers 404.
 - These messages are gateway-built live state: they carry no
@@ -125,8 +125,9 @@ Pause and resume travel over the socket as client messages:
 
 They take effect asynchronously; the confirmation is the
 `agent_paused` / `agent_resumed` event on the same socket. A pause
-parks the in-flight turn (`turn_interrupted`); a resume re-announces
-it with the same `turn_index`.
+cancels the in-flight turn and parks it silently: it emits no turn
+event, so the agent's round stays open until a resume re-announces
+the same turn with the same `turn_index` (`turn_started`).
 
 ## Payload schemas
 
@@ -150,7 +151,7 @@ Conventions:
 | `agent_started` | `{agent_id, depth, parent_id, pacing}` -- `parent_id` is always present, null for the root; pacing ∈ `event-driven` \| `interval` |
 | `agent_paused` | `{agent_id}` |
 | `agent_resumed` | `{agent_id}` |
-| `agent_exited` | `{agent_id, reason, report}` -- reason ∈ `finished` \| `killed by holder <id>` \| `unrecoverable: <reason>`; `report` is always present, null unless finished. Shutdown suspends instead and emits no `agent_exited` |
+| `agent_exited` | `{agent_id, reason, report}` -- reason ∈ `finished` \| `killed by parent <id>` \| `unrecoverable: <reason>`; `report` is always present, null unless finished. Shutdown suspends instead and emits no `agent_exited` |
 
 ### Turn
 
@@ -160,7 +161,7 @@ Conventions:
 | `injections_collected` | `{agent_id, services: [{service_id, ok, duration_s, text_len}]}` -- one event per turn, aggregate over services |
 | `turn_done` | `{agent_id, turn_index, usage?, latency_s, retries, calls, history_chars}` -- usage = `{prompt_tokens, completion_tokens}` |
 | `turn_failed` | `{agent_id, error, backoff_s, retry_index}` |
-| `turn_interrupted` | `{agent_id, turn_index, reason}` -- the turn was parked (retries exhausted, pause, or a restored open turn); it is kept, not discarded |
+| `turn_interrupted` | `{agent_id, turn_index, reason}` -- the turn was parked by a failed turn (retries exhausted) or a restored open turn (`resumed mid-execution`); it is kept, not discarded. A pause parks the turn without this event |
 | `snapshot_restored` | `{agent_id, parent_id, depth, turns, in_flight}` -- this agent came back from disk; in_flight ∈ `requeued` \| `resumed` \| null |
 
 ### Model stream (correlated by envelope `id`)

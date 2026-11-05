@@ -171,7 +171,7 @@ class DeltaEvent:
 
         <delta>
         <service>+echo online</service>
-        <subagent>-9d21 died: killed by holder r0</subagent>
+        <subagent>-9d21 died: killed by parent r0</subagent>
         </delta>
 
     `section` is an open string. Render order is first-appearance
@@ -420,8 +420,8 @@ class Turn:
         """
         The static arrival shape: exactly the fields known when a
         turn is delivered to injection services (before the model
-        call). reply / verb_calls / verb_results / llm / death / ended_at /
-        rendered are absent from the shape.
+        call). phase / thinking / reply / verb_calls / verb_results /
+        llm / death / ended_at / rendered are absent from the shape.
         """
         return {
             "agent_id": self.agent_id,

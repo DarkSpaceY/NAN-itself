@@ -16,8 +16,8 @@ from nan.turn.model import INTERRUPTED, Turn
 
 def render_turn(turn: Turn) -> tuple[Message, ...]:
     """
-    One turn as its message run: the observation (injections,
-    inbox, task), then the assistant's reply or calls, then one
+    One turn as its message run: the observation (delta,
+    injections, inbox), then the assistant's reply or calls, then one
     tool message per call -- paired by call id, so a call with no
     result renders as interrupted. An in-flight turn renders as
     its observation alone.

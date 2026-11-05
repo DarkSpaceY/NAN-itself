@@ -192,9 +192,10 @@ Rules:
 - A service that stops heartbeating is excluded after `heartbeat_ttl`,
   without an unregister call.
 - The archive sees every turn that commits, in the order it commits.
-  A turn that never commits (kill, pause, shutdown, unrecoverable
-  failure) never reaches it; a finished turn is archived with its death
-  record.
+  A turn cut short by death (kill, or a child's unrecoverable
+  failure) commits nothing and never reaches it; a paused or
+  shutdown-parked turn reaches it once it later commits. A finished
+  turn is archived with its death record.
 
 ### Service delta
 
@@ -306,8 +307,8 @@ hello
 When all three are empty the message is `(no input this turn)`.
 
 `<delta>` groups `DeltaEvent`s by section in first-seen order. Sections
-are `service`, `subagent` (spawned, died), and `agent` (paused, retry
-exhausted).
+are `service`, `subagent` (spawned, died), and `agent` (paused,
+resumed, failure reason).
 
 `<injection>` holds one block per recorded service, keyed by
 `service_id`. A failed delivery keeps its text prefixed with
@@ -361,7 +362,8 @@ agent, `<agent_id>.json` under `paths.snapshots` (`snapshots/`).
 ```
 
 - A write is whole-state: a temporary file is fsynced and renamed over
-  the target, so a reader never sees a partial snapshot.
+  the target, then the directory is fsynced, so a reader never sees a
+  partial snapshot and the rename itself survives a crash.
 - The tree is not stored separately: `parent_id` and `depth` rebuild
   it. `parent_id: null` marks the root; empty `turns` means a spawned
   agent that has not observed yet and is still live.

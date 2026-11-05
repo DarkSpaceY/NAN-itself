@@ -1,8 +1,8 @@
 # NAN-itself documentation
 
-NAN-itself is a local-first agent core: one asyncio task per agent, handles
-for multi-agent coordination, external processes for prompt
-injection, and the shell as the universal tool surface.
+NAN-itself is a local-first agent core: one asyncio task per agent, a
+tree of spawned children under their parent, external processes for
+prompt injection, and the shell as the universal tool surface.
 
 ## Reading order
 
@@ -34,6 +34,7 @@ injection, and the shell as the universal tool surface.
     scripts/      install.sh
     tests/        the core pytest suite
     docs/         this documentation
+    snapshots/    per-agent recovery state, written at runtime
     design/       design notes and the backlog
     infraend/     notes for a separate inference backend
     paper_search/ research experiments (idea generation, agent memory)

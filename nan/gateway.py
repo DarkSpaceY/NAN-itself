@@ -6,7 +6,7 @@ WS gateway: bridge the process-wide event sink to the UI.
 
 Server-authoritative stream:
 
-    - on connect: hello + history replay
+    - on connect: hello, then the surface table, then history replay
     - live: forward subscribed events
     - inbound: {"t":"input","text","mid"} -> on_input(text, mid)
                (mid dedup is handled here, bounded cache)

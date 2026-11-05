@@ -69,9 +69,9 @@ conversations across turns.
 - **One agent = one asyncio task.** A turn starts on inbox
   input, on the configured interval, or again after a turn that
   called verbs; messages queue at turn boundaries.
-- **Handles.** A spawned child is reached through a handle:
-  send messages in, kill it. A handle belongs to its spawner,
-  so when an agent dies everything it holds dies with it.
+- **Parent and children.** A spawned child is held by its parent:
+  `send` messages down, `kill` it. A child belongs to its spawner,
+  so when an agent dies everything under it dies with it.
 - **Injection services.** Prompt contributions come from
   independent local processes over a small HTTP protocol.
 - **Shell-first.** Tools and skills are plain files; the agent
@@ -105,6 +105,7 @@ conversations across turns.
     scripts/      install.sh
     tests/        the core pytest suite, one directory per feature
     docs/         this documentation
+    snapshots/    per-agent recovery state, written at runtime
     dist/         build output (`uv build`)
 
 ## Roadmap

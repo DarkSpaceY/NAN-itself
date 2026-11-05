@@ -17,7 +17,7 @@ provider SDKs may fall back to their own env vars when
 | `base_url` | `""` | Endpoint URL; empty = provider default |
 | `api_key` | `""` | Empty = SDK default behavior |
 | `model` | `""` | Model name sent to the endpoint |
-| `max_tokens` | `8192` | Anthropic output cap; must exceed `thinking_budget` when native thinking is on |
+| `max_tokens` | `8192` | Anthropic output cap; an active `thinking_budget` is clamped below it |
 | `thinking` | `true` | Capture model reasoning and replay it verbatim in history (strict prefix cache) |
 | `thinking_budget` | `4096` | Anthropic extended-thinking budget; `0` = do not send the native thinking request |
 | `timeout` | `120.0` | Per-request timeout (seconds) |
@@ -68,7 +68,7 @@ The registry that external prompt-contributor services talk to.
 |-----|---------|---------|
 | `host` | `127.0.0.1` | Registry listen address |
 | `port` | `8901` | Registry port |
-| `timeout` | `2.0` | Per-service, per-turn delivery timeout |
+| `timeout` | `2.0` | Default per-service delivery timeout; an `inject` service may declare a longer read budget (`0.1`-`600`) at registration |
 | `heartbeat_ttl` | `15.0` | A service silent longer than this is evicted from the live set |
 
 ## gateway

@@ -25,7 +25,8 @@ follows the actual layout.
     ├── persistence/
     │   └── snapshot.py   per-agent snapshots
     ├── execution/
-    │   └── sandbox.py    OS-level execution sandbox
+    │   ├── sandbox.py    OS-level execution sandbox
+    │   └── jobs.py       background shell jobs
     ├── llm/
     │   ├── provider.py   the model API transport
     │   └── types.py      protocol vocabulary (DTOs)
@@ -131,8 +132,8 @@ Each invariant names the single place that keeps it true.
    (`core.persist`, called in `_complete_turn` / `_run_phases` /
    `_record_result` / `_commit`).
 7. **Writes are atomic and whole-state.** Temp file + fsync +
-   `os.replace`, one file per agent, rewritten whole each time
-   (`SnapshotStore._write`).
+   `os.replace` + directory fsync, one file per agent, rewritten
+   whole each time (`SnapshotStore._write`).
 8. **Identity belongs to the snapshot.** An agent exists as soon as its
    snapshot does; a snapshot with zero turns is a spawned agent that
    observed nothing yet (`AgentSnapshot`; `spawn_child`).
@@ -345,9 +346,9 @@ function of the turn, so the same turn renders to the same bytes,
 and a failed service's body is prefixed with `[service error] `.
 
 Runtime facts about this agent that land outside a turn (a pause, a
-failure, a `resumed` marker) go through `_note`: into the open turn
-when there is one, otherwise into `_pending_deltas`, which the next
-observation drains. A committed turn stays frozen, so a fact that
+failure, a `resumed` marker) go through `_record_delta`: into the open
+turn when there is one, otherwise into `_pending_deltas`, which the
+next observation drains. A committed turn stays frozen, so a fact that
 arrives after the commit waits for the next turn. A parent's view of
 its children (`+id spawned`, `-id died`) is passive and deferred
 (`note_delta`), so it lands between turns.
@@ -386,7 +387,7 @@ flowchart TD
     E -->|yes| D["discard snapshots carrying a death"]
     D --> R{"root snapshot?"}
     R -->|no| F2["discard all, boot fresh"]
-    R -->|"more than one"| R2["keep the first, drop the rest"]
+    R -->|"more than one"| R2["keep the first, ignore the rest<br/>(their files stay on disk)"]
     R --> T["group children by parent_id<br/>keep only the subtree off the root"]
     T --> B["build agents parents first<br/>turns := snapshot.turns"]
     B --> C["recover each"]
@@ -454,15 +455,17 @@ sequenceDiagram
 - Registration, heartbeat, unregister and `/services` are
   loopback-only in both directions (entry guard + endpoint check).
 - `inject` services receive the fresh turn shape (`to_fresh_json`: no
-  reply, calls, results, llm, death, rendered) before every prompt
-  assembly; their text lands on the turn and an empty contribution is
-  dropped.
+  completed-only fields -- `phase`, `thinking`, `reply`, `calls`,
+  `results`, `llm`, `death`, `rendered`, `ended_at`) before every
+  prompt assembly; their text lands on the turn and an empty
+  contribution is dropped.
 - `archive` services receive the complete turn once it ends; their
   reply is an acknowledgement and a failed delivery is logged and
   dropped.
-- A service that stops beating is evicted at the next read (TTL), and
-  the per-agent online/offline delta is diffed against that agent's
-  last boundary (`InjectionHub._live_services`, `_service_delta`).
+- A service past `injection.heartbeat_ttl` is evicted at the next
+  delivery pass (`inject` or `archive`), and the per-agent
+  online/offline delta is diffed against that agent's last boundary
+  (`InjectionHub._live_services`, `_service_delta`).
 
 ## Events
 

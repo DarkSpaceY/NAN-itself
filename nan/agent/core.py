@@ -782,8 +782,8 @@ class Agent:
             },
         )
 
-        # The archive sees every turn that ended, in the order it
-        # ended. Delivery failure is logged there and dropped.
+        # The archive sees every turn that committed, in the order it
+        # committed. Delivery failure is logged there and dropped.
         await self.injections.archive(turn)
 
         return turn
@@ -1003,7 +1003,7 @@ class Agent:
         await self.jobs.stop_all()
 
         await self._stop_children(
-            lambda child: child.request_death(f"killed by holder {self.agent_id}")
+            lambda child: child.request_death(f"killed by parent {self.agent_id}")
         )
 
         self.children.clear()
