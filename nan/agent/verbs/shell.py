@@ -36,7 +36,11 @@ class ShellVerb(Verb):
                 "fixed timeout set by the user, so a genuinely long task "
                 "must pass background=true: the call then returns a job "
                 "id, pid and log path at once, and later shell calls poll "
-                "the log. Output is truncated (head and tail kept)."
+                "the log. Output is truncated (head and tail kept). "
+                "Prefer chaining shell commands together to reduce the "
+                "number of calls. For commands expected to produce long "
+                "output that cannot be re-run, write the output to a file "
+                "and read it back with grep/head."
             ),
             input_schema={
                 "type": "object",
