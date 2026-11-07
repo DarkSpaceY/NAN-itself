@@ -39,11 +39,11 @@ def test_interval_agent_runs_then_paces() -> None:
     assert transition(Status(paced=False), interval=1.0) == "pace"
 
 
-def test_interval_ignores_pending_input() -> None:
-    """An interval agent never skips its cadence because input waits."""
-    status = Status(paced=False, input_ready=True, owed_step=True)
-
-    assert transition(status, interval=1.0) == "pace"
+def test_interval_skips_the_cadence_for_input_or_owed_step() -> None:
+    """The cadence governs idle time only: pending input or a ReACT
+    result opens a turn now, and the cadence restarts after it."""
+    assert transition(Status(paced=False, input_ready=True), interval=1.0) == "run"
+    assert transition(Status(paced=False, owed_step=True), interval=1.0) == "run"
 
 
 def test_event_driven_runs_on_input_or_owed_step() -> None:

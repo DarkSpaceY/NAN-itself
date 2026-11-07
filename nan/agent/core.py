@@ -490,8 +490,15 @@ class Agent:
                 await self._wake.wait()
 
             case "pace":
-                # The cadence: wait it out, then the fold opens the turn.
-                await asyncio.sleep(self.settings.agent.autonomous_interval)
+                # The cadence sleeps, but a delivery or an exit latch
+                # wakes it early: the fold then acts without waiting
+                # out the interval.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._wake.wait(), timeout=self.settings.agent.autonomous_interval
+                    )
+
+                self._wake.clear()
 
                 self._paced = True
 

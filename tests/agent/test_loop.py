@@ -224,6 +224,33 @@ async def test_interval_agent_paces_itself(tmp_path: Path, no_sink: None) -> Non
         await root._task
 
 
+async def test_interval_agent_opens_a_turn_on_input(tmp_path: Path, no_sink: None) -> None:
+    """A delivery wakes the pace sleep: the input opens a turn now,
+    and the cadence restarts after it."""
+    llm = FakeLLM()
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 30.0})
+
+    root.start()
+
+    assert root._task is not None
+
+    # the initial cadence token opens one spontaneous turn
+    await await_until(lambda: len(root.turns) == 1 and root.turns[0].phase == "committed")
+
+    # the loop is pacing now; input must not wait out the 30s interval
+    root.deliver(InboxMessage.from_user("urgent"))
+
+    await await_until(lambda: len(root.turns) == 2)
+
+    assert [message.text for message in root.turns[1].inbox] == ["urgent"]
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task
+
+
 async def test_tool_call_step_continues_without_new_input(tmp_path: Path, no_sink: None) -> None:
     """
     Event-driven ReACT: a turn that called a verb still owes the

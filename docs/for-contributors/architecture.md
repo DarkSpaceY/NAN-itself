@@ -201,9 +201,12 @@ Behaviour that follows from the table alone:
 - **Event-driven** (`interval == 0`): input opens a turn, and a turn
   that called verbs opens the next one so the model can read its
   results; otherwise the loop waits.
-- **Interval-driven** (`interval > 0`): one turn per interval. Pending
-  input waits for the interval, and `pace` is entered only after a
-  turn has spent the token -- a resumed turn counts as a turn.
+- **Interval-driven** (`interval > 0`): the cadence governs idle time
+  only -- one spontaneous turn per interval. Input or an owed ReACT
+  result opens a turn immediately, and the cadence restarts after it;
+  `pace` is entered only after a turn has spent the token -- a resumed
+  turn counts as a turn. The pace sleep wakes early on delivery, pause
+  or exit.
 - **Pause** cancels the in-flight turn where it stands and parks the
   tree; a resume lifts it and the fold returns `resume`.
 - **`wait`** clears `_wake` and awaits it in one synchronous step, so a

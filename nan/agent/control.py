@@ -57,9 +57,13 @@ def transition(status: Status, *, interval: float) -> Action:
     if status.open_turn:
         return "resume"
 
-    # An interval agent is paced entirely by the cadence: sleep, then
-    # run, then sleep again. Pending input waits for the interval.
+    # The cadence governs idle time only: input or a ReACT result the
+    # model has not seen opens a turn now, and the cadence restarts
+    # after it.
     if interval > 0:
+        if status.input_ready or status.owed_step:
+            return "run"
+
         return "run" if status.paced else "pace"
 
     # Results the model has not seen yet continue the ReACT cycle

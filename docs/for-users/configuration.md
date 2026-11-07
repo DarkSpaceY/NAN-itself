@@ -36,7 +36,7 @@ Example -- a local 27B model behind llama.cpp:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `autonomous_interval` | `0.0` | `>0`: each agent starts a fresh turn every N seconds; `<=0`: event-driven -- a turn starts on inbox input, and a turn that called verbs runs again so the model can read the results |
+| `autonomous_interval` | `0.0` | `>0`: each agent starts a spontaneous turn every N seconds, while inbox input or a verb result still opens one immediately (the cadence then restarts); `<=0`: event-driven -- a turn starts on inbox input, and a turn that called verbs runs again so the model can read the results |
 | `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history and starts a new context epoch |
 | `shell_timeout` | `30.0` | `shell` verb execution timeout; the model cannot change it |
 | `shell_output_limit` | `20000` | `shell` verb output truncation size (head + tail kept, middle elided) |
