@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+import openai
+import pytest
+
 from nan.llm import Message, ThinkingBlock
 from nan.llm.provider import LLMProvider
+from nan.llm.types import LLMRequest, TransientModelError
 
 
 def _provider() -> LLMProvider:
@@ -161,3 +166,43 @@ def test_merge_reasoning_details_accumulates_by_index() -> None:
     )
     assert blocks[1].type == "encrypted"
     assert blocks[1].data == "payload"
+
+
+async def _connection_failure(request: LLMRequest):
+    """A stream that dies before yielding: the transport is gone."""
+    raise openai.APIConnectionError(request=httpx.Request("POST", "http://test"))
+
+    yield  # pragma: no cover
+
+
+async def _client_failure(request: LLMRequest):
+    """A stream that dies on something repeating cannot repair."""
+    raise ValueError("bad request shape")
+
+    yield  # pragma: no cover
+
+
+@pytest.mark.asyncio
+async def test_transient_sdk_failure_is_translated() -> None:
+    provider = _provider()
+
+    provider._closed = False
+    provider._openai = object()
+    provider._stream_openai = _connection_failure
+
+    with pytest.raises(TransientModelError):
+        async for _event in provider.generate(LLMRequest(messages=[])):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_unknown_failure_is_not_translated() -> None:
+    provider = _provider()
+
+    provider._closed = False
+    provider._openai = object()
+    provider._stream_openai = _client_failure
+
+    with pytest.raises(ValueError):
+        async for _event in provider.generate(LLMRequest(messages=[])):
+            pass

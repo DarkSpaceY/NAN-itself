@@ -9,6 +9,12 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
+from anthropic import (
+    APIConnectionError as AnthropicConnectionError,
+)
+from anthropic import (
+    APIStatusError as AnthropicStatusError,
+)
 from anthropic import AsyncAnthropic
 from anthropic import DefaultAsyncHttpxClient as AsyncHttpxClientAnthropic
 from anthropic.types import (
@@ -31,6 +37,8 @@ from anthropic.types import (
 )
 from anthropic.types.raw_message_delta_event import Delta as MessageDeltaDelta
 from loguru import logger
+from openai import APIConnectionError as OpenAIConnectionError
+from openai import APIStatusError as OpenAIStatusError
 from openai import AsyncOpenAI
 from openai import DefaultAsyncHttpxClient as AsyncHttpxClientOpenAI
 
@@ -42,9 +50,27 @@ from .types import (
     LLMStreamEvent,
     Message,
     ThinkingBlock,
+    TransientModelError,
     Usage,
     VerbCall,
 )
+
+# Failures this boundary recognizes as retryable; the vendor types
+# are known here and nowhere else.
+_CONNECTION_ERRORS = (OpenAIConnectionError, AnthropicConnectionError)
+
+_STATUS_ERRORS = (OpenAIStatusError, AnthropicStatusError)
+
+
+def _transient(exc: BaseException) -> bool:
+    """Whether the adapter hands this failure to the retry ladder."""
+    if isinstance(exc, _CONNECTION_ERRORS):
+        return True
+
+    if isinstance(exc, _STATUS_ERRORS):
+        return exc.status_code == 429 or exc.status_code >= 500
+
+    return False
 
 
 def _proxy_kwargs(proxy: str) -> dict[str, Any]:
@@ -68,6 +94,7 @@ class LLMProvider:
         - translate provider-specific tool definitions
         - normalize tool calls
         - normalize usage
+        - translate vendor failures into `TransientModelError`
         - expose one streaming protocol to Agent Runtime
     """
 
@@ -140,12 +167,18 @@ class LLMProvider:
         if self._closed:
             raise RuntimeError("LLMProvider is already closed")
 
-        if self._openai is not None:
-            async for event in self._stream_openai(request):
-                yield event
-        else:
-            async for event in self._stream_anthropic(request):
-                yield event
+        try:
+            if self._openai is not None:
+                async for event in self._stream_openai(request):
+                    yield event
+            else:
+                async for event in self._stream_anthropic(request):
+                    yield event
+        except Exception as exc:
+            if not _transient(exc):
+                raise
+
+            raise TransientModelError(f"{type(exc).__name__}: {exc}") from exc
 
     async def close(self) -> None:
         if self._closed:

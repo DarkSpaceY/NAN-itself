@@ -14,15 +14,18 @@ that throws returns its error as the model-visible result instead of
 failing the turn (see Agent._execute_call). A retry ladder that runs out
 is fatal by definition (`Unrecoverable`).
 
-`classify` is the one place exception types are interpreted. It reads
-status codes and transport exception names structurally, so the SDKs
-may wrap a cause without being imported here.
+`classify` is the one place exception types are interpreted. It takes
+`TransientModelError` -- the adapter's translation of a vendor failure
+-- as retryable, and reads status codes and transport exception names
+structurally, so an SDK may wrap a cause without being imported here.
 """
 
 from __future__ import annotations
 
 import asyncio
 from enum import StrEnum
+
+from nan.llm.types import TransientModelError
 
 
 class FailureKind(StrEnum):
@@ -84,13 +87,20 @@ def classify(exc: BaseException) -> FailureKind:
 
 
 def _retryable(exc: BaseException, depth: int = 0) -> bool:
+    if isinstance(exc, TransientModelError):
+        return True
+
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
 
     status = getattr(exc, "status_code", None)
 
+    if not isinstance(status, int):
+        # httpx.HTTPStatusError keeps it on the response.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+
     if isinstance(status, int):
-        if status == 429 or status >= 500:
+        if status in (408, 425, 429) or status >= 500:
             return True
 
         if status >= 400:

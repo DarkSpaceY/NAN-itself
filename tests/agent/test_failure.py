@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from nan.agent.failure import FailureKind, Unrecoverable, classify
+from nan.llm.types import TransientModelError
 
 
 class _Status(Exception):
@@ -14,6 +15,13 @@ class _Status(Exception):
         super().__init__(f"status {status_code}")
 
         self.status_code = status_code
+
+
+class _WrappedStatus(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"status {status_code}")
+
+        self.response = _Status(status_code)
 
 
 def _named(name: str) -> Exception:
@@ -24,9 +32,18 @@ def test_cancelled_is_its_own_kind() -> None:
     assert classify(asyncio.CancelledError()) is FailureKind.CANCELLED
 
 
-@pytest.mark.parametrize("status", [429, 500, 502, 503])
+@pytest.mark.parametrize("status", [408, 425, 429, 500, 502, 503])
 def test_retryable_status(status: int) -> None:
     assert classify(_Status(status)) is FailureKind.RETRYABLE
+
+
+def test_status_on_the_response_is_read_too() -> None:
+    assert classify(_WrappedStatus(503)) is FailureKind.RETRYABLE
+    assert classify(_WrappedStatus(400)) is FailureKind.FATAL
+
+
+def test_adapter_transient_error_is_retryable() -> None:
+    assert classify(TransientModelError("ConnectError: boom")) is FailureKind.RETRYABLE
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])

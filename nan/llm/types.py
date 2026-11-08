@@ -10,6 +10,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+
+class TransientModelError(Exception):
+    """
+    The model call failed in a way that repeating it may repair.
+
+    The adapter raises this after recognizing a vendor failure
+    (connection, timeout, 429, 5xx), so the runtime reads it as
+    retryable without knowing which SDK produced it.
+    """
+
+
 FinishReason = Literal[
     "stop",
     "tool_calls",
