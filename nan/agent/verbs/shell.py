@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import os
+import pty
 import signal
+import termios
+import tty
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome, format_shell_output
-from nan.execution import Job, kill_group
+from nan.execution import Job, kill_group, start_pump
 from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
@@ -20,6 +24,11 @@ _BACKGROUND_GRACE = 0.1
 
 # How long a cancelled command gets between SIGTERM and SIGKILL.
 _CANCEL_GRACE = 1.0
+
+
+def _own_terminal() -> None:
+    """Take the pty as controlling terminal; setsid already ran."""
+    fcntl.ioctl(1, termios.TIOCSCTTY, 0)
 
 
 class ShellVerb(Verb):
@@ -224,9 +233,11 @@ class ShellVerb(Verb):
         env: dict[str, str] | None,
     ) -> VerbOutcome:
         """
-        Start the command without waiting. Its output goes to a log
-        file the model can poll; the job is registered on the agent
-        so death and shutdown can kill it.
+        Start the command without waiting. It runs on its own pty,
+        which the core keeps open: an ungraceful core death hangs up
+        the job's session. Output is pumped into a log the model
+        polls; the job is registered so death and shutdown can kill
+        it.
         """
         workspace = agent.settings.paths.workspace
         jobs_dir = workspace / ".nan" / "jobs" / agent.agent_id
@@ -234,39 +245,87 @@ class ShellVerb(Verb):
         job_id = agent.jobs.new_id()
         log_path = jobs_dir / f"{job_id}.log"
 
+        job: Job | None = None
+        master = -1
+        slave = -1
+
         try:
             jobs_dir.mkdir(parents=True, exist_ok=True)
 
-            with open(log_path, "wb") as log:
-                proc = await asyncio.create_subprocess_shell(
-                    command,
-                    cwd=str(cwd),
-                    env=env,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=asyncio.subprocess.STDOUT,
-                    start_new_session=True,
-                )
+            # Raw mode: no echo and no CR translation, so the log
+            # holds exactly what the command wrote.
+            master, slave = pty.openpty()
+            tty.setraw(slave)
+
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=slave,
+                stderr=slave,
+                start_new_session=True,
+                preexec_fn=_own_terminal,
+            )
+
+            os.close(slave)
+            slave = -1
+
+            job = Job(
+                job_id=job_id,
+                proc=proc,
+                pgid=proc.pid,
+                log_path=log_path,
+                master=master,
+                pump=start_pump(master, log_path),
+            )
+            master = -1
+
+            # Registered before the grace: every cancellation point
+            # from here on has a job that stop_all can kill.
+            agent.jobs.add(job)
 
             # A command that dies at once (a typo, a missing
             # binary) must say so, not pretend it started.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=_BACKGROUND_GRACE)
 
+            if proc.returncode is not None:
+                # The pty may still hold the final output.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(job.pump), timeout=_BACKGROUND_GRACE)
+
+                output = _read_log(log_path)
+                limit = agent.settings.agent.shell_output_limit
+
+                agent.jobs.discard(job_id)
+
+                return VerbOutcome(
+                    "The command exited immediately.\n"
+                    f"{format_shell_output(output, proc.returncode, limit)}",
+                    {"exit_code": proc.returncode, "timed_out": False},
+                )
+
+        except asyncio.CancelledError:
+            # A cancelled start has no id to report; leaving it alive
+            # would be a job nobody can poll or stop.
+            if job is not None:
+                await agent.jobs.stop(job_id)
+
+            raise
+
         except Exception as exc:
+            if job is not None:
+                await agent.jobs.stop(job_id)
+
             return VerbOutcome(f"{type(exc).__name__}: {exc}")
 
-        if proc.returncode is not None:
-            output = _read_log(log_path)
-            limit = agent.settings.agent.shell_output_limit
+        finally:
+            if slave >= 0:
+                os.close(slave)
 
-            return VerbOutcome(
-                "The command exited immediately.\n"
-                f"{format_shell_output(output, proc.returncode, limit)}",
-                {"exit_code": proc.returncode, "timed_out": False},
-            )
-
-        agent.jobs.add(Job(job_id=job_id, proc=proc, pgid=proc.pid, log_path=log_path))
+            if master >= 0:
+                os.close(master)
 
         relative = log_path.relative_to(workspace)
 

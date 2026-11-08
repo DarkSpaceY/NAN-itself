@@ -8,7 +8,12 @@ their process groups, so no command outlives the agent that
 started it. Pause leaves jobs alone -- a pause cancels the
 in-flight turn, not the agent's processes.
 
-A job's stdout and stderr go to its log file under
+Each job runs on its own pty and the agent keeps the master open.
+A core that dies without unwinding (crash, SIGKILL) closes that
+master, and the kernel hangs up the job's session the way a
+closing terminal does -- so an ungraceful death leaks nothing.
+
+The pty is pumped into the job's log file under
 ``<workspace>/.nan/jobs/<agent_id>/``; the model polls it with
 later shell calls.
 """
@@ -41,10 +46,92 @@ class Job:
     proc: asyncio.subprocess.Process
     pgid: int
     log_path: Path
+    master: int
+    pump: asyncio.Task[None]
 
     @property
     def running(self) -> bool:
         return self.proc.returncode is None
+
+    def close(self) -> None:
+        """Drop the pty and its pump; the process is gone or being killed."""
+        if not self.pump.done():
+            self.pump.cancel()
+        elif not self.pump.cancelled():
+            self.pump.exception()
+
+        with contextlib.suppress(OSError):
+            os.close(self.master)
+
+
+async def _pump(master: int, log_path: Path) -> None:
+    """Copy the pty into the log until the command closes its side."""
+    try:
+        stream = os.fdopen(os.dup(master), "rb", buffering=0)
+    except OSError:
+        return
+
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    transport = None
+
+    try:
+        transport, _ = await loop.connect_read_pipe(
+            lambda: asyncio.StreamReaderProtocol(reader), stream
+        )
+
+        with open(log_path, "wb", buffering=0) as log:
+            while True:
+                try:
+                    chunk = await reader.read(65536)
+                except OSError:
+                    return
+
+                if not chunk:
+                    return
+
+                log.write(chunk)
+
+    finally:
+        if transport is None:
+            stream.close()
+        else:
+            transport.close()
+
+
+def start_pump(master: int, log_path: Path) -> asyncio.Task[None]:
+    """Start copying the job's pty into its log."""
+    return asyncio.create_task(_pump(master, log_path), name=f"job-pump:{log_path.stem}")
+
+
+async def _terminate(jobs: list[Job]) -> None:
+    """SIGTERM the groups, SIGKILL the survivors, then close every pty."""
+    pending = [job for job in jobs if job.running]
+
+    for job in pending:
+        kill_group(job.pgid, signal.SIGTERM)
+
+    waiting = [asyncio.create_task(job.proc.wait()) for job in pending]
+
+    if waiting:
+        await asyncio.wait(waiting, timeout=_STOP_GRACE)
+
+    for job in pending:
+        if job.proc.returncode is None:
+            kill_group(job.pgid, signal.SIGKILL)
+
+    if waiting:
+        await asyncio.gather(*waiting, return_exceptions=True)
+
+    for job in jobs:
+        if not job.pump.done():
+            job.pump.cancel()
+
+    if jobs:
+        await asyncio.gather(*(job.pump for job in jobs), return_exceptions=True)
+
+    for job in jobs:
+        job.close()
 
 
 class JobRegistry:
@@ -79,23 +166,26 @@ class JobRegistry:
 
         self._jobs.clear()
 
-        pending = [job for job in jobs if job.running]
+        await _terminate(jobs)
 
-        for job in pending:
-            kill_group(job.pgid, signal.SIGTERM)
+    async def stop(self, job_id: str) -> None:
+        """Kill one job; a start that was cancelled has no id to report."""
+        job = self._jobs.pop(job_id, None)
 
-        waiting = [asyncio.create_task(job.proc.wait()) for job in pending]
+        if job is not None:
+            await _terminate([job])
 
-        if waiting:
-            await asyncio.wait(waiting, timeout=_STOP_GRACE)
+    def discard(self, job_id: str) -> None:
+        """Drop a job that already exited; its pty goes with it."""
+        job = self._jobs.pop(job_id, None)
 
-        for job in pending:
-            if job.proc.returncode is None:
-                kill_group(job.pgid, signal.SIGKILL)
-
-        if waiting:
-            await asyncio.gather(*waiting, return_exceptions=True)
+        if job is not None:
+            job.close()
 
     def _forget_exited(self) -> None:
-        for job_id in [job.job_id for job in self._jobs.values() if not job.running]:
+        for job_id, job in list(self._jobs.items()):
+            if job.running:
+                continue
+
             self._jobs.pop(job_id, None)
+            job.close()

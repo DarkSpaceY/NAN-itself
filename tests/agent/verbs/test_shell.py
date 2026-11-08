@@ -4,7 +4,9 @@ covered in tests/execution."""
 
 from __future__ import annotations
 
+import asyncio
 import os
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -214,6 +216,95 @@ async def test_pause_leaves_background_jobs_alone(tmp_path: Path, no_sink: Any) 
         assert root.jobs.live != []
 
         os.kill(result.detail["pid"], 0)
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_a_crashed_core_hangs_up_the_job(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        await _shell(root, "sleep 30", background=True)
+
+        job = next(iter(root.jobs._jobs.values()))
+
+        # A core that dies without unwinding closes every fd: the pump's
+        # duplicate and the master. The kernel hangs up the session.
+        job.pump.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await job.pump
+
+        job.close()
+
+        await asyncio.wait_for(job.proc.wait(), timeout=2.0)
+
+        assert job.proc.returncode == -signal.SIGHUP
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_cancelling_the_start_kills_the_job(
+    tmp_path: Path, no_sink: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nan.agent.verbs.shell._BACKGROUND_GRACE", 5.0)
+
+    root = make_agent(tmp_path=tmp_path)
+    pids: list[int] = []
+
+    create = asyncio.create_subprocess_shell
+
+    async def record(*args: Any, **kwargs: Any) -> Any:
+        proc = await create(*args, **kwargs)
+        pids.append(proc.pid)
+
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", record)
+
+    task = asyncio.create_task(_shell(root, "sleep 30", background=True))
+
+    for _ in range(200):
+        if pids:
+            break
+
+        await asyncio.sleep(0.01)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert root.jobs.live == []
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(pids[0], 0)
+
+
+async def test_the_log_is_raw_output(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        result = await _shell(root, "printf 'a\\nb\\n'; sleep 0.2", background=True)
+
+        log = (
+            tmp_path
+            / "workspace"
+            / ".nan"
+            / "jobs"
+            / root.agent_id
+            / f"{result.detail['job_id']}.log"
+        )
+
+        for _ in range(200):
+            if log.exists() and log.read_bytes() == b"a\nb\n":
+                break
+
+            await asyncio.sleep(0.01)
+
+        assert log.read_bytes() == b"a\nb\n"
 
     finally:
         await root.jobs.stop_all()
