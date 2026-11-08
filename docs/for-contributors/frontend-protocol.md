@@ -49,9 +49,10 @@ overlap what it already has.
 ```
 
 `boot` changes when the core restarts: the frontend drops history
-and starts over. `paused` is the root agent's current pause state,
-falling back to the newest `agent_paused`/`agent_resumed` in
-history when the core does not supply it, so a reconnect while
+and rebuilds it from the replay that follows, which starts with
+each restored agent's turns. `paused` is the root agent's current
+pause state, falling back to the newest `agent_paused`/`agent_resumed`
+in history when the core does not supply it, so a reconnect while
 paused still shows the right button.
 
 ## Surfaces

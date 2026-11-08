@@ -109,6 +109,7 @@ class Sink:
         *,
         content: dict[str, Any] | None = None,
         id: str | None = None,
+        ts: float | None = None,
     ) -> str:
         """
         Stamp and publish one event; return its id.
@@ -116,6 +117,9 @@ class Sink:
         `t` is the flat event-type discriminant; all business
         fields travel inside `content`, which is always an object
         (empty when omitted). `content` is stored verbatim.
+
+        `ts` overrides the wall clock for replayed history, whose
+        events happened before this boot.
 
         Must be called from the event loop thread.
         """
@@ -129,7 +133,7 @@ class Sink:
             "t": t,
             "id": eid,
             "seq": self._seq,
-            "ts": time.time(),
+            "ts": time.time() if ts is None else ts,
             "content": payload,
         }
 

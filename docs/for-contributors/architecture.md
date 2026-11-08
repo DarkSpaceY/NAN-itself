@@ -21,7 +21,8 @@ follows the actual layout.
     │   └── verbs/        spawn / sleep / shell / send / kill / finish
     ├── turn/
     │   ├── model.py      the Turn record
-    │   └── render.py     deterministic prompt rendering
+    │   ├── render.py     deterministic prompt rendering
+    │   └── replay.py     deterministic turn -> UI event replay
     ├── persistence/
     │   └── snapshot.py   per-agent snapshots
     ├── execution/
@@ -396,7 +397,8 @@ flowchart TD
     B --> C["recover each"]
     C --> C1["open turn: drop & requeue inbox<br/>if nothing was observed,<br/>else leave it resident"]
     C1 --> C2["deliver pending messages<br/>persist (also when turns = 0)"]
-    C2 --> G["start every agent"]
+    C2 --> C3["replay every turn from the snapshot<br/>(original timestamps), then snapshot_restored"]
+    C3 --> G["start every agent"]
 ```
 
 An agent whose depth disagrees with the tree it hangs off keeps the
@@ -495,10 +497,13 @@ carries the envelope `t` / `id` / `seq` / `ts` / `boot_id` plus a
 | `snapshot_restored` | `agent_id`, `parent_id`, `depth`, `turns`, `in_flight` | `restore._restore_turns` |
 | `user_input` | `text`, optional `mid` | `Core._on_input` |
 
+The same shapes are re-emitted at boot by `turn/replay.py`, which
+derives them from a stored Turn.
+
 The sink keeps a bounded ring (`HISTORY_LIMIT`), where streaming
 deltas are coalesced into one entry per stream, and fans out to
 subscriber queues that drop their oldest entry when full. The ring is
-output-only.
+output-only; boot refills it from the snapshots.
 
 ## Gateway
 

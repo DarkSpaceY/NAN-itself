@@ -67,8 +67,8 @@ Opening sequence, in order:
 3. the history ring
 4. live events
 
-A changed `boot` means the core restarted: drop history and start
-over.
+A changed `boot` means the core restarted: drop history and rebuild
+it from the replay, which starts with every restored agent's turns.
 
 Client messages:
 

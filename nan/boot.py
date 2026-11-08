@@ -24,6 +24,7 @@ from loguru import logger
 from nan.agent import Agent
 from nan.events import sink
 from nan.persistence import AgentSnapshot, InFlight, SnapshotStore
+from nan.turn import replay_turns
 
 if TYPE_CHECKING:
     from nan.config import Settings
@@ -194,6 +195,16 @@ async def _restore_turns(agent: Agent, snapshot: AgentSnapshot) -> None:
     # Always rewritten: an agent with no turns is a spawned agent
     # still waiting for its first observation, and it stays live.
     await agent.persist()
+
+    # The timeline is rebuilt from the snapshot: history replay must
+    # precede snapshot_restored, whose turn count it would overwrite.
+    replay_turns(
+        agent.turns,
+        pending=(
+            *(inflight.inbox_to_requeue if inflight is not None else ()),
+            *snapshot.pending,
+        ),
+    )
 
     sink.emit(
         "snapshot_restored",

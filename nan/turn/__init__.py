@@ -15,6 +15,7 @@ from .model import (
     VerbResult,
 )
 from .render import freeze_turn, render_turn
+from .replay import replay_turns
 
 __all__ = [
     "Death",
@@ -29,4 +30,5 @@ __all__ = [
     "TurnOrigin",
     "freeze_turn",
     "render_turn",
+    "replay_turns",
 ]

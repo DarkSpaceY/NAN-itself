@@ -124,6 +124,10 @@ async def test_restore_rebuilds_the_tree_and_closes_the_open_turn(tmp_path: Path
     assert "snapshot_restored" in restored
     assert "turn_interrupted" in restored
 
+    # History is replayed from the snapshot before the restore marker:
+    # the frontend rebuilds the timeline and then takes the turn count.
+    assert restored.index("turn_started") < restored.index("snapshot_restored")
+
     in_flight = {
         event["content"]["agent_id"]: event["content"]["in_flight"]
         for event in sink.history()
@@ -157,6 +161,12 @@ async def test_restore_drops_an_unanswered_turn_and_requeues_its_inbox(tmp_path:
 
     assert restored["content"]["agent_id"] == "r0"
     assert restored["content"]["in_flight"] == "requeued"
+
+    # The dropped turn's inbox is replayed as waiting input, so the
+    # user message stays on the timeline across the restart.
+    assert [event["content"]["text"] for event in sink.history() if event["t"] == "user_input"] == [
+        "lost input"
+    ]
 
     # The agent itself stays live: its snapshot is rewritten with
     # no turns, which is a spawned agent that observed nothing yet.
