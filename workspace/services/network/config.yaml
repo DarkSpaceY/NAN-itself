@@ -32,3 +32,4 @@ outbound_ttl: 3600.0               # seconds an outbound key stays seen
 
 events_max: 8                      # event ring size
 events_render_limit: 3             # events shown per injection
+state_ttl: 3600.0                  # seconds before an idle agent's diff state is dropped

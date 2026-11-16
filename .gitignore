@@ -17,6 +17,7 @@ wheels/
 .screenshots/
 .DS_Store
 *.tsbuildinfo
+.pyscn/
 
 # Environment / secrets
 .env

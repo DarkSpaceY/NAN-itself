@@ -11,8 +11,14 @@ port: 9001
 
 poll_interval: 5.0                 # seconds between samples
 
-disk_threshold: 90.0               # % that raises a disk event (throttled)
+disk_threshold: 90.0               # % disk high-pressure threshold
+disk_critical: 95.0                # % disk critical-pressure threshold
 disk_announce_every: 600.0         # min seconds between repeated disk events
+mem_warn: 85.0                     # % memory high-pressure threshold
+mem_critical: 95.0                 # % memory critical-pressure threshold
+battery_low: 20.0                  # % battery low threshold (on battery)
+battery_critical: 10.0             # % battery critical threshold (on battery)
+state_ttl: 3600.0                  # seconds before an idle agent's diff state is dropped
 runaway_cpu: 90.0                  # % cpu for a process to count as runaway
 runaway_samples: 3                 # consecutive samples before announcing
 idle_reset_after: 300.0            # idle seconds that reset work_seconds

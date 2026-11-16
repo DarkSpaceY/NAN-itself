@@ -3,7 +3,8 @@ System service: the agent feeling its own body.
 
 An injection service (see docs/for-service-authors): registers
 with the hub, samples the host on a cadence, and answers every
-turn request with the latest rendered facts.
+turn request with a full snapshot for a new epoch or only the
+changed fields for the rest of it.
 
 Disciplines:
 
@@ -12,8 +13,8 @@ Disciplines:
                 the agent judges
     degrade     every platform shim returns None on failure; the
                 service never dies from a missing binary
-    serve fast  sampling runs in the background; /turn replies
-                with the ready text, never computing on request
+    serve fast  sampling runs in the background; /turn only
+                quantizes and renders the ready snapshot
 
 Run:  uv run main.py   (from this directory, after `uv sync`)
 """
@@ -33,6 +34,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -472,6 +474,12 @@ class SystemProbe:
 
         self.events: deque[tuple[float, str]] = deque(maxlen=events_max)
 
+        # Transient signals only: these ride the injection. `events`
+        # keeps the full probe log for tests and debugging; changes
+        # that are already fields (focus, lock, dnd, disk) stay out
+        # of `notes` so they are not announced twice.
+        self.notes: deque[tuple[float, str]] = deque(maxlen=events_max)
+
         self._clock_offset: float | None = None
 
         self._focus: tuple[str, str] | None = None
@@ -504,8 +512,13 @@ class SystemProbe:
 
     # ------------------------------------------------------------------
 
-    def _emit(self, text: str) -> None:
-        self.events.append((self.now(), text))
+    def _emit(self, text: str, *, note: bool = False) -> None:
+        item = (self.now(), text)
+
+        self.events.append(item)
+
+        if note:
+            self.notes.append(item)
 
     def _check_clock_jump(self) -> None:
         offset = self.now() - self.mono()
@@ -514,7 +527,7 @@ class SystemProbe:
             jump = offset - self._clock_offset
 
             if jump > 60.0:
-                self._emit("woke from sleep")
+                self._emit("woke from sleep", note=True)
 
         self._clock_offset = offset
 
@@ -542,7 +555,7 @@ class SystemProbe:
         if count is not None and self._displays is not None and count != self._displays:
             sign = "+" if count > self._displays else "-"
 
-            self._emit(f"display {sign}{abs(count - self._displays)}")
+            self._emit(f"display {sign}{abs(count - self._displays)}", note=True)
 
         if count is not None:
             self._displays = count
@@ -568,7 +581,7 @@ class SystemProbe:
                 self._runaway[pid] = count
 
                 if count == self.runaway_samples:
-                    self._emit(f"runaway: {name} {cpu:.0f}%")
+                    self._emit(f"runaway: {name} {cpu:.0f}%", note=True)
 
             else:
                 self._runaway.pop(pid, None)
@@ -697,6 +710,7 @@ class SystemProbe:
             "dnd": self._dnd,
             "assertions": self._assertions,
             "events": list(self.events),
+            "notes": list(self.notes),
         }
 
 
@@ -732,7 +746,311 @@ def _fmt_bps(bps: float) -> str:
     return f"{bps:.0f}B/s"
 
 
-def _resource_line(facts: dict[str, Any]) -> str:
+def _severity(value: float | None, warn: float, critical: float) -> str | None:
+    if value is None:
+        return None
+
+    if value >= critical:
+        return "critical"
+
+    if value >= warn:
+        return "high"
+
+    return "normal"
+
+
+def _battery_severity(
+    battery: float | None,
+    charging: bool | None,
+    low: float,
+    critical: float,
+) -> str | None:
+    if battery is None:
+        return None
+
+    if charging:
+        return "normal"
+
+    if battery <= critical:
+        return "critical"
+
+    if battery <= low:
+        return "low"
+
+    return "normal"
+
+
+def _idle_band(seconds: float | None) -> int | None:
+    if seconds is None:
+        return None
+
+    if seconds < 120:
+        return 0
+
+    if seconds < 1800:
+        return 1
+
+    if seconds < 7200:
+        return 2
+
+    return 3
+
+
+def _minute_key() -> str:
+    return datetime.now().astimezone().strftime("%H:%M")
+
+
+def system_values(
+    facts: dict[str, Any],
+    *,
+    mem_warn: float = 85.0,
+    mem_critical: float = 95.0,
+    disk_warn: float = 90.0,
+    disk_critical: float = 95.0,
+    battery_low: float = 20.0,
+    battery_critical: float = 10.0,
+) -> dict[str, Any]:
+    """Quantized state used for comparison; values, not text."""
+    focus = facts.get("focus")
+
+    idle = facts.get("idle")
+
+    work = facts.get("work_seconds")
+
+    awake = facts.get("uptime")
+
+    cpu = facts.get("cpu")
+
+    mem = facts.get("mem")
+
+    disk = facts.get("disk")
+
+    battery = facts.get("battery")
+
+    charging = facts.get("charging")
+
+    assertions = facts.get("assertions")
+
+    return {
+        "now": _minute_key(),
+        "focus": focus[0] if focus else None,
+        "idle": _idle_band(idle),
+        "work": None if work is None else int(work // 900),
+        "awake": None if awake is None else int(awake // 3600),
+        "cpu": None if cpu is None else int(cpu // 10),
+        "mem": None if mem is None else int(mem // 10),
+        "disk": None if disk is None else int(disk // 5),
+        "battery": (
+            None
+            if battery is None
+            else (
+                int(battery // 10),
+                bool(charging),
+                _battery_severity(battery, charging, battery_low, battery_critical),
+            )
+        ),
+        "locked": facts.get("locked"),
+        "dnd": facts.get("dnd"),
+        "assertions": tuple(sorted(assertions)[:3]) if assertions else None,
+        "mem_pressure": _severity(mem, mem_warn, mem_critical),
+        "disk_pressure": _severity(disk, disk_warn, disk_critical),
+    }
+
+
+FIELD_ORDER = (
+    "now",
+    "focus",
+    "idle",
+    "work",
+    "awake",
+    "cpu",
+    "mem",
+    "disk",
+    "battery",
+    "locked",
+    "dnd",
+    "assertions",
+    "mem_pressure",
+    "disk_pressure",
+)
+
+
+def system_field_line(
+    key: str,
+    facts: dict[str, Any],
+    *,
+    mem_warn: float = 85.0,
+    mem_critical: float = 95.0,
+    disk_warn: float = 90.0,
+    disk_critical: float = 95.0,
+    battery_low: float = 20.0,
+    battery_critical: float = 10.0,
+) -> str | None:
+    """One self-describing, absolute line for a changed field."""
+    if key == "now":
+        local = datetime.now().astimezone()
+
+        offset = local.strftime("%z")
+
+        return (
+            f"- now: {local.strftime('%H:%M')} "
+            f"{WEEKDAY_ZH[local.weekday()]} (UTC{offset[:3]})"
+        )
+
+    if key == "focus":
+        focus = facts.get("focus")
+
+        return f"- focus: {focus[0]}" if focus else "- focus: none"
+
+    if key == "idle":
+        return f"- idle: {_fmt_span(facts.get('idle')) or 'unknown'}"
+
+    if key == "work":
+        return f"- work: {_fmt_span(facts.get('work_seconds')) or '0s'}"
+
+    if key == "awake":
+        return f"- awake: {_fmt_span(facts.get('uptime')) or 'unknown'}"
+
+    if key == "cpu":
+        cpu = facts.get("cpu")
+
+        return f"- cpu: {cpu:.0f}%" if cpu is not None else "- cpu: unknown"
+
+    if key == "mem":
+        mem = facts.get("mem")
+
+        return f"- mem: {mem:.0f}%" if mem is not None else "- mem: unknown"
+
+    if key == "disk":
+        disk = facts.get("disk")
+
+        return f"- disk: {disk:.0f}%" if disk is not None else "- disk: unknown"
+
+    if key == "battery":
+        battery = facts.get("battery")
+
+        if battery is None:
+            return "- battery: none"
+
+        state = "charging" if facts.get("charging") else "on battery"
+
+        severity = _battery_severity(
+            battery,
+            facts.get("charging"),
+            battery_low,
+            battery_critical,
+        )
+
+        if severity and severity != "normal":
+            return f"- battery: {battery}% {severity} ({state})"
+
+        return f"- battery: {battery}% {state}"
+
+    if key == "locked":
+        locked = facts.get("locked")
+
+        if locked is None:
+            return "- session: unknown"
+
+        return "- session: locked" if locked else "- session: unlocked"
+
+    if key == "dnd":
+        mode = facts.get("dnd")
+
+        return f"- focus mode: {mode}" if mode else "- focus mode: unknown"
+
+    if key == "assertions":
+        assertions = facts.get("assertions")
+
+        return (
+            f"- sleep held by: {'; '.join(sorted(assertions)[:3])}"
+            if assertions
+            else "- sleep held by: none"
+        )
+
+    if key == "mem_pressure":
+        mem = facts.get("mem")
+
+        if mem is None:
+            return "- pressure: mem unknown"
+
+        severity = _severity(mem, mem_warn, mem_critical)
+
+        if severity == "normal":
+            return f"- pressure: mem normal ({mem:.0f}%)"
+
+        return f"- pressure: mem {mem:.0f}% ({severity})"
+
+    if key == "disk_pressure":
+        disk = facts.get("disk")
+
+        if disk is None:
+            return "- pressure: disk unknown"
+
+        severity = _severity(disk, disk_warn, disk_critical)
+
+        if severity == "normal":
+            return f"- pressure: disk normal ({disk:.0f}%)"
+
+        return f"- pressure: disk {disk:.0f}% ({severity})"
+
+    return None
+
+
+def render_delta(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    facts: dict[str, Any],
+    *,
+    events: list[tuple[float, str]],
+    mem_warn: float = 85.0,
+    mem_critical: float = 95.0,
+    disk_warn: float = 90.0,
+    disk_critical: float = 95.0,
+    battery_low: float = 20.0,
+    battery_critical: float = 10.0,
+) -> str:
+    """Changed fields only; every line is absolute, never a ratio."""
+    lines: list[str] = []
+
+    for key in FIELD_ORDER:
+        if previous.get(key) == current.get(key):
+            continue
+
+        # The pressure line already carries the resource value; do
+        # not also emit the plain band line on the same turn.
+        if key == "mem" and previous.get("mem_pressure") != current.get("mem_pressure"):
+            continue
+
+        if key == "disk" and previous.get("disk_pressure") != current.get("disk_pressure"):
+            continue
+
+        line = system_field_line(
+            key,
+            facts,
+            mem_warn=mem_warn,
+            mem_critical=mem_critical,
+            disk_warn=disk_warn,
+            disk_critical=disk_critical,
+            battery_low=battery_low,
+            battery_critical=battery_critical,
+        )
+
+        if line:
+            lines.append(line)
+
+    if events:
+        lines.append("- events: " + " | ".join(text for _, text in events))
+
+    return "\n".join(lines)
+
+
+def _resource_line(
+    facts: dict[str, Any],
+    *,
+    battery_low: float = 20.0,
+    battery_critical: float = 10.0,
+) -> str:
     cpu = facts.get("cpu")
 
     mem = facts.get("mem")
@@ -752,7 +1070,18 @@ def _resource_line(facts: dict[str, Any]) -> str:
     if battery is not None:
         state = "charging" if facts.get("charging") else "on battery"
 
-        line += f" | battery {battery}% {state}"
+        severity = _battery_severity(
+            battery,
+            facts.get("charging"),
+            battery_low,
+            battery_critical,
+        )
+
+        if severity and severity != "normal":
+            line += f" | battery {battery}% {severity} ({state})"
+
+        else:
+            line += f" | battery {battery}% {state}"
 
     return line
 
@@ -762,13 +1091,31 @@ def render_facts(
     *,
     title_cap: int,
     events_limit: int,
+    mem_warn: float = 85.0,
+    mem_critical: float = 95.0,
+    disk_warn: float = 90.0,
+    disk_critical: float = 95.0,
+    battery_low: float = 20.0,
+    battery_critical: float = 10.0,
+    note: bool = True,
 ) -> str:
-    """The compact fact block injected into the prompt.
+    """The epoch's full fact block injected into the prompt.
 
     No header: the core labels the block by service_id when it
     packages injections into the observation.
     """
     lines = []
+
+    identity = facts.get("identity") or {}
+
+    host_parts = [
+        identity.get("model"),
+        identity.get("os"),
+        identity.get("arch"),
+    ]
+
+    if any(host_parts):
+        lines.append("- host: " + " ".join(str(part) for part in host_parts if part))
 
     local = datetime.now().astimezone()
 
@@ -797,7 +1144,9 @@ def render_facts(
         f"- idle: {idle or 'unknown'} | work: {work or '0s'} | awake: {awake or 'unknown'}",
     )
 
-    lines.append(f"- {_resource_line(facts)}")
+    lines.append(
+        f"- {_resource_line(facts, battery_low=battery_low, battery_critical=battery_critical)}",
+    )
 
     read_rate = facts.get("disk_read_bps")
 
@@ -825,9 +1174,26 @@ def render_facts(
     assertions = facts.get("assertions")
 
     if assertions:
-        lines.append(f"- sleep held by: {'; '.join(assertions[:3])}")
+        lines.append(f"- sleep held by: {'; '.join(sorted(assertions)[:3])}")
 
-    events = facts.get("events") or []
+    mem = facts.get("mem")
+
+    mem_severity = _severity(mem, mem_warn, mem_critical)
+
+    if mem is not None and mem_severity != "normal":
+        lines.append(f"- pressure: mem {mem:.0f}% ({mem_severity})")
+
+    disk = facts.get("disk")
+
+    disk_severity = _severity(disk, disk_warn, disk_critical)
+
+    if disk is not None and disk_severity != "normal":
+        lines.append(f"- pressure: disk {disk:.0f}% ({disk_severity})")
+
+    events = facts.get("notes")
+
+    if events is None:
+        events = facts.get("events") or []
 
     if events:
         rendered = " | ".join(text for _, text in events[-events_limit:])
@@ -852,6 +1218,9 @@ def render_facts(
 
         lines.append(f"- top: {rendered}")
 
+    if note:
+        lines.append("- note: snapshot for this epoch; only changed lines follow")
+
     return "\n".join(lines)
 
 
@@ -868,6 +1237,18 @@ class Config(ServiceConfig):
     disk_threshold: float = 90.0
 
     disk_announce_every: float = 600.0
+
+    disk_critical: float = 95.0
+
+    mem_warn: float = 85.0
+
+    mem_critical: float = 95.0
+
+    battery_low: float = 20.0
+
+    battery_critical: float = 10.0
+
+    state_ttl: float = 3600.0
 
     runaway_cpu: float = 90.0
 
@@ -892,10 +1273,27 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     return read_config(Config, path)
 
 
+@dataclass
+class _AgentState:
+    """What one agent has already been told; isolated per context."""
+
+    epoch: int
+
+    known: dict[str, Any]
+
+    event_cursor: float
+
+    turn_started_at: float
+
+    last_text: str
+
+    last_seen: float
+
+
 class SystemService:
     """
-    Owns the probe, the latest sample and its rendered text, and the
-    link that keeps this process registered with the hub.
+    Owns the probe, the latest sample, the per-agent injection state,
+    and the link that keeps this process registered with the hub.
     """
 
     def __init__(self, config: Config, *, link: HubLink | None = None) -> None:
@@ -922,22 +1320,14 @@ class SystemService:
 
         self._facts: dict[str, Any] | None = None
 
-        self._rendered: str | None = None
+        self._states: dict[str, _AgentState] = {}
 
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     # -- sampling ------------------------------------------------------
 
     def _sample_once(self) -> None:
-        facts = self.probe.sample()
-
-        self._facts = facts
-
-        self._rendered = render_facts(
-            facts,
-            title_cap=self.config.focus_title_cap,
-            events_limit=self.config.events_render_limit,
-        )
+        self._facts = self.probe.sample()
 
     async def _sample_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -956,8 +1346,124 @@ class SystemService:
 
     # -- turn answering --------------------------------------------------
 
-    def contribution(self) -> str | None:
-        return self._rendered
+    def _prune(self, now: float) -> None:
+        ttl = self.config.state_ttl
+
+        for agent_id in [
+            agent_id
+            for agent_id, state in self._states.items()
+            if now - state.last_seen > ttl
+        ]:
+            del self._states[agent_id]
+
+    def contribution(self, turn: dict[str, Any] | None = None) -> str:
+        facts = self._facts
+
+        if facts is None:
+            return ""
+
+        turn = turn or {}
+
+        agent_id = str(turn.get("agent_id") or "root")
+
+        started = float(turn.get("started_at") or 0.0)
+
+        epoch = int(turn.get("epoch") or 0)
+
+        origin = str(turn.get("origin") or "normal")
+
+        depth = int(turn.get("depth") or 0)
+
+        now = time.time()
+
+        self._prune(now)
+
+        state = self._states.get(agent_id)
+
+        # The hub re-injects a parked turn with the same started_at;
+        # replay the exact text and do not advance the baseline again.
+        if state is not None and state.turn_started_at == started:
+            state.last_seen = now
+
+            return state.last_text
+
+        values = system_values(
+            facts,
+            mem_warn=self.config.mem_warn,
+            mem_critical=self.config.mem_critical,
+            disk_warn=self.config.disk_threshold,
+            disk_critical=self.config.disk_critical,
+            battery_low=self.config.battery_low,
+            battery_critical=self.config.battery_critical,
+        )
+
+        notes = facts.get("notes") or []
+
+        full = (
+            state is None
+            or state.epoch != epoch
+            or origin in ("first", "context_cleared")
+        )
+
+        if full:
+            rendered_facts = facts
+
+            if origin == "first" and depth > 0 and started:
+                rendered_facts = {
+                    **facts,
+                    "notes": [
+                        (ts, text)
+                        for ts, text in notes
+                        if ts >= started
+                    ],
+                }
+
+            text = render_facts(
+                rendered_facts,
+                title_cap=self.config.focus_title_cap,
+                events_limit=self.config.events_render_limit,
+                mem_warn=self.config.mem_warn,
+                mem_critical=self.config.mem_critical,
+                disk_warn=self.config.disk_threshold,
+                disk_critical=self.config.disk_critical,
+                battery_low=self.config.battery_low,
+                battery_critical=self.config.battery_critical,
+            )
+
+            cursor = max((ts for ts, _ in notes), default=0.0)
+
+        else:
+            fresh = [
+                (ts, text)
+                for ts, text in notes
+                if ts > state.event_cursor
+            ]
+
+            text = render_delta(
+                state.known,
+                values,
+                facts,
+                events=fresh,
+                mem_warn=self.config.mem_warn,
+                mem_critical=self.config.mem_critical,
+                disk_warn=self.config.disk_threshold,
+                disk_critical=self.config.disk_critical,
+                battery_low=self.config.battery_low,
+                battery_critical=self.config.battery_critical,
+            )
+
+            cursor = max((ts for ts, _ in fresh), default=state.event_cursor)
+
+        self._states[agent_id] = _AgentState(
+            epoch=epoch,
+            known=values,
+            event_cursor=cursor,
+            turn_started_at=started,
+            last_text=text,
+            last_seen=now,
+        )
+
+        return text
 
 
 def build_app(service: SystemService) -> FastAPI:
@@ -986,7 +1492,7 @@ def build_app(service: SystemService) -> FastAPI:
 
     @app.post("/turn")
     async def turn(body: dict[str, Any]) -> dict[str, str]:
-        text = service.contribution()
+        text = service.contribution(body)
 
         return {"text": text} if text else {"text": ""}
 

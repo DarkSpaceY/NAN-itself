@@ -18,7 +18,12 @@ def test_inject_contract():
 
     service = system_mod.SystemService(config, link=HubLink(config, transport=stub.transport()))
 
-    service._rendered = "hello"
+    def contribution(turn):
+        assert turn["agent_id"] == "test"
+
+        return "hello"
+
+    service.contribution = contribution
 
     with TestClient(system_mod.build_app(service)) as client:
         assert_turn_text(client, "hello")

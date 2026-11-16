@@ -3,7 +3,8 @@ Network service: the agent feeling its long-range nerves.
 
 An injection service (see docs/for-service-authors): registers
 with the hub, samples the link on a cadence, and answers every
-turn request with the latest rendered facts.
+turn request with a full snapshot for a new epoch or only the
+changed fields for the rest of it.
 
 Disciplines:
 
@@ -12,8 +13,8 @@ Disciplines:
                 belongs to the agent)
     degrade     every probe/shim returns None on failure; the
                 service never dies from a missing network
-    serve fast  sampling runs in the background; /turn replies
-                with the ready text, never computing on request
+    serve fast  sampling runs in the background; /turn only
+                quantizes and renders the ready snapshot
 
 Run:  uv run main.py   (from this directory, after `uv sync`)
 """
@@ -32,6 +33,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -384,6 +386,12 @@ class NetworkProbe:
 
         self.events: deque[tuple[float, str]] = deque(maxlen=events_max)
 
+        # Transient signals only: these ride the injection. `events`
+        # keeps the full probe log for tests and debugging; link,
+        # reach, probe, dns and public-ip changes are fields now, so
+        # they stay out of `notes` and are not announced twice.
+        self.notes: deque[tuple[float, str]] = deque(maxlen=events_max)
+
         self._t_online = -1e9
 
         self._t_ip = -1e9
@@ -393,6 +401,8 @@ class NetworkProbe:
         self._fail_count = 0
 
         self._offline_since: float | None = None
+
+        self._offline_detail: str | None = None
 
         self._latency: float | None = None
 
@@ -426,8 +436,13 @@ class NetworkProbe:
 
     # ------------------------------------------------------------------
 
-    def _emit(self, text: str) -> None:
-        self.events.append((self.now(), text))
+    def _emit(self, text: str, *, note: bool = False) -> None:
+        item = (self.now(), text)
+
+        self.events.append(item)
+
+        if note:
+            self.notes.append(item)
 
     def _proc_name(self, pid: int | None, name: str | None = None) -> str:
         if pid is not None and pid in self._proc_names:
@@ -445,7 +460,7 @@ class NetworkProbe:
 
         return name
 
-    def _gw_note(self) -> str:
+    def _gw_detail(self) -> str | None:
         """
         Offline detail: can we still reach the gateway? Distinguishes
         a local break from an upstream outage.
@@ -453,11 +468,9 @@ class NetworkProbe:
         gw = self.gw_fn()
 
         if not gw:
-            return ""
+            return None
 
-        return (
-            " (gw ok, upstream down)" if self.gw_ping_fn(gw[0]) else " (gw unreachable)"
-        )
+        return "gw ok, upstream down" if self.gw_ping_fn(gw[0]) else "gw unreachable"
 
     def _check_online(self) -> None:
         if self.mono() - self._t_online < self.online_every:
@@ -473,7 +486,11 @@ class NetworkProbe:
             if self._fail_count >= self.offline_after and self._offline_since is None:
                 self._offline_since = self.now()
 
-                self._emit(f"offline{self._gw_note()}")
+                self._offline_detail = self._gw_detail()
+
+                detail = f" ({self._offline_detail})" if self._offline_detail else ""
+
+                self._emit(f"offline{detail}")
 
             self._latency = None
 
@@ -496,6 +513,8 @@ class NetworkProbe:
             span = self.now() - self._offline_since
 
             self._offline_since = None
+
+            self._offline_detail = None
 
             self._fail_count = 0
 
@@ -530,7 +549,7 @@ class NetworkProbe:
             fresh = sorted(set(devices) - self._seen_arp)[:2]
 
             for ip in fresh:
-                self._emit(f"new lan device: {ip} ({devices[ip]})")
+                self._emit(f"new lan device: {ip} ({devices[ip]})", note=True)
 
         self._seen_arp = set(devices)
 
@@ -601,7 +620,7 @@ class NetworkProbe:
         total_up = sum(s for _, s in rates.values())
 
         if total_down > self._baseline[0] * self.spike_ratio and total_down > self.spike_floor_bps:
-            self._emit(f"traffic spike ↓{_fmt_bps(total_down)}")
+            self._emit(f"traffic spike ↓{_fmt_bps(total_down)}", note=True)
 
             self._baseline = (total_down, total_up)
 
@@ -669,13 +688,13 @@ class NetworkProbe:
                         k: v for k, v in self._seen_outbound.items() if v > cutoff
                     }
 
-                self._emit(f"new outbound: {key[0]} -> {key[1]}:{key[2]}")
+                self._emit(f"new outbound: {key[0]} -> {key[1]}:{key[2]}", note=True)
 
         new_listen = listen_keys - self._seen_listen
 
         if self._seen_listen and new_listen:
             for lport, pid in sorted(new_listen)[:2]:
-                self._emit(f"listen added: {lport} ({self._proc_name(pid)})")
+                self._emit(f"listen added: {lport} ({self._proc_name(pid)})", note=True)
 
         self._seen_listen = listen_keys
 
@@ -754,6 +773,7 @@ class NetworkProbe:
             "probe_code": self._probe_code,
             "dns_ok": self._dns_ok,
             "offline_since": self._offline_since,
+            "offline_detail": self._offline_detail,
             "public_ip": self._public,
             "dl": total_down if self._rates else None,
             "ul": total_up if self._rates else None,
@@ -761,6 +781,7 @@ class NetworkProbe:
             "public_conns": public,
             "listen": listen,
             "events": list(self.events),
+            "notes": list(self.notes),
         }
 
     def _primary_interface(self) -> tuple[str | None, str | None]:
@@ -831,15 +852,203 @@ def _fmt_bps(bps: float) -> str:
     return f"{bps:.0f}B/s"
 
 
-def render_facts(facts: dict[str, Any], *, events_limit: int) -> str:
-    """The compact fact block injected into the prompt.
+def _offline_span(facts: dict[str, Any]) -> str:
+    since = facts.get("offline_since")
+
+    if not since:
+        return ""
+
+    now = facts.get("now") or time.time()
+
+    return _fmt_span(max(0.0, now - since))
+
+
+def _latency_band(latency: float | None) -> int | None:
+    if latency is None:
+        return None
+
+    if latency < 20:
+        return 0
+
+    if latency < 100:
+        return 1
+
+    if latency < 500:
+        return 2
+
+    return 3
+
+
+def _offline_band(facts: dict[str, Any]) -> int | None:
+    if facts.get("online"):
+        return None
+
+    since = facts.get("offline_since")
+
+    if not since:
+        return 0
+
+    now = facts.get("now") or time.time()
+
+    span = max(0.0, now - since)
+
+    if span < 60:
+        return 0
+
+    if span < 300:
+        return 1
+
+    if span < 1800:
+        return 2
+
+    if span < 7200:
+        return 3
+
+    return 4
+
+
+def network_values(facts: dict[str, Any]) -> dict[str, Any]:
+    """Quantized state used for comparison; values, not text."""
+    return {
+        "link": (
+            facts.get("primary_if"),
+            facts.get("ssid"),
+            facts.get("local_ip"),
+            facts.get("gw"),
+        ),
+        "reach": (
+            bool(facts.get("online")),
+            _latency_band(facts.get("latency")),
+            _offline_band(facts),
+        ),
+        "probe": facts.get("probe_code"),
+        "dns": facts.get("dns_ok"),
+        "public": facts.get("public_ip"),
+        "tunnel": facts.get("tunnel"),
+    }
+
+
+FIELD_ORDER = ("link", "reach", "probe", "dns", "public", "tunnel")
+
+
+def _reach_line(facts: dict[str, Any]) -> str:
+    if facts.get("online"):
+        latency = facts.get("latency")
+
+        return f"- reach: online {latency:.0f}ms" if latency is not None else "- reach: online"
+
+    span = _offline_span(facts)
+
+    detail = facts.get("offline_detail")
+
+    line = f"- reach: offline{(' ' + span) if span else ''}"
+
+    if detail:
+        line += f" ({detail})"
+
+    return line
+
+
+def network_field_line(key: str, facts: dict[str, Any]) -> str | None:
+    """One self-describing, absolute line for a changed field."""
+    if key == "link":
+        parts = [part for part in (facts.get("ssid"), facts.get("local_ip")) if part]
+
+        head = facts.get("primary_if") or "link"
+
+        gw = facts.get("gw")
+
+        if not parts and not gw and not facts.get("primary_if"):
+            return None
+
+        line = f"- link: {head}"
+
+        if parts:
+            line += " " + " ".join(parts)
+
+        if gw:
+            line += f" -> gw {gw}"
+
+        return line
+
+    if key == "reach":
+        return _reach_line(facts)
+
+    if key == "probe":
+        code = facts.get("probe_code")
+
+        return f"- probe: http {code} (expected 204)" if code else "- probe: clean"
+
+    if key == "dns":
+        ok = facts.get("dns_ok")
+
+        if ok is None:
+            return "- dns: unknown"
+
+        return "- dns: ok" if ok else "- dns: fail"
+
+    if key == "public":
+        ip = facts.get("public_ip")
+
+        return f"- public: {ip}" if ip else "- public: none"
+
+    if key == "tunnel":
+        tunnel = facts.get("tunnel")
+
+        return f"- tunnel: {tunnel}" if tunnel else "- tunnel: none"
+
+    return None
+
+
+def render_delta(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    facts: dict[str, Any],
+    *,
+    events: list[tuple[float, str]],
+) -> str:
+    """Changed fields only; every line is absolute, never a ratio."""
+    lines: list[str] = []
+
+    for key in FIELD_ORDER:
+        if previous.get(key) == current.get(key):
+            continue
+
+        line = network_field_line(key, facts)
+
+        if line:
+            lines.append(line)
+
+    if events:
+        lines.append("- events: " + " | ".join(text for _, text in events))
+
+    return "\n".join(lines)
+
+
+def render_facts(
+    facts: dict[str, Any],
+    *,
+    events_limit: int,
+    note: bool = True,
+) -> str:
+    """The epoch's full fact block injected into the prompt.
 
     No header: the core labels the block by service_id when it
     packages injections into the observation.
     """
     lines = []
 
-    lines.append(_link_line(facts))
+    lines.append(network_field_line("link", facts) or "- link: unknown")
+
+    lines.append(_reach_line(facts))
+
+    probe_code = facts.get("probe_code")
+
+    if probe_code:
+        lines.append(f"- probe: http {probe_code} (expected 204)")
+
+    if facts.get("dns_ok") is False:
+        lines.append("- dns: fail")
 
     public = facts.get("public_ip")
 
@@ -877,53 +1086,20 @@ def render_facts(facts: dict[str, Any], *, events_limit: int) -> str:
             f" | listen {facts.get('listen') or 0}",
         )
 
-    events = facts.get("events") or []
+    events = facts.get("notes")
+
+    if events is None:
+        events = facts.get("events") or []
 
     if events:
         rendered = " | ".join(text for _, text in events[-events_limit:])
 
         lines.append(f"- events: {rendered}")
 
+    if note:
+        lines.append("- note: snapshot for this epoch; only changed lines follow")
+
     return "\n".join(lines)
-
-
-def _link_line(facts: dict[str, Any]) -> str:
-    if not facts.get("online"):
-        since = _fmt_span(
-            (lambda ts: time.time() - ts if ts else None)(facts.get("offline_since")),
-        )
-
-        return f"- link: offline{(' ' + since) if since else ''}"
-
-    parts = []
-
-    if facts.get("ssid"):
-        parts.append(facts["ssid"])
-
-    if facts.get("local_ip"):
-        parts.append(facts["local_ip"])
-
-    head = facts.get("primary_if") or "link"
-
-    line = f"- link: {head} " + " ".join(parts)
-
-    if facts.get("gw"):
-        line += f" -> gw {facts['gw']}"
-
-    latency = facts.get("latency")
-
-    if latency is not None:
-        line += f" | online {latency:.0f}ms"
-
-    else:
-        line += " | online"
-
-    probe_code = facts.get("probe_code")
-
-    if probe_code:
-        line += f" | probe: http {probe_code} (expected 204)"
-
-    return line
 
 
 # ============================================================================
@@ -966,15 +1142,34 @@ class Config(ServiceConfig):
 
     events_render_limit: int = 3
 
+    state_ttl: float = 3600.0
+
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     return read_config(Config, path)
 
 
+@dataclass
+class _AgentState:
+    """What one agent has already been told; isolated per context."""
+
+    epoch: int
+
+    known: dict[str, Any]
+
+    event_cursor: float
+
+    turn_started_at: float
+
+    last_text: str
+
+    last_seen: float
+
+
 class NetworkService:
     """
-    Owns the probe, the latest sample and its rendered text, and the
-    link that keeps this process registered with the hub.
+    Owns the probe, the latest sample, the per-agent injection state,
+    and the link that keeps this process registered with the hub.
     """
 
     def __init__(self, config: Config, *, link: HubLink | None = None) -> None:
@@ -1002,21 +1197,14 @@ class NetworkService:
 
         self._facts: dict[str, Any] | None = None
 
-        self._rendered: str | None = None
+        self._states: dict[str, _AgentState] = {}
 
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     # -- sampling ------------------------------------------------------
 
     def _sample_once(self) -> None:
-        facts = self.probe.sample()
-
-        self._facts = facts
-
-        self._rendered = render_facts(
-            facts,
-            events_limit=self.config.events_render_limit,
-        )
+        self._facts = self.probe.sample()
 
     async def _sample_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -1035,8 +1223,103 @@ class NetworkService:
 
     # -- turn answering --------------------------------------------------
 
-    def contribution(self) -> str | None:
-        return self._rendered
+    def _prune(self, now: float) -> None:
+        ttl = self.config.state_ttl
+
+        for agent_id in [
+            agent_id
+            for agent_id, state in self._states.items()
+            if now - state.last_seen > ttl
+        ]:
+            del self._states[agent_id]
+
+    def contribution(self, turn: dict[str, Any] | None = None) -> str:
+        facts = self._facts
+
+        if facts is None:
+            return ""
+
+        turn = turn or {}
+
+        agent_id = str(turn.get("agent_id") or "root")
+
+        started = float(turn.get("started_at") or 0.0)
+
+        epoch = int(turn.get("epoch") or 0)
+
+        origin = str(turn.get("origin") or "normal")
+
+        depth = int(turn.get("depth") or 0)
+
+        now = time.time()
+
+        self._prune(now)
+
+        state = self._states.get(agent_id)
+
+        # The hub re-injects a parked turn with the same started_at;
+        # replay the exact text and do not advance the baseline again.
+        if state is not None and state.turn_started_at == started:
+            state.last_seen = now
+
+            return state.last_text
+
+        values = network_values(facts)
+
+        notes = facts.get("notes") or []
+
+        full = (
+            state is None
+            or state.epoch != epoch
+            or origin in ("first", "context_cleared")
+        )
+
+        if full:
+            rendered_facts = facts
+
+            if origin == "first" and depth > 0 and started:
+                rendered_facts = {
+                    **facts,
+                    "notes": [
+                        (ts, text)
+                        for ts, text in notes
+                        if ts >= started
+                    ],
+                }
+
+            text = render_facts(
+                rendered_facts,
+                events_limit=self.config.events_render_limit,
+            )
+
+            cursor = max((ts for ts, _ in notes), default=0.0)
+
+        else:
+            fresh = [
+                (ts, text)
+                for ts, text in notes
+                if ts > state.event_cursor
+            ]
+
+            text = render_delta(
+                state.known,
+                values,
+                facts,
+                events=fresh,
+            )
+
+            cursor = max((ts for ts, _ in fresh), default=state.event_cursor)
+
+        self._states[agent_id] = _AgentState(
+            epoch=epoch,
+            known=values,
+            event_cursor=cursor,
+            turn_started_at=started,
+            last_text=text,
+            last_seen=now,
+        )
+
+        return text
 
 
 def build_app(service: NetworkService) -> FastAPI:
@@ -1065,7 +1348,7 @@ def build_app(service: NetworkService) -> FastAPI:
 
     @app.post("/turn")
     async def turn(body: dict[str, Any]) -> dict[str, str]:
-        text = service.contribution()
+        text = service.contribution(body)
 
         return {"text": text} if text else {"text": ""}
 
