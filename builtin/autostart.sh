@@ -59,4 +59,3 @@ launch() {
 
 # --- builtin components ------------------------------------------------
 launch "$HERE/services/record"
-launch "$HERE/services/vision"

@@ -369,6 +369,25 @@ def _metrics() -> dict[str, Any]:
     return out
 
 
+def _process_label(short: str | None, argv: list[str] | None) -> str:
+    """Prefer the argv program name when comm was truncated.
+
+    macOS comm is 16 bytes, so names such as 'Helper (Renderer)'
+    arrive cut off. The first argv entry is the full program path.
+    """
+    name = short or "?"
+
+    if not argv:
+        return name
+
+    program = Path(argv[0]).name
+
+    if len(program) > len(name):
+        return program
+
+    return name
+
+
 def _top_processes(
     cache: dict[int, tuple[Any, str]],
 ) -> list[tuple[int, str, float]]:
@@ -380,7 +399,15 @@ def _top_processes(
             entry = cache.get(proc.pid)
 
             if entry is None:
-                entry = (proc, proc.info["name"] or "?")
+                short = proc.info["name"] or "?"
+
+                try:
+                    argv = proc.cmdline()
+
+                except Exception:
+                    argv = None
+
+                entry = (proc, _process_label(short, argv))
 
                 cache[proc.pid] = entry
 

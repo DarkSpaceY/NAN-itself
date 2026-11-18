@@ -7,8 +7,77 @@ hardware or the real network.
 
 from __future__ import annotations
 
+import httpx
 import main as network_mod
-import pytest
+
+
+class _ScriptedClient:
+    """HEAD answers 200 with no body; GET answers the scripted page."""
+
+    def __init__(self, body: str, status: int = 200) -> None:
+        self.body = body
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+    def head(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text="")
+
+    def get(self, url: str) -> httpx.Response:
+        return httpx.Response(self.status, text=self.body)
+
+
+def test_apple_success_page_is_a_clean_probe(monkeypatch):
+    monkeypatch.setattr(
+        network_mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _ScriptedClient(
+            "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>"
+        ),
+    )
+
+    _latency, code = network_mod.probe_online(
+        ["http://captive.apple.com/hotspot-detect.html"], 1.0
+    )
+
+    assert code is None
+
+
+def test_generate_204_is_a_clean_probe(monkeypatch):
+    monkeypatch.setattr(
+        network_mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _ScriptedClient("", status=204),
+    )
+
+    _latency, code = network_mod.probe_online(["http://example.test/generate_204"], 1.0)
+
+    assert code is None
+
+
+def test_login_page_stays_an_anomaly(monkeypatch):
+    monkeypatch.setattr(
+        network_mod.httpx,
+        "Client",
+        lambda *args, **kwargs: _ScriptedClient("<html>sign in to wifi</html>"),
+    )
+
+    _latency, code = network_mod.probe_online(
+        ["http://captive.apple.com/hotspot-detect.html"], 1.0
+    )
+
+    assert code == 200
+
+
+def test_default_probe_uses_the_apple_success_page():
+    assert (
+        network_mod.load_config().probe_urls[0]
+        == "http://captive.apple.com/hotspot-detect.html"
+    )
 
 
 class FakeClock:

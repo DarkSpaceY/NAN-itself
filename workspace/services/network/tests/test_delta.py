@@ -161,7 +161,7 @@ def test_probe_dns_public_and_tunnel_fields():
     service._facts = facts(probe_code=302)
 
     assert service.contribution(turn(started=2.0, origin="normal")) == (
-        "- probe: http 302 (expected 204)"
+        "- probe: http 302 (captive check failed)"
     )
 
     service._facts = facts(probe_code=302, dns_ok=False)

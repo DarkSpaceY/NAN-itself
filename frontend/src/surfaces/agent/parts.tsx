@@ -91,6 +91,11 @@ function Verb({
             failed
           </span>
         )}
+        {part.state === "refused" && (
+          <span className="verb-state" data-kind="refused">
+            refused
+          </span>
+        )}
         {part.durationS !== undefined && (
           <span className="verb-duration">{part.durationS.toFixed(2)}s</span>
         )}
@@ -115,7 +120,7 @@ function Verb({
           {part.text && (
             <pre className="verb-body">{truncate(part.text, 4000)}</pre>
           )}
-          {part.detail && (
+          {part.detail && part.detail.refused !== true && (
             <pre className="verb-body detail">
               {JSON.stringify(part.detail, null, 2)}
             </pre>
