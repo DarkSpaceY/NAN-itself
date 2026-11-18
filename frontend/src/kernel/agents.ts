@@ -26,9 +26,6 @@ export interface AgentNode {
   startedSeq: number;
 }
 
-/** Keep at most this many exited subagent nodes. Nodes are tiny; timelines are the bulk. */
-const EXITED_KEEP = 512;
-
 export interface AgentTree {
   nodes: Map<string, AgentNode>;
   /** The root's agent_id; determined by the first agent_started at depth 0. */
@@ -112,7 +109,6 @@ export function reduceTree(tree: AgentTree, env: Envelope): boolean {
       node.status = "exited";
       node.exitReason = str(env.content.reason);
       node.exitedSeq = env.seq;
-      pruneExited(tree);
       return true;
     }
 
@@ -134,20 +130,6 @@ export function reduceTree(tree: AgentTree, env: Envelope): boolean {
 
     default:
       return false;
-  }
-}
-
-/** Keep only the most recent exited nodes; the root is never evicted. */
-function pruneExited(tree: AgentTree): void {
-  const exited = [...tree.nodes.values()]
-    .filter((node) => node.status === "exited" && node.agent_id !== tree.rootId)
-    .sort((a, b) => (a.exitedSeq ?? 0) - (b.exitedSeq ?? 0));
-
-  for (const node of exited.slice(
-    0,
-    Math.max(0, exited.length - EXITED_KEEP),
-  )) {
-    tree.nodes.delete(node.agent_id);
   }
 }
 
