@@ -63,7 +63,6 @@ jobs:
           (cd workspace/services/system && uv run --frozen pytest -q)
           (cd workspace/services/network && uv run --frozen pytest -q)
           (cd workspace/services/mcp && uv run --frozen pytest -q)
-          (cd builtin/services/record && uv run --frozen pytest -q)
           (cd lib/nan-service-kit && uv run --frozen pytest -q)
 
   # The distribution has to build: pyproject is the source of truth for

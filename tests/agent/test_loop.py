@@ -241,7 +241,8 @@ async def test_interval_agent_opens_a_turn_on_input(tmp_path: Path, no_sink: Non
     # the loop is pacing now; input must not wait out the 30s interval
     root.deliver(InboxMessage.from_user("urgent"))
 
-    await await_until(lambda: len(root.turns) == 2)
+    # 10s still proves the point: it is far below the 30s interval.
+    await await_until(lambda: len(root.turns) == 2, timeout=10)
 
     assert [message.text for message in root.turns[1].inbox] == ["urgent"]
 

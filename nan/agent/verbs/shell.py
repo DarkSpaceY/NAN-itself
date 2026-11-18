@@ -19,8 +19,10 @@ if TYPE_CHECKING:
     from nan.agent.core import Agent
 
 # How long a background command gets to prove it started before the
-# call reports "started" or its immediate exit.
-_BACKGROUND_GRACE = 0.1
+# call reports "started" or its immediate exit. A pty spawn plus shell
+# startup costs ~50-120ms on a loaded machine, so the window needs
+# headroom over that or a fast exit is reported as a running job.
+_BACKGROUND_GRACE = 0.3
 
 # How long a cancelled command gets between SIGTERM and SIGKILL.
 _CANCEL_GRACE = 1.0

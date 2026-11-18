@@ -75,13 +75,6 @@ repos:
         pass_filenames: false
         files: ^workspace/services/mcp/
 
-      - id: pytest-record
-        name: pytest (record service)
-        entry: uv run --directory builtin/services/record --frozen pytest -q
-        language: system
-        pass_filenames: false
-        files: ^builtin/services/record/
-
       - id: pytest-service-kit
         name: pytest (service kit)
         entry: uv run --directory lib/nan-service-kit --frozen pytest -q

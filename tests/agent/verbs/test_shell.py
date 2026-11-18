@@ -287,7 +287,7 @@ async def test_the_log_is_raw_output(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 
     try:
-        result = await _shell(root, "printf 'a\\nb\\n'; sleep 0.2", background=True)
+        result = await _shell(root, "printf 'a\\nb\\n'; sleep 2", background=True)
 
         log = (
             tmp_path
