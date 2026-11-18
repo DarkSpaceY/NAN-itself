@@ -28,6 +28,46 @@ function argSummary(args: Record<string, unknown>): string {
   return `${key}: ${truncate(value ?? "null", 96)}`;
 }
 
+function argValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return value.map((item) => String(item)).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key}=${String(item)}`)
+      .join("\n");
+  }
+  return String(value);
+}
+
+/** The full arguments behind the one-line summary, never truncated. */
+function VerbArgs({
+  verb,
+  args,
+}: {
+  verb: string;
+  args: Record<string, unknown>;
+}) {
+  const entries = Object.entries(args);
+  if (entries.length === 0) return null;
+
+  const command =
+    verb === "shell" && typeof args.command === "string" ? args.command : null;
+  const rest =
+    command === null ? entries : entries.filter(([key]) => key !== "command");
+
+  return (
+    <div className="verb-input">
+      {command !== null && <pre className="verb-arg-command">{command}</pre>}
+      {rest.map(([key, value]) => (
+        <div className="verb-arg" key={key}>
+          <span className="verb-arg-key">{key}</span>
+          <span className="verb-arg-value">{argValue(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Text({ part }: { part: TextPart }) {
   return (
     <div className={`text-part${part.streaming ? " streaming" : ""}`}>
@@ -110,6 +150,8 @@ function Verb({
           open {childId} →
         </button>
       )}
+
+      <VerbArgs verb={part.verb} args={part.args} />
 
       {part.error ? (
         <pre className="verb-body error">

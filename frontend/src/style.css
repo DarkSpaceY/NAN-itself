@@ -738,6 +738,51 @@ button {
   opacity: 0.8;
 }
 
+/* Full arguments behind the truncated one-line summary */
+.verb-input {
+  margin: 0 0 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.verb-arg-command {
+  margin: 0 0 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--raised);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.verb-arg {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.verb-arg-key {
+  flex: none;
+  color: var(--muted);
+}
+
+.verb-arg-key::after {
+  content: ":";
+}
+
+.verb-arg-value {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verb-input:last-child {
+  margin-bottom: 0;
+}
+
 /* Drill-down is a plain text link, sharing the language of the line-style folding */
 
 .drill {
