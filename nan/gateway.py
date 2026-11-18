@@ -125,8 +125,13 @@ class Gateway:
         reaper = asyncio.create_task(self._reap_surfaces(), name="surface-reaper")
 
         try:
+            # The browser opens only after our own socket is bound.
+            # "Something accepts on the port" is not enough: a stale
+            # instance would answer while this boot silently failed.
+            await self._wait_until_serving(server_task)
+
             if open_browser:
-                await self._open_browser_when_ready()
+                self._open_browser()
 
             await server_task
 
@@ -225,31 +230,25 @@ class Gateway:
 
         return app
 
-    async def _open_browser_when_ready(self) -> None:
-        """Wait for the port to accept, then open the desktop."""
-        deadline = asyncio.get_running_loop().time() + 10
+    async def _wait_until_serving(self, server_task: asyncio.Task[None]) -> None:
+        """
+        Return only after this gateway's own socket is bound; a failed
+        bind propagates instead of leaving the boot half-started.
+        """
+        assert self._server is not None
 
-        while asyncio.get_running_loop().time() < deadline:
-            if await self._port_is_open():
-                self._open_browser()
-
+        for _ in range(1000):
+            if self._server.started:
                 return
 
-            await asyncio.sleep(0.2)
+            if server_task.done():
+                server_task.result()
 
-        logger.warning("Server did not start in time, browser not opened")
+                raise RuntimeError(f"gateway exited before serving on {self.host}:{self.port}")
 
-    async def _port_is_open(self) -> bool:
-        try:
-            _, writer = await asyncio.open_connection(self.host, self.port)
+            await asyncio.sleep(0.01)
 
-            writer.close()
-            await writer.wait_closed()
-
-            return True
-
-        except Exception:
-            return False
+        raise RuntimeError(f"gateway did not start on {self.host}:{self.port} within 10s")
 
     def _open_browser(self) -> None:
         url = f"http://{self.host}:{self.port}/"

@@ -316,12 +316,23 @@ button {
   position: relative;
   overflow: hidden;
   background: var(--surface);
+  display: flex;
+  flex-direction: column;
 }
 
+/*
+ * Height is handed down by flex, never by percentage: a percentage here
+ * only resolves against an ancestor with a definite height, so a pane
+ * resize could leave the frame taller than the viewport -- the stream
+ * then scrolls to its own end while its bottom stays clipped.
+ */
 .frame {
   position: relative;
   width: 100%;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .workspace-empty {
@@ -343,14 +354,16 @@ button {
 /* -- agent timeline ---------------------------------------------------- */
 
 .agent-surface {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--surface);
 }
 
 .service-surface {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   background: var(--surface);
 }
 
@@ -367,6 +380,8 @@ button {
   min-height: 0;
   overflow-y: auto;
   padding: 24px 48px 72px;
+  /* The tail is followed explicitly; anchoring would fight it while rounds collapse */
+  overflow-anchor: none;
 }
 
 .stream-empty {

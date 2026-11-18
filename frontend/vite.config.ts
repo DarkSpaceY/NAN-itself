@@ -15,6 +15,10 @@ export default defineConfig({
     },
   },
   server: {
+    // 固定端口：被占用时直接失败，绝不静默切到 5174。
+    // 切端口会让人对着旧实例（或另一个工作区）的页面调试。
+    port: 5173,
+    strictPort: true,
     proxy: {
       // the core process serves both the websocket and the HTTP endpoints
       "/ws": {

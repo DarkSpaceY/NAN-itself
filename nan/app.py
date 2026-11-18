@@ -33,6 +33,7 @@ from nan.llm import LLMProvider
 from nan.persistence import SnapshotStore
 from nan.turn import InboxMessage
 from nan.utils.autostart import Autostart
+from nan.utils.net import PortUnavailableError, ensure_port_available
 
 _SHUTDOWN_TIMEOUT = 10.0
 _SIGNALS = (signal.SIGINT, signal.SIGTERM)
@@ -86,6 +87,20 @@ class Core:
         self._stop = asyncio.Event()
 
         self._settings = Settings()
+
+        # Ports are fixed by config: refuse to boot when one is taken,
+        # before any agent or autostart service is started.
+        ensure_port_available(
+            self._settings.gateway.host,
+            self._settings.gateway.port,
+            "gateway",
+        )
+        ensure_port_available(
+            self._settings.injection.host,
+            self._settings.injection.port,
+            "injection registry",
+        )
+
         self._llm = LLMProvider(self._settings)
         self._hub = InjectionHub(self._settings)
 
@@ -420,7 +435,15 @@ class Core:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(Core().run())
+        try:
+            asyncio.run(Core().run())
+
+        except PortUnavailableError as error:
+            # Startup refusals (occupied ports, unusable address) are
+            # configuration errors, not bugs: one line, exit non-zero.
+            logger.error("{}", error)
+
+            raise SystemExit(1) from error
 
 
 if __name__ == "__main__":

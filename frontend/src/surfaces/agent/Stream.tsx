@@ -4,7 +4,7 @@
 // near the bottom resumes it. version comes from the hub and
 // increments once per applied event.
 
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 import type { Round } from "../../kernel/history/parts";
 import { PartView } from "./parts";
@@ -22,11 +22,32 @@ export function Stream({ rounds, version, onDrill, emptyHint }: StreamProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
 
+  const pinToTail = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // New output: only follow while the user is parked at the bottom.
+  useLayoutEffect(() => {
+    if (follow.current) pinToTail();
+  }, [version, pinToTail]);
+
+  // The pane can change height without a new event (window resize, the
+  // composer growing). Re-pin then too, otherwise the tail silently
+  // drops below the fold and the last scroll position looks stuck.
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (!el || !follow.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [version]);
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      if (follow.current) pinToTail();
+    });
+
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [pinToTail]);
 
   return (
     <div
