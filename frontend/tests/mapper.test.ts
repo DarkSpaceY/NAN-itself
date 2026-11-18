@@ -260,6 +260,28 @@ describe("mapper", () => {
     expect(rounds[0].parts[1]).toMatchObject({ text: "完整结论" });
   });
 
+  it("replaces an interrupted attempt when the turn speaks without another turn_started", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "user_input", { text: "跑测试" }));
+    m.feed(env(2, "turn_started", { ...base, turn_index: 3 }));
+    m.feed(env(3, "output_started", base, "o1"));
+    m.feed(env(4, "output_delta", { ...base, text: "半句" }, "o1"));
+    m.feed(env(5, "turn_interrupted", { ...base, turn_index: 3, reason: "paused" }));
+
+    m.feed(env(6, "output_started", base, "o2"));
+    m.feed(env(7, "output_delta", { ...base, text: "完整结论" }, "o2"));
+    m.feed(env(8, "output_done", base, "o2"));
+    m.feed(env(9, "turn_done", { ...base, turn_index: 3 }));
+
+    const rounds = m.getRounds();
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].index).toBe(3);
+    expect(rounds[0].outcome).toBe("done");
+    expect(rounds[0].detail).toBeNull();
+    expect(rounds[0].parts.map((part) => part.kind)).toEqual(["input", "text"]);
+    expect(rounds[0].parts[1]).toMatchObject({ text: "完整结论" });
+  });
+
   it("shows the latest failure while retries are still closed", () => {
     const m = new Mapper("r0");
     m.feed(env(1, "turn_started", { ...base, turn_index: 4 }));

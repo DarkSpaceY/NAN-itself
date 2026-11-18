@@ -151,16 +151,16 @@ export class Mapper {
   }
 
   /**
-   * Continue a closed failure when the model speaks again without a
-   * new turn_started. A new turn opens through turn_started and does
-   * not come through here.
+   * Continue a closed failed or interrupted attempt when the model
+   * speaks again without a new turn_started. A new turn opens through
+   * turn_started and does not come through here.
    */
   private resumeFailed(env: Envelope): Round {
     const last = this.rounds[this.rounds.length - 1];
     if (
       (!this.open || this.open.closed) &&
       last?.closed &&
-      last.outcome === "failed"
+      (last.outcome === "failed" || last.outcome === "interrupted")
     ) {
       this.replacementIndex = last.index;
       this.rollback(last.index);
