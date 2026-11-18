@@ -10,6 +10,26 @@ from __future__ import annotations
 import main as system_mod
 import pytest
 
+
+def test_top_processes_prefer_the_full_program_name(monkeypatch):
+    """macOS comm is 16 bytes and cuts names such as 'Helper (Renderer)'."""
+
+    class Proc:
+        pid = 7
+        info = {"pid": 7, "name": "Helper (Render"}
+
+        def cmdline(self):
+            return ["/Applications/App.app/Contents/MacOS/Helper (Renderer)"]
+
+        def cpu_percent(self, interval):
+            return 30.0
+
+    monkeypatch.setattr(system_mod.psutil, "process_iter", lambda attrs: [Proc()])
+
+    rows = system_mod._top_processes({})
+
+    assert rows == [(7, "Helper (Renderer)", 30.0)]
+
 # ============================================================================
 # Shared fakes
 # ============================================================================

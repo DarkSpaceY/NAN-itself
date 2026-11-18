@@ -5,7 +5,7 @@
 // entries within the same stream. A round anchors on turn_started and
 // is opened by the user's input (the user_input echo).
 
-export type VerbState = "running" | "done" | "failed";
+export type VerbState = "running" | "done" | "failed" | "refused";
 
 /** Visible text of model output; multiple outputs within one turn merge into one stream. */
 export interface TextPart {

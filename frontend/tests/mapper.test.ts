@@ -238,6 +238,77 @@ describe("mapper", () => {
     expect(rounds[0].parts[0]).toMatchObject({ kind: "text", text: "after resume" });
   });
 
+  it("replaces a failed attempt when the retry speaks without another turn_started", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "user_input", { text: "跑测试" }));
+    m.feed(env(2, "turn_started", { ...base, turn_index: 3 }));
+    m.feed(env(3, "output_started", base, "o1"));
+    m.feed(env(4, "output_delta", { ...base, text: "半句" }, "o1"));
+    m.feed(env(5, "turn_failed", { ...base, error: "first 500", backoff_s: 0.8, retry_index: 0 }));
+
+    m.feed(env(6, "output_started", base, "o2"));
+    m.feed(env(7, "output_delta", { ...base, text: "完整结论" }, "o2"));
+    m.feed(env(8, "output_done", base, "o2"));
+    m.feed(env(9, "turn_done", { ...base, turn_index: 3 }));
+
+    const rounds = m.getRounds();
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].index).toBe(3);
+    expect(rounds[0].outcome).toBe("done");
+    expect(rounds[0].detail).toBeNull();
+    expect(rounds[0].parts.map((part) => part.kind)).toEqual(["input", "text"]);
+    expect(rounds[0].parts[1]).toMatchObject({ text: "完整结论" });
+  });
+
+  it("shows the latest failure while retries are still closed", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "turn_started", { ...base, turn_index: 4 }));
+    m.feed(env(2, "turn_failed", { ...base, error: "mock fatal 1", retry_index: 0 }));
+    m.feed(env(3, "turn_failed", { ...base, error: "mock fatal 2", retry_index: 1 }));
+
+    const rounds = m.getRounds();
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].outcome).toBe("failed");
+    expect(rounds[0].detail).toBe("mock fatal 2");
+  });
+
+  it("replaces the visible failure with the park reason", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "turn_started", { ...base, turn_index: 4 }));
+    m.feed(env(2, "turn_failed", { ...base, error: "mock fatal 1", retry_index: 0 }));
+    m.feed(
+      env(3, "turn_interrupted", {
+        ...base,
+        turn_index: 4,
+        reason: "retries exhausted after 2: InternalServerError",
+      }),
+    );
+
+    const round = m.getRounds()[0];
+    expect(round.outcome).toBe("interrupted");
+    expect(round.detail).toBe("retries exhausted after 2: InternalServerError");
+  });
+
+  it("marks a sandbox refusal on the verb instead of a successful call", () => {
+    const m = new Mapper("r0");
+    m.feed(env(1, "verb_started", { ...base, verb: "shell", arguments: { command: "sudo -n true" } }));
+    m.feed(
+      env(2, "verb_result", {
+        ...base,
+        verb: "shell",
+        text: "Refused by sandbox rule: privilege escalation is not available to agent commands.",
+        detail: { refused: true, reason: "privilege escalation is not available to agent commands" },
+      }),
+    );
+    m.feed(env(3, "verb_done", { ...base, verb: "shell", duration_s: 0 }));
+
+    expect(m.getRounds()[0].parts[0]).toMatchObject({
+      verb: "shell",
+      state: "refused",
+      detail: { refused: true },
+    });
+  });
+
   it("is idempotent under replay", () => {
     const events = [
       env(1, "turn_started", { ...base, turn_index: 1 }),

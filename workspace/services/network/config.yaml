@@ -11,8 +11,8 @@ port: 9002
 
 online_every: 15.0                 # seconds between reachability probes
 probe_timeout: 3.0                 # per-probe-request timeout
-probe_urls:                        # first must be a 204 endpoint (non-204 = captive)
-  - "http://captive.apple.com"
+probe_urls:                        # first is the captive check (204, or Apple's Success page)
+  - "http://captive.apple.com/hotspot-detect.html"
   - "https://www.baidu.com"
   - "https://api.ipify.org"
 dns_host: www.apple.com            # resolved on every online sweep (dns fail events)

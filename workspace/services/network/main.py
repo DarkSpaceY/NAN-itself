@@ -122,29 +122,44 @@ def default_gateway() -> tuple[str, str] | None:
     return None
 
 
+def _captive_clean(response: httpx.Response) -> bool:
+    """A clean captive check is HTTP 204, or HTTP 200 whose body
+    is Apple's Success page. HEAD on the root often returns 200
+    with an empty body, so the check is a GET."""
+    if response.status_code == 204:
+        return True
+
+    if response.status_code != 200:
+        return False
+
+    return "Success" in response.text
+
+
 def probe_online(urls: list[str], timeout: float) -> tuple[float, int | None] | None:
     """
     (latency ms, probe code) of the first responsive endpoint;
-    None when offline. probe_code is None when the first URL (a
-    204 endpoint, captive.apple.com) answered 204 as expected,
-    else the HTTP code actually received (captive portal, DNS
-    hijack, ...). Judging the anomaly is the agent's job.
+    None when offline. probe_code is None when the first URL
+    passes the captive check (204, or Apple's Success page), or
+    when a later URL only confirms connectivity. Any other status
+    from the first URL is the anomaly code. Judging it is the
+    agent's job.
     """
     with httpx.Client(timeout=timeout, follow_redirects=False) as client:
         for index, url in enumerate(urls):
             started = time.perf_counter()
 
             try:
-                response = client.head(url)
+                response = client.get(url)
 
             except Exception:
                 continue
 
             latency = (time.perf_counter() - started) * 1000.0
 
-            code = response.status_code if index == 0 else None
+            if index != 0 or _captive_clean(response):
+                return latency, None
 
-            return latency, None if code == 204 else code
+            return latency, response.status_code
 
     return None
 
@@ -325,7 +340,7 @@ class NetworkProbe:
         events_max: int = 8,
     ) -> None:
         self.probe_urls = probe_urls or [
-            "http://captive.apple.com",  # 204 endpoint; non-204 = captive
+            "http://captive.apple.com/hotspot-detect.html",
             "https://www.baidu.com",
             "https://api.ipify.org",
         ]
@@ -485,9 +500,7 @@ class NetworkProbe:
 
         if self._probe_code is not None and probe_code != self._probe_code:
             self._emit(
-                f"probe anomaly (http {probe_code})"
-                if probe_code
-                else "probe clean (204)"
+                f"probe anomaly (http {probe_code})" if probe_code else "probe clean"
             )
 
         self._probe_code = probe_code
@@ -921,7 +934,7 @@ def _link_line(facts: dict[str, Any]) -> str:
     probe_code = facts.get("probe_code")
 
     if probe_code:
-        line += f" | probe: http {probe_code} (expected 204)"
+        line += f" | probe: http {probe_code} (captive check failed)"
 
     return line
 
@@ -934,7 +947,10 @@ def _link_line(facts: dict[str, Any]) -> str:
 class Config(ServiceConfig):
     """The network keys: what to probe, and how often."""
 
-    probe_urls: list[str] = ["http://captive.apple.com", "https://www.baidu.com"]
+    probe_urls: list[str] = [
+        "http://captive.apple.com/hotspot-detect.html",
+        "https://www.baidu.com",
+    ]
 
     dns_host: str = "www.apple.com"
 

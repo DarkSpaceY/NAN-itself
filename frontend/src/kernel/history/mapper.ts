@@ -33,6 +33,9 @@ export class Mapper {
   /** Messages sent before the current round ends: kept out of the timeline until the next round boundary. */
   private queued: InputPart[] = [];
 
+  /** Turn index kept when an in-turn retry replaces a closed failure. */
+  private replacementIndex: number | null = null;
+
   constructor(agentId: string) {
     this.agentId = agentId;
   }
@@ -70,7 +73,7 @@ export class Mapper {
 
   private startRound(env: Envelope, index?: number): Round {
     const round: Round = {
-      index: index ?? this.rounds.length + 1,
+      index: index ?? this.replacementIndex ?? this.rounds.length + 1,
       ts: env.ts,
       appliedSeq: env.seq,
       closed: false,
@@ -78,6 +81,7 @@ export class Mapper {
       detail: null,
       parts: this.takeCarry(),
     };
+    this.replacementIndex = null;
     this.rounds.push(round);
     this.open = round;
     return round;
@@ -126,7 +130,9 @@ export class Mapper {
    * failed / interrupted attempt with the same turn_index is removed,
    * and its user messages are handed over to the new round. The error
    * line therefore stays visible during backoff and is overwritten as
-   * soon as the retry speaks.
+   * soon as the retry speaks. A resumed turn does this from turn_started.
+   * An in-turn retry does not emit another turn_started, so the next
+   * model event drops the closed failure itself.
    */
   private rollback(index: number): void {
     const dead = this.rounds.filter(
@@ -142,6 +148,37 @@ export class Mapper {
       ),
     );
     this.rounds = this.rounds.filter((round) => !dead.includes(round));
+  }
+
+  /**
+   * Continue a closed failure when the model speaks again without a
+   * new turn_started. A new turn opens through turn_started and does
+   * not come through here.
+   */
+  private resumeFailed(env: Envelope): Round {
+    const last = this.rounds[this.rounds.length - 1];
+    if (
+      (!this.open || this.open.closed) &&
+      last?.closed &&
+      last.outcome === "failed"
+    ) {
+      this.replacementIndex = last.index;
+      this.rollback(last.index);
+    }
+    return this.current(env);
+  }
+
+  /** A later failure or the park reason, after the attempt is already closed. */
+  private reviseClosed(
+    outcome: "failed" | "interrupted",
+    detail: string | null,
+  ): void {
+    const last = this.rounds[this.rounds.length - 1];
+    if (!last?.closed) return;
+    if (last.outcome !== "failed" && last.outcome !== "interrupted") return;
+    last.outcome = outcome;
+    last.detail = detail;
+    this.stamp(last);
   }
 
   /**
@@ -214,7 +251,7 @@ export class Mapper {
       }
 
       case "output_started": {
-        const round = this.current(env);
+        const round = this.resumeFailed(env);
         const part: TextPart = {
           kind: "text",
           id: env.id ?? `out-${env.seq}`,
@@ -229,7 +266,7 @@ export class Mapper {
 
       case "output_delta": {
         const part = env.id ? this.streams.get(env.id) : undefined;
-        const round = this.current(env);
+        const round = this.resumeFailed(env);
         if (part) {
           part.text += textOf(env);
         } else {
@@ -264,7 +301,7 @@ export class Mapper {
       }
 
       case "thinking_started": {
-        const round = this.current(env);
+        const round = this.resumeFailed(env);
         const part: ThinkingPart = {
           kind: "thinking",
           id: env.id ?? `think-${env.seq}`,
@@ -279,7 +316,7 @@ export class Mapper {
 
       case "thinking_delta": {
         const part = env.id ? this.thinkingStreams.get(env.id) : undefined;
-        const round = this.current(env);
+        const round = this.resumeFailed(env);
         if (part) {
           part.text += textOf(env);
         } else {
@@ -308,7 +345,7 @@ export class Mapper {
       }
 
       case "verb_started": {
-        const round = this.current(env);
+        const round = this.resumeFailed(env);
         const verb = verbOf(env);
         const part: VerbPart = {
           kind: "verb",
@@ -337,7 +374,7 @@ export class Mapper {
         const verb = verbOf(env);
         const part = this.running.get(verb);
         if (part) {
-          part.state = "done";
+          part.state = part.detail?.refused === true ? "refused" : "done";
           const d = env.content.duration_s;
           part.durationS = typeof d === "number" ? d : undefined;
           this.running.delete(verb);
@@ -364,7 +401,12 @@ export class Mapper {
       }
 
       case "turn_failed":
-        // The error line stays visible during backoff; the next round's turn_started overwrites it as soon as the retry begins
+        // The error line stays visible during backoff. Later attempts
+        // of an already closed turn replace the message in place.
+        if (!this.open) {
+          this.reviseClosed("failed", str(env.content.error));
+          break;
+        }
         this.closeOpen(env, "failed", str(env.content.error), true);
         break;
 
@@ -372,6 +414,11 @@ export class Mapper {
         // The turn was parked, not discarded: the partial content
         // stays visible until the turn continues (a new turn_started
         // with the same index rolls it away) or the agent exits.
+        // The park reason replaces an error that already closed the turn.
+        if (!this.open) {
+          this.reviseClosed("interrupted", str(env.content.reason));
+          break;
+        }
         this.closeOpen(env, "interrupted", str(env.content.reason), true);
         break;
 

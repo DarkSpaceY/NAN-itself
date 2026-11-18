@@ -31,7 +31,7 @@
   /* One row of the ledger, and the shared column track. */
   --row-h: 30px;
   --gap-h: 26px;
-  --cols: 86px 60px 164px minmax(0, 1fr) 100px;
+  --cols: 86px 60px minmax(72px, 7.5rem) minmax(0, 1fr) 72px;
   --pad: 16px;
   --radius: 14px;
 
@@ -304,7 +304,7 @@ button {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  height: 28px;
+  min-height: 28px;
   margin-top: 1px;
   padding-left: 64px;
   font: 10.5px var(--font-mono);
@@ -312,7 +312,15 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.range-span { flex: 1; text-align: center; opacity: 0.7; }
+.range-span {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ----------------------------------------------------------- ledger */
 
@@ -340,6 +348,12 @@ main {
   display: grid;
   grid-template-columns: var(--cols);
   align-items: center;
+}
+
+.ledger-head > *,
+.row > * {
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* A legend, not a header band: no fill, the quietest rule we have. */
@@ -802,6 +816,23 @@ main {
   color: var(--muted);
   max-height: 220px;
   overflow: auto;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --cols: 86px 58px minmax(0, 4.5rem) minmax(0, 1fr) 4.5rem;
+  }
+
+  main { position: relative; }
+
+  .drawer {
+    position: absolute;
+    top: 0;
+    right: 14px;
+    bottom: 14px;
+    width: min(420px, calc(100% - 28px));
+    z-index: 2;
+  }
 }
 
 pre.raw {
