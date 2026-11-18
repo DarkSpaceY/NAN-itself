@@ -30,11 +30,18 @@ function argSummary(args: Record<string, unknown>): string {
 
 function argValue(value: unknown): string {
   if (value === null) return "null";
-  if (Array.isArray(value)) return value.map((item) => String(item)).join("\n");
+  if (Array.isArray(value)) {
+    const nested = value.some((item) => item !== null && typeof item === "object");
+    return nested
+      ? JSON.stringify(value, null, 2)
+      : value.map((item) => String(item)).join("\n");
+  }
   if (typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => `${key}=${String(item)}`)
-      .join("\n");
+    const entries = Object.entries(value as Record<string, unknown>);
+    const nested = entries.some(([, item]) => item !== null && typeof item === "object");
+    return nested
+      ? JSON.stringify(value, null, 2)
+      : entries.map(([key, item]) => `${key}=${String(item)}`).join("\n");
   }
   return String(value);
 }
@@ -105,6 +112,209 @@ function Thinking({ part }: { part: ThinkingPart }) {
   );
 }
 
+function firstLine(value: unknown, max = 120): string {
+  if (typeof value !== "string") return "";
+  const line = value.trim().split("\n")[0] ?? "";
+  return truncate(line, max);
+}
+
+/** One line per verb: the argument the reader actually needs. */
+function verbSummary(part: VerbPart): { text: string; tags: string[] } {
+  const depth = part.detail?.depth;
+
+  switch (part.verb) {
+    case "shell": {
+      const command =
+        typeof part.args.command === "string" ? part.args.command : "";
+      const lines = command.trim().split("\n").filter(Boolean);
+      return {
+        text: `$ ${truncate(lines[0] ?? "", 120)}`,
+        tags: lines.length > 1 ? [`${lines.length} 行`] : [],
+      };
+    }
+    case "spawn":
+      return {
+        text: firstLine(part.args.task),
+        tags: typeof depth === "number" ? [`depth ${depth}`] : [],
+      };
+    case "send": {
+      const down = part.args.direction === "down";
+      const who =
+        typeof part.args.child_id === "string"
+          ? part.args.child_id
+          : down
+            ? "child"
+            : "parent";
+      return { text: `${down ? "↓" : "↑"} ${who}`, tags: [] };
+    }
+    case "kill":
+      return { text: String(part.args.child_id ?? ""), tags: [] };
+    case "sleep":
+      return { text: `${String(part.args.seconds ?? "")}s`, tags: [] };
+    case "finish":
+      return { text: firstLine(part.args.report), tags: [] };
+    default:
+      return { text: argSummary(part.args), tags: [] };
+  }
+}
+
+function ShellBody({ part }: { part: VerbPart }) {
+  const command =
+    typeof part.args.command === "string" ? part.args.command : "";
+  const exit =
+    typeof part.detail?.exit_code === "number" ? part.detail.exit_code : null;
+  const job =
+    typeof part.detail?.job_id === "string" ? part.detail.job_id : null;
+  const extras = [
+    typeof part.args.cwd === "string" ? `cwd ${part.args.cwd}` : null,
+    part.args.background === true ? "background" : null,
+  ].filter((item): item is string => item !== null);
+  const foot = [
+    exit !== null ? `exit ${exit}` : null,
+    part.durationS !== undefined ? `${part.durationS.toFixed(2)}s` : null,
+    job ? `job ${job}` : null,
+  ].filter((item): item is string => item !== null);
+
+  return (
+    <div className="verb-term">
+      <pre className="verb-term-cmd">$ {command}</pre>
+      {extras.length > 0 && (
+        <div className="verb-term-meta">{extras.join(" · ")}</div>
+      )}
+      {part.error ? (
+        <pre className="verb-term-out error">
+          {part.error.type}: {part.error.message}
+        </pre>
+      ) : (
+        part.text && <pre className="verb-term-out">{truncate(part.text, 4000)}</pre>
+      )}
+      {foot.length > 0 && <div className="verb-term-foot">{foot.join(" · ")}</div>}
+    </div>
+  );
+}
+
+function SpawnBody({
+  part,
+  onDrill,
+}: {
+  part: VerbPart;
+  onDrill?: (agentId: string) => void;
+}) {
+  const task = typeof part.args.task === "string" ? part.args.task : "";
+  const childId =
+    typeof part.detail?.child_id === "string" ? part.detail.child_id : null;
+  const depth = part.detail?.depth;
+
+  return (
+    <>
+      {task && <p className="verb-quote">{task}</p>}
+      <div className="verb-child">
+        <span className="verb-dot" data-state={part.state} />
+        <span className="verb-child-id">{childId ?? "子代理"}</span>
+        {typeof depth === "number" && (
+          <span className="verb-meta">depth {depth}</span>
+        )}
+        {childId && onDrill && (
+          <button type="button" className="drill" onClick={() => onDrill(childId)}>
+            open →
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+function SendBody({ part }: { part: VerbPart }) {
+  const text = typeof part.args.text === "string" ? part.args.text : "";
+  return text ? <blockquote className="verb-quote">{text}</blockquote> : null;
+}
+
+function SleepBody({ part }: { part: VerbPart }) {
+  const seconds =
+    typeof part.args.seconds === "number" ? part.args.seconds : null;
+  const running = part.state === "running";
+
+  return (
+    <div className="verb-sleep">
+      <div className="verb-track">
+        <div
+          className="verb-fill"
+          data-state={part.state}
+          style={
+            running && seconds !== null
+              ? { animationDuration: `${seconds}s` }
+              : undefined
+          }
+        />
+      </div>
+      <span className="verb-meta">
+        {running ? `计时中 · ${seconds ?? "?"}s` : (part.text ?? "已等待")}
+      </span>
+    </div>
+  );
+}
+
+function FinishBody({ part }: { part: VerbPart }) {
+  const report = typeof part.args.report === "string" ? part.args.report : "";
+  if (!report) return null;
+
+  return (
+    <div className="verb-report">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        {report}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function GenericBody({ part }: { part: VerbPart }) {
+  return (
+    <>
+      <VerbArgs verb={part.verb} args={part.args} />
+      {part.text && <pre className="verb-body">{truncate(part.text, 4000)}</pre>}
+      {part.detail && part.detail.refused !== true && (
+        <pre className="verb-body detail">
+          {JSON.stringify(part.detail, null, 2)}
+        </pre>
+      )}
+    </>
+  );
+}
+
+function VerbBody({
+  part,
+  onDrill,
+}: {
+  part: VerbPart;
+  onDrill?: (agentId: string) => void;
+}) {
+  if (part.error && part.verb !== "shell") {
+    const { type, message } = part.error;
+    return (
+      <pre className="verb-body error">
+        {type}: {message}
+      </pre>
+    );
+  }
+
+  switch (part.verb) {
+    case "shell":
+      return <ShellBody part={part} />;
+    case "spawn":
+      return <SpawnBody part={part} onDrill={onDrill} />;
+    case "send":
+      return <SendBody part={part} />;
+    case "kill":
+      return <p className="verb-note">{part.text ?? ""}</p>;
+    case "sleep":
+      return <SleepBody part={part} />;
+    case "finish":
+      return <FinishBody part={part} />;
+    default:
+      return <GenericBody part={part} />;
+  }
+}
+
 function Verb({
   part,
   onDrill,
@@ -112,15 +322,19 @@ function Verb({
   part: VerbPart;
   onDrill?: (agentId: string) => void;
 }) {
-  const childId =
-    typeof part.detail?.child_id === "string" ? part.detail.child_id : null;
+  const summary = verbSummary(part);
 
   return (
     <details className="verb-part" data-state={part.state}>
       <summary>
         <span className="caret">›</span>
         <span className="verb-name">{part.verb}</span>
-        <span className="verb-args">{argSummary(part.args)}</span>
+        <span className="verb-args">{summary.text}</span>
+        {summary.tags.map((tag) => (
+          <span className="verb-tag" key={tag}>
+            {tag}
+          </span>
+        ))}
         {part.state === "running" && (
           <span className="verb-state" data-kind="running">
             running
@@ -141,34 +355,7 @@ function Verb({
         )}
       </summary>
 
-      {childId && onDrill && (
-        <button
-          type="button"
-          className="drill"
-          onClick={() => onDrill(childId)}
-        >
-          open {childId} →
-        </button>
-      )}
-
-      <VerbArgs verb={part.verb} args={part.args} />
-
-      {part.error ? (
-        <pre className="verb-body error">
-          {part.error.type}: {part.error.message}
-        </pre>
-      ) : (
-        <>
-          {part.text && (
-            <pre className="verb-body">{truncate(part.text, 4000)}</pre>
-          )}
-          {part.detail && part.detail.refused !== true && (
-            <pre className="verb-body detail">
-              {JSON.stringify(part.detail, null, 2)}
-            </pre>
-          )}
-        </>
-      )}
+      <VerbBody part={part} onDrill={onDrill} />
     </details>
   );
 }

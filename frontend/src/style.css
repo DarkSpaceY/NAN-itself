@@ -783,6 +783,183 @@ button {
   margin-bottom: 0;
 }
 
+/* Per-verb bodies: command shape on top, feedback below */
+.verb-tag {
+  flex: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.verb-meta {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.verb-note {
+  margin: 0 0 8px 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.verb-term {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--raised);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.verb-term pre {
+  margin: 0;
+}
+
+.verb-term-cmd {
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verb-term-out {
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verb-term-out.error {
+  color: var(--error);
+}
+
+.verb-term-meta,
+.verb-term-foot {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 10px;
+}
+
+.verb-term-foot {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.verb-quote {
+  margin: 0 0 8px 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verb-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 14px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--raised);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.verb-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+}
+
+.verb-dot[data-state="failed"] {
+  background: var(--error);
+}
+
+.verb-dot[data-state="refused"] {
+  background: var(--warn);
+}
+
+.verb-dot[data-state="done"] {
+  background: var(--muted);
+}
+
+.verb-child .drill {
+  margin: 0 0 0 auto;
+}
+
+.verb-sleep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px 14px;
+}
+
+.verb-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.verb-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--live);
+  transform-origin: left center;
+}
+
+.verb-fill[data-state="running"] {
+  animation-name: verb-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes verb-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .verb-fill[data-state="running"] {
+    animation: none;
+    transform: scaleX(0);
+  }
+}
+
+.verb-report {
+  margin: 0 0 8px 14px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.verb-report p {
+  margin: 0 0 6px;
+}
+
+.verb-report p:last-child {
+  margin-bottom: 0;
+}
+
 /* Drill-down is a plain text link, sharing the language of the line-style folding */
 
 .drill {
