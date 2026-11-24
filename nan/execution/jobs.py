@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import json
 import os
+import secrets
 import signal
 import time
 from dataclasses import dataclass, field
@@ -42,12 +43,23 @@ _DRAIN_GRACE = 0.3
 # stay on disk either way.
 _KEEP_FINISHED = 20
 
+# One token per core process: log paths never collide with a previous
+# run's, and an old log is never truncated by a fresh j1.
+_BOOT_ID = secrets.token_hex(3)
+
+_TRUNCATED = b"\n[nan: log truncated at the configured limit]\n"
+
 
 def kill_group(pgid: int, sig: int) -> None:
     """Signal a whole process group; an already-dead group is nothing to do."""
     # ProcessLookupError: the group is already gone.
     with contextlib.suppress(ProcessLookupError):
         os.killpg(pgid, sig)
+
+
+def job_directory(workspace: Path, agent_id: str) -> Path:
+    """This boot's job directory for one agent."""
+    return workspace / ".nan" / "jobs" / agent_id / _BOOT_ID
 
 
 @dataclass
@@ -64,6 +76,8 @@ class Job:
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
     watch: asyncio.Task[None] | None = field(default=None, repr=False)
+    stdin: asyncio.StreamWriter | None = field(default=None, repr=False)
+    stdin_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
     def running(self) -> bool:
@@ -107,6 +121,8 @@ class Job:
 
     def close(self) -> None:
         """Drop the pty and its pump; the process is gone or being killed."""
+        close_stdin(self)
+
         if not self.pump.done():
             self.pump.cancel()
         else:
@@ -125,14 +141,52 @@ async def _watch(job: Job) -> None:
 
     job.ended_at = time.time()
 
+    close_stdin(job)
+
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(asyncio.shield(job.pump), timeout=_DRAIN_GRACE)
 
     job.write_status()
 
 
-async def _pump(master: int, log_path: Path) -> None:
-    """Copy the pty into the log until the command closes its side."""
+async def write_stdin(job: Job, text: str) -> bool:
+    """
+    Write to the command's stdin, leaving it open. False when the
+    command already closed its side (or exited) -- nothing to do.
+    """
+    writer = job.stdin
+
+    if writer is None or writer.is_closing():
+        return False
+
+    async with job.stdin_lock:
+        try:
+            writer.write(text.encode("utf-8"))
+
+            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError, OSError, RuntimeError):
+            return False
+
+    return True
+
+
+def close_stdin(job: Job) -> None:
+    """Send EOF: the command's next read returns end-of-file."""
+    writer = job.stdin
+
+    if writer is None:
+        return
+
+    with contextlib.suppress(Exception):
+        writer.close()
+
+
+async def _pump(master: int, log_path: Path, limit: int) -> None:
+    """
+    Copy the pty into the log until the command closes its side. Past
+    `limit` the log stops growing but the pty keeps draining, so a
+    chatty command never blocks on a full terminal buffer.
+    """
     try:
         stream = os.fdopen(os.dup(master), "rb", buffering=0)
     except OSError:
@@ -147,6 +201,8 @@ async def _pump(master: int, log_path: Path) -> None:
             lambda: asyncio.StreamReaderProtocol(reader), stream
         )
 
+        written = 0
+
         with open(log_path, "wb", buffering=0) as log:
             while True:
                 try:
@@ -157,7 +213,15 @@ async def _pump(master: int, log_path: Path) -> None:
                 if not chunk:
                     return
 
-                log.write(chunk)
+                if written >= limit:
+                    continue
+
+                room = limit - written
+                log.write(chunk[:room])
+                written += min(len(chunk), room)
+
+                if written >= limit:
+                    log.write(_TRUNCATED)
 
     finally:
         if transport is None:
@@ -166,9 +230,9 @@ async def _pump(master: int, log_path: Path) -> None:
             transport.close()
 
 
-def start_pump(master: int, log_path: Path) -> asyncio.Task[None]:
+def start_pump(master: int, log_path: Path, limit: int) -> asyncio.Task[None]:
     """Start copying the job's pty into its log."""
-    return asyncio.create_task(_pump(master, log_path), name=f"job-pump:{log_path.stem}")
+    return asyncio.create_task(_pump(master, log_path, limit), name=f"job-pump:{log_path.stem}")
 
 
 def read_output(log_path: Path, limit: int) -> str:

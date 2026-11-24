@@ -69,6 +69,7 @@ class AgentSettings(BaseModel):
     history_char_limit: int = 100_000
     shell_timeout: float = 30.0
     shell_output_limit: int = Field(default=20_000, ge=2)
+    job_log_limit: int = Field(default=8_388_608, ge=1_024)
     backoff: list[float] = Field(default_factory=lambda: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0])
     max_depth: int = 3
     max_children: int = 5

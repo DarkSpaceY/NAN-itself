@@ -6,14 +6,14 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
-from nan.execution import Job, read_slice
+from nan.execution import Job, close_stdin, read_slice, write_stdin
 from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
     from nan.config.models import Settings
 
-_ACTIONS = ("list", "status", "logs", "wait", "stop")
+_ACTIONS = ("list", "status", "logs", "wait", "input", "stop")
 
 _DEFAULT_BYTES = 8_000
 _MAX_BYTES = 64_000
@@ -33,9 +33,10 @@ class JobsVerb(Verb):
                 "Work with the background jobs your shell calls started. "
                 "'list' shows every job you started in this session, running "
                 "or finished; 'logs' returns new output from a byte offset; "
-                "'wait' blocks until a job exits or the timeout; 'stop' kills "
-                "its process group. Jobs belong to you: they outlive the turn "
-                "that started them, and a pause does not kill them."
+                "'wait' blocks until a job exits or the timeout; 'input' "
+                "writes to a job's stdin, or sends EOF by closing it; 'stop' "
+                "kills its process group. Jobs belong to you: they outlive "
+                "the turn that started them, and a pause does not kill them."
             ),
             input_schema={
                 "type": "object",
@@ -66,6 +67,21 @@ class JobsVerb(Verb):
                             f"wait: seconds to block before reporting it is "
                             f"still running (default {_DEFAULT_WAIT:g}, "
                             f"max {_MAX_WAIT:g})."
+                        ),
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "input: text written to the job's stdin. The pipe "
+                            "stays open afterwards unless eof is true; include "
+                            "a trailing newline if the command expects a line."
+                        ),
+                    },
+                    "eof": {
+                        "type": "boolean",
+                        "description": (
+                            "input: close the job's stdin after writing text, "
+                            "so its next read sees end-of-file."
                         ),
                     },
                 },
@@ -103,6 +119,9 @@ class JobsVerb(Verb):
 
         if action == "wait":
             return await _wait(agent, job, arguments)
+
+        if action == "input":
+            return await _input(job, arguments)
 
         return await _stop(agent, job)
 
@@ -191,6 +210,62 @@ async def _wait(agent: Agent, job: Job, arguments: dict[str, Any]) -> VerbOutcom
             "exited": True,
             "exit_code": job.proc.returncode,
         },
+    )
+
+
+async def _input(job: Job, arguments: dict[str, Any]) -> VerbOutcome:
+    text = arguments.get("text")
+    eof = arguments.get("eof", False)
+
+    if text is not None and not isinstance(text, str):
+        return VerbOutcome("'text' must be a string.")
+
+    if not isinstance(eof, bool):
+        return VerbOutcome("'eof' must be a boolean.")
+
+    if not text and not eof:
+        return VerbOutcome("'input' needs 'text', 'eof': true, or both.")
+
+    if not job.running:
+        return VerbOutcome(
+            f"{job.job_id} has exited {job.proc.returncode}; its stdin is closed.",
+            {
+                "action": "input",
+                "job_id": job.job_id,
+                "written": 0,
+                "eof": False,
+            },
+        )
+
+    written = 0
+
+    if text:
+        if not await write_stdin(job, text):
+            return VerbOutcome(
+                f"{job.job_id} is no longer reading stdin.",
+                {
+                    "action": "input",
+                    "job_id": job.job_id,
+                    "written": 0,
+                    "eof": False,
+                },
+            )
+
+        written = len(text.encode("utf-8"))
+
+    if eof:
+        close_stdin(job)
+
+    if written and eof:
+        message = f"Wrote {written} bytes to {job.job_id}'s stdin, then closed it (EOF)."
+    elif written:
+        message = f"Wrote {written} bytes to {job.job_id}'s stdin."
+    else:
+        message = f"Closed {job.job_id}'s stdin (EOF)."
+
+    return VerbOutcome(
+        message,
+        {"action": "input", "job_id": job.job_id, "written": written, "eof": eof},
     )
 
 

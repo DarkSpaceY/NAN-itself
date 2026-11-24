@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
 from nan.config.models import Settings
-from nan.execution import Job, read_output, start_pump
+from nan.execution import Job, job_directory, read_output, start_pump, write_stdin
 from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
@@ -44,14 +44,17 @@ class ShellVerb(Verb):
                 "workspace root unless you pass 'cwd' (relative to the "
                 "root and it must stay inside it; prefer 'cwd' over a "
                 "leading 'cd').\n"
-                f"Commands are non-interactive. A command that finishes "
-                f"within {wait} returns its output and exit code directly. "
-                f"A command still running after {wait} keeps going as a "
-                "background job: the call returns its job id and log path, "
-                "and the 'jobs' verb can list it, read new output, wait for "
-                "it or stop it. Pass background=true when you know the "
-                "command should outlive the call -- for example a server or "
-                "debugger you keep open and inspect across several steps.\n"
+                f"Commands are non-interactive on the terminal, but their "
+                f"stdin stays open: a command that reads stdin waits until "
+                f"you write to it or send EOF with the 'jobs' verb. A command "
+                f"that finishes within {wait} returns its output and exit "
+                f"code directly. A command still running after {wait} keeps "
+                "going as a background job: the call returns its job id and "
+                "log path, and the 'jobs' verb can list it, read new output, "
+                "write its stdin, wait for it or stop it. Pass background=true "
+                "when you know the command should outlive the call -- for "
+                "example a server or debugger you keep open and inspect "
+                "across several steps.\n"
                 f"Output is truncated to {limit} characters (head and tail "
                 "kept), so write long output to a file and read it back with "
                 "grep/head. Prefer chaining shell commands together to "
@@ -76,7 +79,8 @@ class ShellVerb(Verb):
                     "stdin": {
                         "type": "string",
                         "description": (
-                            "Text written once to the command's stdin. Not allowed with background."
+                            "Text written to the command's stdin when it starts. "
+                            "The pipe stays open; send more, or EOF, with jobs input."
                         ),
                     },
                     "background": {
@@ -121,11 +125,6 @@ class ShellVerb(Verb):
 
         if not isinstance(background, bool):
             return VerbOutcome("'background' must be a boolean.")
-
-        if background and stdin is not None:
-            return VerbOutcome(
-                "'stdin' cannot be used with background: the command runs without input."
-            )
 
         # Command-level deny list: a hit is reported back as the
         # verb result so the model can rewrite the command.
@@ -195,7 +194,7 @@ async def _start_job(
     copies the pty into the log.
     """
     workspace = agent.settings.paths.workspace
-    jobs_dir = workspace / ".nan" / "jobs" / agent.agent_id
+    jobs_dir = job_directory(workspace, agent.agent_id)
 
     job_id = agent.jobs.new_id()
     log_path = jobs_dir / f"{job_id}.log"
@@ -216,7 +215,10 @@ async def _start_job(
             command,
             cwd=str(cwd),
             env=env,
-            stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+            # A pipe that stays open for the job's life: a command that
+            # reads stdin waits for `jobs input` (or EOF) instead of
+            # seeing end-of-file at once.
+            stdin=asyncio.subprocess.PIPE,
             stdout=slave,
             stderr=slave,
             start_new_session=True,
@@ -232,8 +234,9 @@ async def _start_job(
             pgid=proc.pid,
             log_path=log_path,
             master=master,
-            pump=start_pump(master, log_path),
+            pump=start_pump(master, log_path, agent.settings.agent.job_log_limit),
             command=display,
+            stdin=proc.stdin,
         )
         master = -1
 
@@ -241,8 +244,8 @@ async def _start_job(
         # here on has a job that stop_all can kill.
         agent.jobs.add(job)
 
-        if stdin is not None and proc.stdin is not None:
-            await _feed(proc.stdin, stdin)
+        if stdin is not None:
+            await write_stdin(job, stdin)
 
         return job
 
@@ -295,7 +298,8 @@ def _job_outcome(
     return VerbOutcome(
         f"{intro}pid {job.proc.pid}, pgid {job.pgid}. Log: {relative}\n"
         f"Use the 'jobs' verb to work with it: list, logs {job.job_id}, "
-        f"wait {job.job_id}, stop {job.job_id}.",
+        f"wait {job.job_id}, input {job.job_id} (write stdin or EOF), "
+        f"stop {job.job_id}.",
         {"job_id": job.job_id, "pid": job.proc.pid, "pgid": job.pgid, "promoted": promoted},
     )
 
@@ -365,13 +369,3 @@ def _environment(
         env["PATH"] = f"{env.get('PATH', '')}{os.pathsep}{tools}"
 
     return env, None
-
-
-async def _feed(stream: asyncio.StreamWriter, text: str) -> None:
-    """Write the one-shot stdin; a command that never reads it is fine."""
-    with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-        stream.write(text.encode("utf-8"))
-
-        await stream.drain()
-
-    stream.close()

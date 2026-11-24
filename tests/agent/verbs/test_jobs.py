@@ -168,6 +168,100 @@ async def test_status_names_pid_and_log(tmp_path: Path, no_sink: Any) -> None:
         await root.jobs.stop_all()
 
 
+async def test_input_writes_to_a_running_jobs_stdin(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        job_id = await _background(root, "head -1")
+
+        result = await _jobs(root, action="input", job_id=job_id, text="hello\n")
+
+        assert result.detail["written"] == 6
+        assert result.detail["eof"] is False
+        assert "Wrote 6 bytes" in result.text
+
+        waited = await _jobs(root, action="wait", job_id=job_id, timeout=5)
+
+        assert waited.detail["exit_code"] == 0
+
+        logs = await _read_until(root, job_id, "hello")
+
+        assert "hello" in logs.text
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_input_eof_closes_stdin(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        job_id = await _background(root, "cat")
+
+        result = await _jobs(root, action="input", job_id=job_id, text="hi\n", eof=True)
+
+        assert result.detail["written"] == 3
+        assert result.detail["eof"] is True
+
+        waited = await _jobs(root, action="wait", job_id=job_id, timeout=5)
+
+        assert waited.detail["exit_code"] == 0
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_input_needs_text_or_eof(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        job_id = await _background(root, "sleep 30")
+
+        result = await _jobs(root, action="input", job_id=job_id)
+
+        assert result.text == "'input' needs 'text', 'eof': true, or both."
+
+    finally:
+        await root.jobs.stop_all()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"text": 1}, "'text' must be a string."),
+        ({"text": "hi", "eof": "yes"}, "'eof' must be a boolean."),
+    ],
+)
+async def test_input_validates_its_arguments(
+    tmp_path: Path, no_sink: Any, arguments: dict[str, object], message: str
+) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    try:
+        job_id = await _background(root, "sleep 30")
+
+        result = await _jobs(root, action="input", job_id=job_id, **arguments)
+
+        assert result.text == message
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_input_after_exit_is_reported(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    job_id = await _background(root, "sleep 1; exit 3")
+
+    waited = await _jobs(root, action="wait", job_id=job_id, timeout=5)
+
+    assert waited.detail["exit_code"] == 3
+
+    result = await _jobs(root, action="input", job_id=job_id, text="hi")
+
+    assert "has exited 3" in result.text
+
+
 async def test_unknown_job_is_reported(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 
@@ -181,7 +275,7 @@ async def test_action_must_be_known(tmp_path: Path, no_sink: Any) -> None:
 
     result = await _jobs(root, action="dance")
 
-    assert result.text == "'action' must be one of: list, status, logs, wait, stop."
+    assert result.text == "'action' must be one of: list, status, logs, wait, input, stop."
 
 
 async def test_job_id_is_required_outside_list(tmp_path: Path, no_sink: Any) -> None:

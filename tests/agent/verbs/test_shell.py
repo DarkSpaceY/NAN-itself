@@ -15,6 +15,7 @@ import pytest
 from nan_fakes import make_agent
 
 from nan.agent.verbs.shell import ShellVerb
+from nan.execution import job_directory
 
 pytestmark = pytest.mark.asyncio
 
@@ -143,10 +144,12 @@ async def test_the_model_cannot_override_the_agent_identity(tmp_path: Path, no_s
     assert f"agent={root.agent_id}" in result.text
 
 
-async def test_stdin_is_fed_once(tmp_path: Path, no_sink: Any) -> None:
+async def test_stdin_is_written_when_the_command_starts(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 
-    result = await _shell(root, "cat", stdin="hello stdin")
+    # head reads one line and exits; the pipe stays open after it, so
+    # a command that consumed all of stdin would block instead.
+    result = await _shell(root, "head -1", stdin="hello stdin\n")
 
     assert result.text.startswith("exit code: 0\n")
     assert "hello stdin" in result.text
@@ -161,12 +164,13 @@ async def test_stdin_must_be_a_string(tmp_path: Path, no_sink: Any, value: objec
     assert result.text == "'stdin' must be a string."
 
 
-async def test_stdin_with_background_is_refused(tmp_path: Path, no_sink: Any) -> None:
+async def test_stdin_with_background_is_allowed(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 
-    result = await _shell(root, "cat", stdin="hi", background=True)
+    result = await _shell(root, "head -1", stdin="hi\n", background=True)
 
-    assert result.text.startswith("'stdin' cannot be used with background")
+    assert result.detail == {"exit_code": 0}
+    assert "hi" in result.text
 
 
 @pytest.mark.parametrize("value", ["true", 1])
@@ -190,7 +194,7 @@ async def test_a_command_that_outlives_the_window_becomes_a_job(
         assert result.detail["promoted"] is True
         assert "Still running after 0.5s" in result.text
 
-        log = tmp_path / "workspace" / ".nan" / "jobs" / root.agent_id / "j1.log"
+        log = job_directory(tmp_path / "workspace", root.agent_id) / "j1.log"
 
         for _ in range(20):
             if "before" in log.read_text():
@@ -222,7 +226,7 @@ async def test_background_returns_a_job_and_its_log(tmp_path: Path, no_sink: Any
         assert result.detail["job_id"] == "j1"
         assert result.detail["pgid"] == result.detail["pid"]
 
-        log = tmp_path / "workspace" / ".nan" / "jobs" / root.agent_id / "j1.log"
+        log = job_directory(tmp_path / "workspace", root.agent_id) / "j1.log"
 
         assert log.exists()
         assert str(log.relative_to(tmp_path / "workspace")) in result.text
@@ -366,12 +370,7 @@ async def test_the_log_is_raw_output(tmp_path: Path, no_sink: Any) -> None:
         result = await _shell(root, "printf 'a\\nb\\n'; sleep 2", background=True)
 
         log = (
-            tmp_path
-            / "workspace"
-            / ".nan"
-            / "jobs"
-            / root.agent_id
-            / f"{result.detail['job_id']}.log"
+            job_directory(tmp_path / "workspace", root.agent_id) / f"{result.detail['job_id']}.log"
         )
 
         for _ in range(200):
@@ -384,3 +383,35 @@ async def test_the_log_is_raw_output(tmp_path: Path, no_sink: Any) -> None:
 
     finally:
         await root.jobs.stop_all()
+
+
+async def test_the_log_stops_at_the_configured_limit(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path, agent={"job_log_limit": 1024})
+
+    result = await _shell(root, "head -c 5000 /dev/zero | tr '\\0' 'x'")
+
+    assert result.text.startswith("exit code: 0\n")
+
+    log = job_directory(tmp_path / "workspace", root.agent_id) / "j1.log"
+    data = log.read_bytes()
+
+    assert data.startswith(b"x" * 1024)
+    assert b"log truncated" in data
+    assert len(data) < 2000
+
+
+async def test_a_previous_runs_log_is_not_overwritten(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    stale = tmp_path / "workspace" / ".nan" / "jobs" / root.agent_id / "j1.log"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old run")
+
+    result = await _shell(root, "echo fresh")
+
+    assert result.text.startswith("exit code: 0\n")
+    assert stale.read_text() == "old run"
+
+    log = job_directory(tmp_path / "workspace", root.agent_id) / "j1.log"
+
+    assert "fresh" in log.read_text()
