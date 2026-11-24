@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -130,6 +131,16 @@ def build_app(service: SegvService) -> FastAPI:
             service.close()
 
     app = FastAPI(lifespan=lifespan)
+
+    # The desktop embeds this panel in a sandboxed iframe, which has an
+    # opaque origin: its module script and API calls are cross-origin.
+    # Without these headers the page loads styled but its JS never runs.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["*"],
+    )
 
     # -- archive --------------------------------------------------------
 

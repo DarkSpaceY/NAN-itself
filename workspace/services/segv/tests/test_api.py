@@ -47,6 +47,17 @@ def _turn(ts: float, reply: str = "hi") -> dict:
     }
 
 
+def test_web_panel_is_readable_from_a_sandboxed_iframe(config) -> None:
+    service = SegvService(config, links=[])
+
+    with _client(service) as client:
+        for path in ("/app.js", "/api/stats"):
+            response = client.get(path, headers={"Origin": "null"})
+
+            assert response.status_code == 200
+            assert response.headers["access-control-allow-origin"] == "*"
+
+
 def test_turn_endpoint_and_trace_api(config) -> None:
     service = SegvService(config, links=[])
 
