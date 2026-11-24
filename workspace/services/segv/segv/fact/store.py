@@ -544,6 +544,10 @@ class FactStore:
         try:
             raw = self._decompressor.decompress(value)
             meta_len, flags, dim = HEADER.unpack_from(raw, 0)
+
+            if dim != self.dim:
+                raise ValueError(f"vector dim {dim} != configured {self.dim}")
+
             offset = HEADER.size
             meta = json.loads(raw[offset : offset + meta_len])
             offset += meta_len

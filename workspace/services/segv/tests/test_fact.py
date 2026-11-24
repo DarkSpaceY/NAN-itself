@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,7 @@ from segv.config import Config
 from segv.fact.chunk import build_chunks, strip_injections
 from segv.fact.config import ChunkConfig, CueConfig, EmbedConfig, FactConfig
 from segv.fact.layer import FactLayer
-from segv.fact.store import FactStore
+from segv.fact.store import HEADER, FactStore
 from segv.store import Store
 
 
@@ -252,6 +253,23 @@ def test_stored_vectors_are_int8_and_reload_from_disk(tmp_path: Path) -> None:
 
     store.close()
     l0.close()
+
+
+def test_decode_rejects_a_mismatched_vector_dim(tmp_path: Path) -> None:
+    store = FactStore(
+        tmp_path / "fact",
+        dim=FakeEmbedder.dim,
+        raw_bm25=_fact_config().raw_bm25,
+        event_bm25=_fact_config().event_bm25,
+    )
+
+    meta = json.dumps({"chunk_id": "root#c0"}, separators=(",", ":")).encode()
+    raw = HEADER.pack(len(meta), 0, FakeEmbedder.dim + 1) + meta
+    raw += np.zeros(FakeEmbedder.dim + 1, dtype=np.int8).tobytes()
+
+    assert store._decode(store._compressor.compress(raw)) is None
+
+    store.close()
 
 
 def test_multi_chunk_turn_indexes_every_chunk(tmp_path: Path) -> None:
