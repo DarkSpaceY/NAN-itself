@@ -1,5 +1,5 @@
 {
-  "name": "nan-desktop",
+  "name": "nan-electron",
   "version": "0.1.0",
   "private": true,
   "description": "Electron shell for the local NAN core",

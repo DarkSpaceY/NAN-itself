@@ -14,6 +14,7 @@ const HOST = '127.0.0.1';
 const PORT = 8765;
 const GATEWAY_URL = `http://${HOST}:${PORT}/`;
 const REPO_ROOT = path.resolve(__dirname, '..');
+const ICON_PATH = path.join(__dirname, 'icon.png');
 
 const POLL_INTERVAL_MS = 250;
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -226,7 +227,10 @@ function createWindow() {
     },
   });
 
-  win.loadURL(GATEWAY_URL);
+  // The renderer's HTTP cache survives restarts; without a changing
+  // document URL Chromium may keep serving an old index.html (and its
+  // hashed bundle) even after a rebuild.
+  win.loadURL(`${GATEWAY_URL}?boot=${Date.now()}`);
 
   // Links that leave the local UI open in the system browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -255,6 +259,12 @@ function createWindow() {
 
 async function main() {
   try {
+    // Unbundled runs (npm start) show Electron's default Dock icon;
+    // set ours explicitly. It would come from the bundle once packaged.
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.setIcon(ICON_PATH);
+    }
+
     await startCore();
     running = true;
     createWindow();

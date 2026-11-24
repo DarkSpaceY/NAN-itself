@@ -15,9 +15,9 @@ export function serviceWindowId(serviceId: string): string {
   return `svc:${serviceId}`;
 }
 
-/** Four-pointed star: root and subagents share one glyph. */
+/** Hexagon mark (the product glyph): root and subagents share it. */
 export const AGENT_ICON =
-  "M12 2.5l2.35 7.15L21.5 12l-7.15 2.35L12 21.5l-2.35-7.15L2.5 12l7.15-2.35z";
+  "M12 2l8.66 5v10L12 22l-8.66-5V7zM12 5.52 6.39 8.76v6.48L12 18.48l5.61-3.24V8.76z";
 
 export function builtinWindow(): WindowRef {
   return { id: AGENT_ID, kind: "agent", title: "agent", icon: AGENT_ICON };

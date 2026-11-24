@@ -219,7 +219,11 @@ class Gateway:
                 index_path = frontend_dir / "index.html"
 
                 if index_path.exists():
-                    return FileResponse(str(index_path))
+                    # Revalidate on every load: a heuristically fresh
+                    # cache entry would keep pointing at the previous
+                    # hashed bundle, so a rebuilt frontend would never
+                    # reach an already-open window.
+                    return FileResponse(str(index_path), headers={"Cache-Control": "no-cache"})
 
                 return {"error": "Frontend not built"}
 
