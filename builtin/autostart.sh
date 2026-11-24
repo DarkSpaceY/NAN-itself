@@ -58,4 +58,4 @@ launch() {
 }
 
 # --- builtin components ------------------------------------------------
-launch "$HERE/services/record"
+
