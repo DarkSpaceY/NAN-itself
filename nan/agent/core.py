@@ -104,7 +104,7 @@ class Agent:
         # no finish verb) and the terminal of a failed turn: the
         # root parks for a resume, a child dies.
         self.verbs = ROOT_VERBS if parent is None else CHILD_VERBS
-        self.verb_definitions = verb_definitions(self.verbs)
+        self.verb_definitions = verb_definitions(self.verbs, self.settings)
 
         # --- identity ---
         self.agent_id = agent_id or uuid.uuid4().hex[:8]

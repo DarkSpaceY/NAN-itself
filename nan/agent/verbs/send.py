@@ -8,12 +8,13 @@ from nan.turn import InboxMessage
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
+    from nan.config.models import Settings
 
 
 class SendVerb(Verb):
     name = "send"
 
-    def definition(self) -> VerbDefinition:
+    def definition(self, _settings: Settings) -> VerbDefinition:
         return VerbDefinition(
             name=self.name,
             description=(

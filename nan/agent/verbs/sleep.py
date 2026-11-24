@@ -8,12 +8,13 @@ from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
+    from nan.config.models import Settings
 
 
 class SleepVerb(Verb):
     name = "sleep"
 
-    def definition(self) -> VerbDefinition:
+    def definition(self, _settings: Settings) -> VerbDefinition:
         return VerbDefinition(
             name=self.name,
             description="Wait for a while before your next step.",

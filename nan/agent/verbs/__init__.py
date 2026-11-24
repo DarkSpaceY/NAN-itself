@@ -1,9 +1,10 @@
 """
-Agent verbs: the six cognitive actions.
+Agent verbs: the seven cognitive actions.
 
     spawn    create a child agent
     sleep    block for a while
     shell    run a command in the workspace
+    jobs     work with the shell's background jobs
     send     send text message up to the parent, or down into a child
     kill     kill a child (cascade is automatic)
     finish   report upstream and die
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
+    from nan.config.models import Settings
     from nan.llm.types import VerbDefinition
 
 
@@ -47,7 +49,7 @@ class Verb:
 
     name: ClassVar[str]
 
-    def definition(self) -> VerbDefinition:
+    def definition(self, settings: Settings) -> VerbDefinition:
         raise NotImplementedError
 
     async def execute(self, *, call: Any, agent: Agent) -> VerbOutcome:
@@ -56,6 +58,7 @@ class Verb:
 
 def _build_registry() -> dict[str, Verb]:
     from .finish import FinishVerb
+    from .jobs import JobsVerb
     from .kill import KillVerb
     from .send import SendVerb
     from .shell import ShellVerb
@@ -66,6 +69,7 @@ def _build_registry() -> dict[str, Verb]:
         SpawnVerb.name: SpawnVerb(),
         SleepVerb.name: SleepVerb(),
         ShellVerb.name: ShellVerb(),
+        JobsVerb.name: JobsVerb(),
         SendVerb.name: SendVerb(),
         KillVerb.name: KillVerb(),
         FinishVerb.name: FinishVerb(),
@@ -94,6 +98,6 @@ CHILD_VERBS: dict[str, Verb] = dict(VERBS)
 ROOT_VERBS: dict[str, Verb] = {name: verb for name, verb in VERBS.items() if name != "finish"}
 
 
-def verb_definitions(verbs: dict[str, Verb]) -> list[VerbDefinition]:
+def verb_definitions(verbs: dict[str, Verb], settings: Settings) -> list[VerbDefinition]:
     """The verb protocol handed to the model: exactly `verbs`."""
-    return [verb.definition() for verb in verbs.values()]
+    return [verb.definition(settings) for verb in verbs.values()]

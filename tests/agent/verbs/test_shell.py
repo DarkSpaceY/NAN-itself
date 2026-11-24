@@ -178,14 +178,39 @@ async def test_background_must_be_a_boolean(tmp_path: Path, no_sink: Any, value:
     assert result.text == "'background' must be a boolean."
 
 
-async def test_a_timeout_keeps_the_output_so_far(tmp_path: Path, no_sink: Any) -> None:
+async def test_a_command_that_outlives_the_window_becomes_a_job(
+    tmp_path: Path, no_sink: Any
+) -> None:
     root = make_agent(tmp_path=tmp_path, agent={"shell_timeout": 0.5})
 
-    result = await _shell(root, "echo before; sleep 30")
+    try:
+        result = await _shell(root, "echo before; sleep 30")
 
-    assert result.detail == {"timed_out": True}
-    assert "before" in result.text
-    assert "Timed out after 0.5s" in result.text
+        assert result.detail["job_id"] == "j1"
+        assert result.detail["promoted"] is True
+        assert "Still running after 0.5s" in result.text
+
+        log = tmp_path / "workspace" / ".nan" / "jobs" / root.agent_id / "j1.log"
+
+        for _ in range(20):
+            if "before" in log.read_text():
+                break
+
+            await asyncio.sleep(0.05)
+
+        assert "before" in log.read_text()
+
+    finally:
+        await root.jobs.stop_all()
+
+
+async def test_a_finished_command_leaves_no_job(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    result = await _shell(root, "echo hi")
+
+    assert "job_id" not in result.detail
+    assert root.jobs.all == []
 
 
 async def test_background_returns_a_job_and_its_log(tmp_path: Path, no_sink: Any) -> None:
@@ -226,7 +251,7 @@ async def test_a_background_command_that_exits_at_once_reports_the_exit(
 
     result = await _shell(root, "echo boom; exit 3", background=True)
 
-    assert result.detail == {"exit_code": 3, "timed_out": False}
+    assert result.detail == {"exit_code": 3}
     assert "exited immediately" in result.text
     assert "boom" in result.text
 

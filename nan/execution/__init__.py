@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .jobs import Job, JobRegistry, kill_group, start_pump
+from .jobs import Job, JobRegistry, kill_group, read_output, read_slice, start_pump
 from .sandbox import Sandbox, SandboxUnavailableError
 
 __all__ = [
@@ -11,5 +11,7 @@ __all__ = [
     "Sandbox",
     "SandboxUnavailableError",
     "kill_group",
+    "read_output",
+    "read_slice",
     "start_pump",
 ]

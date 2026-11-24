@@ -7,12 +7,13 @@ from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
+    from nan.config.models import Settings
 
 
 class KillVerb(Verb):
     name = "kill"
 
-    def definition(self) -> VerbDefinition:
+    def definition(self, _settings: Settings) -> VerbDefinition:
         return VerbDefinition(
             name=self.name,
             description=(

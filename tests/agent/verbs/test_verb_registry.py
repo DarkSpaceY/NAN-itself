@@ -4,8 +4,9 @@ protocol handed to the model."""
 from __future__ import annotations
 
 from nan.agent.verbs import CHILD_VERBS, ROOT_VERBS, VERBS, format_shell_output, verb_definitions
+from nan.config.models import AgentSettings, Settings
 
-EXPECTED = {"spawn", "sleep", "shell", "send", "kill", "finish"}
+EXPECTED = {"spawn", "sleep", "shell", "jobs", "send", "kill", "finish"}
 
 
 def test_the_registry_is_the_whole_verb_set() -> None:
@@ -18,17 +19,31 @@ def test_the_root_cannot_finish() -> None:
 
 
 def test_verb_definitions_mirror_the_set() -> None:
-    definitions = verb_definitions(ROOT_VERBS)
+    definitions = verb_definitions(ROOT_VERBS, Settings())
 
     assert [definition.name for definition in definitions] == list(ROOT_VERBS)
     assert all(definition.input_schema["type"] == "object" for definition in definitions)
 
 
 def test_verb_definitions_are_the_verb_contracts() -> None:
-    spawn = verb_definitions(ROOT_VERBS)[list(ROOT_VERBS).index("spawn")]
+    spawn = verb_definitions(ROOT_VERBS, Settings())[list(ROOT_VERBS).index("spawn")]
 
     assert spawn.input_schema["required"] == ["task"]
     assert spawn.input_schema["additionalProperties"] is False
+
+
+def test_the_shell_description_carries_the_settings() -> None:
+    settings = Settings(agent=AgentSettings(shell_timeout=7, shell_output_limit=1234))
+
+    shell = next(
+        definition
+        for definition in verb_definitions(ROOT_VERBS, settings)
+        if definition.name == "shell"
+    )
+
+    assert "7s" in shell.description
+    assert "1,234" in shell.description
+    assert "'jobs' verb" in shell.description
 
 
 def test_format_shell_output_keeps_the_longs_head_and_tail() -> None:

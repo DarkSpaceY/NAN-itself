@@ -5,27 +5,24 @@ import contextlib
 import fcntl
 import os
 import pty
-import signal
 import termios
 import tty
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from nan.agent.verbs import Verb, VerbOutcome, format_shell_output
-from nan.execution import Job, kill_group, start_pump
+from nan.agent.verbs import Verb, VerbOutcome
+from nan.config.models import Settings
+from nan.execution import Job, read_output, start_pump
 from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
     from nan.agent.core import Agent
 
-# How long a background command gets to prove it started before the
-# call reports "started" or its immediate exit. A pty spawn plus shell
-# startup costs ~50-120ms on a loaded machine, so the window needs
-# headroom over that or a fast exit is reported as a running job.
+# How long a command gets to prove it finished before the call hands
+# it to the background (or reports an immediate exit for an explicit
+# background start). A pty spawn plus shell startup costs ~50-120ms on
+# a loaded machine, so the window needs headroom over that.
 _BACKGROUND_GRACE = 0.3
-
-# How long a cancelled command gets between SIGTERM and SIGKILL.
-_CANCEL_GRACE = 1.0
 
 
 def _own_terminal() -> None:
@@ -36,22 +33,29 @@ def _own_terminal() -> None:
 class ShellVerb(Verb):
     name = "shell"
 
-    def definition(self) -> VerbDefinition:
+    def definition(self, settings: Settings) -> VerbDefinition:
+        wait = f"{settings.agent.shell_timeout:g}s"
+        limit = f"{settings.agent.shell_output_limit:,}"
+
         return VerbDefinition(
             name=self.name,
             description=(
                 "Run a bash command in your workspace. Its cwd is the "
                 "workspace root unless you pass 'cwd' (relative to the "
                 "root and it must stay inside it; prefer 'cwd' over a "
-                "leading 'cd'). Commands are non-interactive and have a "
-                "fixed timeout set by the user, so a genuinely long task "
-                "must pass background=true: the call then returns a job "
-                "id, pid and log path at once, and later shell calls poll "
-                "the log. Output is truncated (head and tail kept). "
-                "Prefer chaining shell commands together to reduce the "
-                "number of calls. For commands expected to produce long "
-                "output that cannot be re-run, write the output to a file "
-                "and read it back with grep/head."
+                "leading 'cd').\n"
+                f"Commands are non-interactive. A command that finishes "
+                f"within {wait} returns its output and exit code directly. "
+                f"A command still running after {wait} keeps going as a "
+                "background job: the call returns its job id and log path, "
+                "and the 'jobs' verb can list it, read new output, wait for "
+                "it or stop it. Pass background=true when you know the "
+                "command should outlive the call -- for example a server or "
+                "debugger you keep open and inspect across several steps.\n"
+                f"Output is truncated to {limit} characters (head and tail "
+                "kept), so write long output to a file and read it back with "
+                "grep/head. Prefer chaining shell commands together to "
+                "reduce the number of calls."
             ),
             input_schema={
                 "type": "object",
@@ -78,8 +82,8 @@ class ShellVerb(Verb):
                     "background": {
                         "type": "boolean",
                         "description": (
-                            "Start the command in the background and return "
-                            "immediately with its job id, pid and log path."
+                            "Return at once with a job id instead of waiting. "
+                            "Use it for servers and debuggers you keep open."
                         ),
                     },
                 },
@@ -136,210 +140,164 @@ class ShellVerb(Verb):
         # Execution-level sandbox: the command the model wrote is
         # wrapped by the sandbox profile. wrap() may raise when
         # required but unavailable.
-        command = agent.sandbox.wrap(command)
+        wrapped = agent.sandbox.wrap(command)
 
-        if background:
-            return await self._background(agent, command, cwd, env)
-
-        return await self._foreground(agent, command, cwd, env, stdin)
-
-    async def _foreground(
-        self,
-        agent: Agent,
-        command: str,
-        cwd: Path,
-        env: dict[str, str] | None,
-        stdin: str | None,
-    ) -> VerbOutcome:
-        """Run the command and wait; the fixed timeout is the user's."""
         timeout = agent.settings.agent.shell_timeout
-        limit = agent.settings.agent.shell_output_limit
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                cwd=str(cwd),
-                env=env,
-                stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                # Own session: the whole tree can be signalled.
-                start_new_session=True,
-            )
+            job = await _start_job(agent, wrapped, command, cwd, env, stdin)
+        except Exception as exc:
+            return VerbOutcome(f"{type(exc).__name__}: {exc}")
 
-            collector = _Collector()
-            reader = asyncio.create_task(collector.pump(proc.stdout))
-            waited = asyncio.create_task(proc.wait())
-            feeder = (
-                asyncio.create_task(_feed(proc.stdin, stdin))
-                if stdin is not None and proc.stdin is not None
-                else None
-            )
-
+        if background:
             try:
-                # EOF is the end of the command: its exit closes the
-                # pipe. A leftover child still holding it counts as
-                # overrunning the timeout.
-                await asyncio.wait_for(reader, timeout=timeout)
-
-                await waited
-
-                if feeder is not None:
-                    await feeder
-
-            except TimeoutError:
-                kill_group(proc.pid, signal.SIGKILL)
-
-                await waited
-
-                if feeder is not None:
-                    feeder.cancel()
-
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await feeder
-
-                # The output read so far survives the cancelled reader.
-                return VerbOutcome(
-                    f"{format_shell_output(collector.text, proc.returncode, limit)}\n\n"
-                    f"Timed out after {timeout:g}s (command killed).",
-                    {"timed_out": True},
-                )
-
-            except asyncio.CancelledError:
-                # Pause/death cancellation kills the child's
-                # process tree.
-                kill_group(proc.pid, signal.SIGTERM)
-
+                # A command that dies at once (a typo, a missing
+                # binary) must say so, not pretend it started.
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(waited, timeout=_CANCEL_GRACE)
-
-                if proc.returncode is None:
-                    kill_group(proc.pid, signal.SIGKILL)
-
-                for task in (reader, feeder):
-                    if task is not None:
-                        task.cancel()
+                    await asyncio.wait_for(job.proc.wait(), timeout=_BACKGROUND_GRACE)
+            except asyncio.CancelledError:
+                # A cancelled start has no id to report; leaving it
+                # alive would be a job nobody can poll or stop.
+                await agent.jobs.stop(job.job_id)
 
                 raise
 
-        except Exception as exc:
-            return VerbOutcome(f"{type(exc).__name__}: {exc}")
+            if not job.running:
+                return await _completed(agent, job, immediate=True)
 
-        text = format_shell_output(collector.text, proc.returncode, limit)
-
-        return VerbOutcome(text, {"exit_code": proc.returncode, "timed_out": False})
-
-    async def _background(
-        self,
-        agent: Agent,
-        command: str,
-        cwd: Path,
-        env: dict[str, str] | None,
-    ) -> VerbOutcome:
-        """
-        Start the command without waiting. It runs on its own pty,
-        which the core keeps open: an ungraceful core death hangs up
-        the job's session. Output is pumped into a log the model
-        polls; the job is registered so death and shutdown can kill
-        it.
-        """
-        workspace = agent.settings.paths.workspace
-        jobs_dir = workspace / ".nan" / "jobs" / agent.agent_id
-
-        job_id = agent.jobs.new_id()
-        log_path = jobs_dir / f"{job_id}.log"
-
-        job: Job | None = None
-        master = -1
-        slave = -1
+            return _job_outcome(agent, job, promoted=False)
 
         try:
-            jobs_dir.mkdir(parents=True, exist_ok=True)
-
-            # Raw mode: no echo and no CR translation, so the log
-            # holds exactly what the command wrote.
-            master, slave = pty.openpty()
-            tty.setraw(slave)
-
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                cwd=str(cwd),
-                env=env,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=slave,
-                stderr=slave,
-                start_new_session=True,
-                preexec_fn=_own_terminal,
-            )
-
-            os.close(slave)
-            slave = -1
-
-            job = Job(
-                job_id=job_id,
-                proc=proc,
-                pgid=proc.pid,
-                log_path=log_path,
-                master=master,
-                pump=start_pump(master, log_path),
-            )
-            master = -1
-
-            # Registered before the grace: every cancellation point
-            # from here on has a job that stop_all can kill.
-            agent.jobs.add(job)
-
-            # A command that dies at once (a typo, a missing
-            # binary) must say so, not pretend it started.
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(proc.wait(), timeout=_BACKGROUND_GRACE)
-
-            if proc.returncode is not None:
-                # The pty may still hold the final output.
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(job.pump), timeout=_BACKGROUND_GRACE)
-
-                output = _read_log(log_path)
-                limit = agent.settings.agent.shell_output_limit
-
-                agent.jobs.discard(job_id)
-
-                return VerbOutcome(
-                    "The command exited immediately.\n"
-                    f"{format_shell_output(output, proc.returncode, limit)}",
-                    {"exit_code": proc.returncode, "timed_out": False},
-                )
-
+                await asyncio.wait_for(job.proc.wait(), timeout=timeout)
         except asyncio.CancelledError:
-            # A cancelled start has no id to report; leaving it alive
-            # would be a job nobody can poll or stop.
-            if job is not None:
-                await agent.jobs.stop(job_id)
-
+            # A job belongs to the agent: a cancelled turn leaves it
+            # running, exactly like an explicit background start.
             raise
 
-        except Exception as exc:
-            if job is not None:
-                await agent.jobs.stop(job_id)
+        if not job.running:
+            return await _completed(agent, job, immediate=False)
 
-            return VerbOutcome(f"{type(exc).__name__}: {exc}")
+        return _job_outcome(agent, job, promoted=True, waited=timeout)
 
-        finally:
-            if slave >= 0:
-                os.close(slave)
 
-            if master >= 0:
-                os.close(master)
+async def _start_job(
+    agent: Agent,
+    command: str,
+    display: str,
+    cwd: Path,
+    env: dict[str, str] | None,
+    stdin: str | None,
+) -> Job:
+    """
+    Start the command on its own pty. The core keeps the master open:
+    an ungraceful core death hangs up the job's session, and the pump
+    copies the pty into the log.
+    """
+    workspace = agent.settings.paths.workspace
+    jobs_dir = workspace / ".nan" / "jobs" / agent.agent_id
 
-        relative = log_path.relative_to(workspace)
+    job_id = agent.jobs.new_id()
+    log_path = jobs_dir / f"{job_id}.log"
 
-        return VerbOutcome(
-            f"Started {job_id} (pid {proc.pid}, pgid {proc.pid}). "
-            f"Log: {relative}\n"
-            f"Poll the log with a later shell call; stop it with "
-            f"kill -TERM -- -{proc.pid}.",
-            {"job_id": job_id, "pid": proc.pid, "pgid": proc.pid},
+    job: Job | None = None
+    master = -1
+    slave = -1
+
+    try:
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Raw mode: no echo and no CR translation, so the log holds
+        # exactly what the command wrote.
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(cwd),
+            env=env,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+            stdout=slave,
+            stderr=slave,
+            start_new_session=True,
+            preexec_fn=_own_terminal,
         )
+
+        os.close(slave)
+        slave = -1
+
+        job = Job(
+            job_id=job_id,
+            proc=proc,
+            pgid=proc.pid,
+            log_path=log_path,
+            master=master,
+            pump=start_pump(master, log_path),
+            command=display,
+        )
+        master = -1
+
+        # Registered before any await: every cancellation point from
+        # here on has a job that stop_all can kill.
+        agent.jobs.add(job)
+
+        if stdin is not None and proc.stdin is not None:
+            await _feed(proc.stdin, stdin)
+
+        return job
+
+    except BaseException:
+        if job is not None:
+            await agent.jobs.stop(job_id)
+
+        raise
+
+    finally:
+        if slave >= 0:
+            os.close(slave)
+
+        if master >= 0:
+            os.close(master)
+
+
+async def _completed(agent: Agent, job: Job, *, immediate: bool) -> VerbOutcome:
+    """The command exited within the window; hand back its output."""
+    limit = agent.settings.agent.shell_output_limit
+
+    # The pty may still hold the final output; drain it with a bound.
+    if not job.pump.done():
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(job.pump), timeout=_BACKGROUND_GRACE)
+
+    output = read_output(job.log_path, limit)
+    code = job.proc.returncode
+
+    agent.jobs.discard(job.job_id)
+
+    prefix = "The command exited immediately.\n" if immediate else ""
+
+    return VerbOutcome(f"{prefix}exit code: {code}\n{output}", {"exit_code": code})
+
+
+def _job_outcome(
+    agent: Agent, job: Job, *, promoted: bool, waited: float | None = None
+) -> VerbOutcome:
+    """The command is still running; hand back its job."""
+    relative = job.log_path.relative_to(agent.settings.paths.workspace)
+
+    if promoted:
+        intro = (
+            f"Still running after {waited:g}s; it continues as job {job.job_id} in the background. "
+        )
+    else:
+        intro = f"Started {job.job_id}. "
+
+    return VerbOutcome(
+        f"{intro}pid {job.proc.pid}, pgid {job.pgid}. Log: {relative}\n"
+        f"Use the 'jobs' verb to work with it: list, logs {job.job_id}, "
+        f"wait {job.job_id}, stop {job.job_id}.",
+        {"job_id": job.job_id, "pid": job.proc.pid, "pgid": job.pgid, "promoted": promoted},
+    )
 
 
 # ----------------------------------------------------------------------
@@ -377,11 +335,13 @@ def _environment(
     value: Any, agent_id: str, workspace: Path
 ) -> tuple[dict[str, str] | None, str | None]:
     """
-    The command's environment: the inherited one, then the model's
-    overlay, then the core's identity last so a command cannot
-    impersonate another agent. `<workspace>/bin` trails PATH: tools
-    there are callable by bare name, but can never shadow a system
-    command (the model can write into the workspace).
+    The command's environment: the inherited one, then a quiet
+    terminal (the pty would otherwise invite colors and progress
+    bars into the log), then the model's overlay, then the core's
+    identity last so a command cannot impersonate another agent.
+    `<workspace>/bin` trails PATH: tools there are callable by bare
+    name, but can never shadow a system command (the model can write
+    into the workspace).
     """
     if value is not None and (
         not isinstance(value, dict)
@@ -390,7 +350,14 @@ def _environment(
         return None, "'env' must be an object of string values."
 
     overlay = value if isinstance(value, dict) else {}
-    env = {**os.environ, **overlay, "NAN_AGENT_ID": agent_id}
+    env = {
+        **os.environ,
+        "TERM": "dumb",
+        "NO_COLOR": "1",
+        "CLICOLOR": "0",
+        **overlay,
+        "NAN_AGENT_ID": agent_id,
+    }
 
     tools = workspace / "bin"
 
@@ -398,35 +365,6 @@ def _environment(
         env["PATH"] = f"{env.get('PATH', '')}{os.pathsep}{tools}"
 
     return env, None
-
-
-# ----------------------------------------------------------------------
-# Output
-# ----------------------------------------------------------------------
-
-
-class _Collector:
-    """Output read so far; it survives the reader being cancelled."""
-
-    def __init__(self) -> None:
-        self._chunks: list[bytes] = []
-
-    async def pump(self, stream: asyncio.StreamReader | None) -> None:
-        """Drain a pipe to EOF; a kill ends it like a normal exit."""
-        if stream is None:
-            return
-
-        while True:
-            chunk = await stream.read(65536)
-
-            if not chunk:
-                return
-
-            self._chunks.append(chunk)
-
-    @property
-    def text(self) -> str:
-        return b"".join(self._chunks).decode("utf-8", errors="replace")
 
 
 async def _feed(stream: asyncio.StreamWriter, text: str) -> None:
@@ -437,10 +375,3 @@ async def _feed(stream: asyncio.StreamWriter, text: str) -> None:
         await stream.drain()
 
     stream.close()
-
-
-def _read_log(path: Path) -> str:
-    with contextlib.suppress(OSError):
-        return path.read_bytes().decode("utf-8", errors="replace")
-
-    return ""
