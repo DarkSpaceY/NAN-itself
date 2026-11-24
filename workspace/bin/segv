@@ -1,0 +1,4 @@
+#!/bin/zsh
+# Workspace tools. NAN's shell verb puts this directory on PATH, so an
+# agent can run `segv ...` by bare name.
+exec "$(dirname "$0")/../services/segv/bin/segv" "$@"

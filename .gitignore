@@ -29,11 +29,15 @@ config/nan.yaml
 logs/
 turns/
 cache/
+# segv's cache/ is source code, not runtime state
+!workspace/services/segv/segv/cache/
 # record's derived Fact index (rebuildable from turns/)
 builtin/services/record/fact/
 snapshots/
 # RocksDB renames a store to turns.<reason>-<timestamp>/ when it fails to open.
 turns.*/
+# segv service runtime state (the RocksDB archive itself)
+workspace/services/segv/data/
 *.log
 *.log.*
 workspace/*.pid

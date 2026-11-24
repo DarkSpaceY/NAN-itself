@@ -1,0 +1,38 @@
+[project]
+name = "nan-segv-service"
+version = "0.1.0"
+description = "SEGV memory service: turn archive (L0), fact/cache/exp layers"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "nan-service-kit",
+    "numpy>=2.0",
+    "rocksdict>=0.3.25",
+    "torch>=2.15",
+    "transformers>=5.23",
+    "usearch>=2.23",
+    "uvicorn>=0.30.0",
+    "zstandard>=0.23.0",
+]
+
+[project.scripts]
+segv = "segv.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name = "segv"
+module-root = ""
+
+[tool.uv.sources]
+nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8.3.0", "httpx>=0.28.1"]

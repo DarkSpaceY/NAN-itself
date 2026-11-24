@@ -59,6 +59,9 @@ class ServiceConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int
     mode: Mode = "inject"
+    # The path the hub posts to. A process that registers twice (an
+    # injector and an archiver) keeps them apart here.
+    path: str = "turn"
     # The read budget for one inject delivery, in seconds. None
     # keeps the hub's global default; archive may not declare it.
     timeout: float | None = Field(default=None, ge=0.1, le=600)
@@ -82,7 +85,7 @@ class ServiceConfig(BaseModel):
     @property
     def endpoint(self) -> str:
         """The URL the hub calls for a turn."""
-        return f"http://{self.host}:{self.port}/turn"
+        return f"http://{self.host}:{self.port}/{self.path.strip('/')}"
 
 
 def read_config[ConfigT: ServiceConfig](model: type[ConfigT], path: Path) -> ConfigT:

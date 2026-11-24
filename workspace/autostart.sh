@@ -65,3 +65,4 @@ launch() {
 launch "$NAN_WORKSPACE/services/system"
 launch "$NAN_WORKSPACE/services/network"
 launch "$NAN_WORKSPACE/services/mcp"
+launch "$NAN_WORKSPACE/services/segv"

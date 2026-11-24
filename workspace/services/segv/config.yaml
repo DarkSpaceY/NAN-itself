@@ -1,0 +1,94 @@
+# SEGV memory service. Loaded from this file's directory.
+#
+# L0 (archive) is the only durable layer here; fact / cache / exp are
+# derived and rebuildable. The process holds two hub registrations:
+# `segv-archive` observes completed turns, `segv` injects memory (all
+# injection blocks are stripped from chunks, so none of it feeds back).
+
+service_id: "segv"
+host: "127.0.0.1"
+port: 9004
+mode: "archive"
+archive_id: "segv-archive"  # mode archive, POST /turn
+inject_id: "segv"           # mode inject, POST /inject
+timeout: 8.0                # inject budget; the hub global is 2s
+
+surface:                    # the trace UI, served by this service
+  title: "SEGV"
+  every: 10.0               # seconds between panel refreshes (gateway TTL 30s)
+
+data_dir: "data"            # RocksDB home, relative to this directory
+
+max_bytes: 4294967296       # L0 budget: 4 GiB rolling, oldest turns pruned first
+prune_to: 0.95              # retention deletes down to this fraction of max_bytes
+
+ledger_limit: 300           # rows per page of the global time order
+activity_buckets: 1200      # cap on histogram buckets (the UI sends its width)
+
+fact:                       # segv-fact: chunks + two int8 vectors + BM25/HNSW
+  enabled: true
+  data_dir: "fact"          # <L0 data dir>/fact; delete it to rebuild
+  hnsw_connectivity: 16
+
+  slm:                      # cue sentences, OpenAI-compatible chat API
+    model: "qwen3.5:4b-mlx"
+    base_url: "http://127.0.0.1:11434/v1"
+    temperature: 0.0
+    seed: 42
+    max_tokens: 220
+    timeout: 300.0
+    attempts: 4
+    reasoning_effort: "none" # Ollama maps this to think=false
+
+  embed:                    # embeddinggemma, OpenAI-compatible embeddings API
+    model: "embeddinggemma:300m"
+    base_url: "http://127.0.0.1:11434/v1"
+    dim: 768
+    batch_size: 32
+    timeout: 600.0
+    attempts: 4
+    doc_prefix: "title: none | text: "
+    query_prefix: "task: search result | query: "
+
+  rerank:                   # BAAI/bge-reranker-base, in-process torch fp16
+    enabled: true
+    model: "BAAI/bge-reranker-base"
+    device: "auto"
+    fp16: true
+    batch_size: 16
+    max_length: 512
+    candidates: 100         # must not exceed fusion.pool
+    weight: 0.75
+
+  chunk:
+    max_chars: 512         # Chinese chunks stay inside the CE's 512-token window
+    ctx_chars: 256
+    include_tool_calls: true
+
+  cue:
+    ctx_chars: 256
+    workers: 2
+    fallback_on_error: true
+
+cache:                      # segv-cache: rolling snapshot over fact cues
+  enabled: true
+  data_dir: "cache"         # <L0 data dir>/cache; separate RocksDB
+  trigger: 5                # pending chunks that force a rewrite
+  batch_cues: 10            # pending chunks per rewrite; raw input stays bounded
+  raw_chars: 4000           # verbatim source text per rewrite
+  tail_cues: 20             # epoch-boundary tail caps
+  tail_chars: 2000
+  recall_k: 3               # fact cues injected each step
+  recall_pool: 200          # fixed pool; never expanded
+  max_items: 50             # cap per snapshot list
+  min_retention: 0.5        # a rewrite keeping less is a bad parse
+
+  slm:                      # rewrite calls; independent of the cue model
+    model: "qwen3.5:4b-mlx"
+    base_url: "http://127.0.0.1:11434/v1"
+    temperature: 0.0
+    seed: 42
+    max_tokens: 2048
+    timeout: 600.0
+    attempts: 4
+    reasoning_effort: "none"
