@@ -13,6 +13,7 @@ restores from it.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import os
@@ -51,9 +52,10 @@ class CoreState(Enum):
 class Core:
     """Owns the lifecycle and the wired components."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, open_browser: bool = True) -> None:
         self._state = CoreState.INIT
         self._boot_id = uuid.uuid4().hex[:12]
+        self._open_browser = open_browser
         self._stop: asyncio.Event | None = None
 
         self._settings: Settings | None = None
@@ -152,7 +154,7 @@ class Core:
             self._root.start()
 
         self._gateway_task = asyncio.create_task(
-            self._gateway.serve(open_browser=True),
+            self._gateway.serve(open_browser=self._open_browser),
             name="gateway",
         )
 
@@ -433,10 +435,18 @@ class Core:
         self._autostart.start()
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="nan", description="Run the NAN core.")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="do not open a browser window; the desktop shell loads the gateway itself",
+    )
+    args = parser.parse_args(argv)
+
     with contextlib.suppress(KeyboardInterrupt):
         try:
-            asyncio.run(Core().run())
+            asyncio.run(Core(open_browser=not args.no_browser).run())
 
         except PortUnavailableError as error:
             # Startup refusals (occupied ports, unusable address) are
