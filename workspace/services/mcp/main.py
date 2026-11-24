@@ -318,15 +318,23 @@ class MCPService:
         """
         The tool table is not re-sent every turn: the CLI is the
         interface and its --help carries the same information. The
-        pointer is injected when the context that held it is gone.
+        pointer and the category list are injected when the context
+        that held them is gone.
         """
         if turn.get("origin") not in ("first", "context_cleared"):
             return ""
 
-        return (
+        text = (
             f"External MCP tool servers are reachable through `{HERE}/mcp.sh`; "
             "run it with `--help` for list, schema and call."
         )
+
+        names = sorted({spec.name for spec in self.specs})
+
+        if names:
+            text += f" Categories: {', '.join(names)}."
+
+        return text
 
 
 def build_app(service: MCPService) -> FastAPI:

@@ -1,7 +1,7 @@
 """
-Config and API tests. No MCP server is started: the catalog is empty,
-so the contribution is silent and the HTTP surface answers without
-spawning npx or uvx.
+Config and API tests. No MCP server is started: the contribution
+carries the configured categories and the HTTP surface answers
+without spawning npx or uvx.
 """
 
 from __future__ import annotations
@@ -37,6 +37,28 @@ def test_contribution_returns_at_context_starts():
     assert "mcp.sh" in pointer
     assert service.contribution({"origin": "context_cleared"}) == pointer
     assert service.contribution({"origin": "normal"}) == ""
+
+
+def test_contribution_lists_the_configured_categories():
+    service = MCPService(load_config())
+
+    pointer = service.contribution({"origin": "first"})
+
+    names = sorted({spec.name for spec in service.specs})
+
+    assert names
+    assert f"Categories: {', '.join(names)}." in pointer
+
+
+def test_contribution_omits_categories_when_nothing_is_configured():
+    service = MCPService(load_config())
+
+    service.specs = []
+
+    pointer = service.contribution({"origin": "first"})
+
+    assert "mcp.sh" in pointer
+    assert "Categories" not in pointer
 
 
 def test_http_surface_without_servers():
