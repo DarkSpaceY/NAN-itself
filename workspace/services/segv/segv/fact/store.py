@@ -562,8 +562,8 @@ class FactStore:
 
             return meta, raw_vec, event_vec
 
-        except Exception:
-            logger.warning("segv-fact chunk unreadable")
+        except Exception as exc:
+            logger.warning("segv-fact chunk unreadable: {}", exc)
 
             return None
 
