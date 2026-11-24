@@ -75,6 +75,13 @@ repos:
         pass_filenames: false
         files: ^workspace/services/mcp/
 
+      - id: pytest-segv
+        name: pytest (segv service)
+        entry: uv run --directory workspace/services/segv --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/segv/
+
       - id: pytest-service-kit
         name: pytest (service kit)
         entry: uv run --directory lib/nan-service-kit --frozen pytest -q
