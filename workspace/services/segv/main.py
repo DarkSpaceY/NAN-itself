@@ -54,6 +54,7 @@ def main() -> None:
         host=config.host,
         port=config.port,
         log_level="warning",
+        timeout_graceful_shutdown=1,
     )
 
 
