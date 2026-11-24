@@ -101,7 +101,9 @@ class ShellVerb(Verb):
         if error is not None:
             return VerbOutcome(error)
 
-        env, error = _environment(arguments.get("env"))
+        env, error = _environment(
+            arguments.get("env"), agent.agent_id, agent.settings.paths.workspace
+        )
 
         if error is not None:
             return VerbOutcome(error)
@@ -371,20 +373,31 @@ def _cwd(agent: Agent, value: Any) -> tuple[Path, str | None]:
     return resolved, None
 
 
-def _environment(value: Any) -> tuple[dict[str, str] | None, str | None]:
+def _environment(
+    value: Any, agent_id: str, workspace: Path
+) -> tuple[dict[str, str] | None, str | None]:
     """
-    The command's environment: the inherited one plus the model's
-    overlay. None means "inherit untouched".
+    The command's environment: the inherited one, then the model's
+    overlay, then the core's identity last so a command cannot
+    impersonate another agent. `<workspace>/bin` trails PATH: tools
+    there are callable by bare name, but can never shadow a system
+    command (the model can write into the workspace).
     """
-    if value is None:
-        return None, None
-
-    if not isinstance(value, dict) or not all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    if value is not None and (
+        not isinstance(value, dict)
+        or not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items())
     ):
         return None, "'env' must be an object of string values."
 
-    return {**os.environ, **value}, None
+    overlay = value if isinstance(value, dict) else {}
+    env = {**os.environ, **overlay, "NAN_AGENT_ID": agent_id}
+
+    tools = workspace / "bin"
+
+    if tools.is_dir():
+        env["PATH"] = f"{env.get('PATH', '')}{os.pathsep}{tools}"
+
+    return env, None
 
 
 # ----------------------------------------------------------------------

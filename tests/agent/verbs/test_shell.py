@@ -92,6 +92,57 @@ async def test_env_is_merged_into_the_inherited_environment(tmp_path: Path, no_s
     assert "value=hello" in result.text
 
 
+async def test_commands_carry_the_agent_identity(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    result = await _shell(root, 'echo "agent=$NAN_AGENT_ID"')
+
+    assert f"agent={root.agent_id}" in result.text
+
+
+async def test_workspace_bin_leads_the_path(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    tools = tmp_path / "workspace" / "bin"
+
+    tools.mkdir()
+
+    script = tools / "hello-tool"
+
+    script.write_text("#!/bin/sh\necho hello-from-tool\n")
+    script.chmod(0o755)
+
+    result = await _shell(root, "hello-tool")
+
+    assert "hello-from-tool" in result.text
+
+
+async def test_the_model_cannot_shadow_workspace_bin(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    tools = tmp_path / "workspace" / "bin"
+
+    tools.mkdir()
+
+    script = tools / "echo"
+
+    script.write_text("#!/bin/sh\necho shadowed\n")
+    script.chmod(0o755)
+
+    result = await _shell(root, "echo real")
+
+    assert "real" in result.text
+    assert "shadowed" not in result.text
+
+
+async def test_the_model_cannot_override_the_agent_identity(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    result = await _shell(root, 'echo "agent=$NAN_AGENT_ID"', env={"NAN_AGENT_ID": "spoofed"})
+
+    assert f"agent={root.agent_id}" in result.text
+
+
 async def test_stdin_is_fed_once(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 
