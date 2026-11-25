@@ -72,6 +72,47 @@ def test_redelivery_is_idempotent(tmp_path: Path) -> None:
     store.close()
 
 
+def test_grep_scans_raw_turns_newest_first(tmp_path: Path) -> None:
+    store = Store(tmp_path / "db")
+
+    store.append(payload(ts=100.0, reply="first mention of sydney"))
+    store.append(payload(ts=200.0, reply="unrelated middle turn"))
+    store.append(payload(ts=300.0, reply="second SYDNEY note"))
+
+    result = store.grep("a1", "sydney")
+
+    assert [hit["seq"] for hit in result["hits"]] == [2, 0]
+    assert result["scanned"] == 3
+    assert "sydney" in result["hits"][0]["snippet"].lower()
+
+    limited = store.grep("a1", "sydney", limit=1)
+
+    assert [hit["seq"] for hit in limited["hits"]] == [2]
+
+    older = store.grep("a1", "sydney", before=2)
+
+    assert [hit["seq"] for hit in older["hits"]] == [0]
+
+    assert store.grep("a1", "missing-needle")["hits"] == []
+    assert store.grep("nobody", "x")["hits"] == []
+
+    # A zero budget still examines one turn, then stops and reports how
+    # to resume.
+    cut = store.grep("a1", "sydney", timeout=0.0)
+
+    assert cut["truncated"] is True
+    assert cut["scanned"] == 1
+    assert cut["next_before"] == 2
+
+    resumed = store.grep("a1", "sydney", before=cut["next_before"], timeout=5.0)
+
+    assert [hit["seq"] for hit in resumed["hits"]] == [0]
+    assert resumed["truncated"] is False
+    assert resumed["next_before"] is None
+
+    store.close()
+
+
 def test_agent_meta_tracks_epochs(tmp_path: Path) -> None:
     store = Store(tmp_path / "db")
 

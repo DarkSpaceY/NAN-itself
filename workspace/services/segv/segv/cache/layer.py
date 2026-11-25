@@ -21,7 +21,7 @@ from ..fact.layer import FactLayer
 from ..fact.slm import Slm
 from ..store import Store
 from .config import CacheConfig
-from .prompts import GUIDE, rewrite_prompt
+from .prompts import GUIDE, STATUS_NEW, STATUS_WARMING, rewrite_prompt
 from .snapshot import Snapshot, SnapshotError, parse_snapshot
 from .store import CacheState, CacheStore
 
@@ -84,6 +84,78 @@ def _tail(
     out.reverse()
 
     return out
+
+
+def _status_notice(l0: Store, agent_id: str) -> str:
+    """Why the epoch-start memory block is absent: no history, or warming."""
+    try:
+        known = l0.meta(agent_id) is not None
+
+    except Exception:
+        # If L0 cannot be read, history may exist: warming is the safer claim.
+        known = True
+
+    return STATUS_WARMING if known else STATUS_NEW
+
+
+def _pointer_block(l0: Store, agent_id: str) -> str:
+    """Tell the model where the raw timeline ends so it can browse it."""
+    try:
+        meta = l0.meta(agent_id)
+
+    except Exception:
+        return ""
+
+    latest = int((meta or {}).get("next_seq") or 0) - 1
+
+    if latest < 0:
+        return ""
+
+    return (
+        f"<segv-pointer>latest archived turn is seq {latest}; read any turn "
+        "with segv turn <seq>, or scan raw history newest-first with "
+        'segv grep "text".</segv-pointer>'
+    )
+
+
+def _epoch_start(
+    l0: Store,
+    agent_id: str,
+    state: CacheState,
+    pending: list[CueRef],
+    config: CacheConfig,
+) -> tuple[list[str], list[CueRef], bool]:
+    """GUIDE plus the memory that exists; a status notice when none does."""
+    tail = _tail(pending, state.pointer, config.tail_cues, config.tail_chars)
+
+    snapshot_text = state.snapshot.render()
+
+    if not snapshot_text and not tail:
+        blocks = [GUIDE, _status_notice(l0, agent_id)]
+
+        pointer = _pointer_block(l0, agent_id)
+
+        if pointer:
+            blocks.append(pointer)
+
+        return blocks, [], False
+
+    blocks = [GUIDE]
+
+    if snapshot_text:
+        blocks.append(snapshot_text)
+
+    tail_text = render_refs("recent_cues", tail)
+
+    if tail_text:
+        blocks.append(tail_text)
+
+    pointer = _pointer_block(l0, agent_id)
+
+    if pointer:
+        blocks.append(pointer)
+
+    return blocks, tail, True
 
 
 class CacheLayer:
@@ -485,27 +557,21 @@ class CacheLayer:
             seen: set[tuple[int, int]] = set()
 
             if changed:
-                tail = _tail(
-                    pending,
-                    state.pointer,
-                    self.config.tail_cues,
-                    self.config.tail_chars,
+                epoch_blocks, tail, ready = _epoch_start(
+                    self.l0, agent_id, state, pending, self.config
                 )
-                # The guide opens every epoch (and init) so a freshly
-                # compacted context relearns what these blocks are.
-                blocks.append(GUIDE)
+                blocks.extend(epoch_blocks)
 
-                snapshot_text = state.snapshot.render()
+                seen |= {ref.key for ref in tail}
 
-                if snapshot_text:
-                    blocks.append(snapshot_text)
+                if ready:
+                    try:
+                        self.store.set_delivered(agent_id, True)
 
-                tail_text = render_refs("recent_cues", tail)
-
-                if tail_text:
-                    blocks.append(tail_text)
-
-                seen = {ref.key for ref in tail}
+                    except Exception:
+                        logger.exception(
+                            "segv-cache delivered write failed for {}", agent_id
+                        )
 
                 if pending:
                     self._enqueue(agent_id, True)
@@ -518,6 +584,29 @@ class CacheLayer:
                     logger.exception(
                         "segv-cache seen read failed for {}/{}", agent_id, epoch
                     )
+
+                if not state.delivered:
+                    # The epoch opened before memory was ready. Deliver the
+                    # epoch-start block on the first turn where it exists.
+                    epoch_blocks, tail, ready = _epoch_start(
+                        self.l0, agent_id, state, pending, self.config
+                    )
+
+                    if ready:
+                        blocks.extend(epoch_blocks)
+
+                        seen |= {ref.key for ref in tail}
+
+                        try:
+                            self.store.set_delivered(agent_id, True)
+
+                        except Exception:
+                            logger.exception(
+                                "segv-cache delivered write failed for {}", agent_id
+                            )
+
+                        if pending:
+                            self._enqueue(agent_id, True)
 
             recall = self._recall(agent_id, query, seen)
 

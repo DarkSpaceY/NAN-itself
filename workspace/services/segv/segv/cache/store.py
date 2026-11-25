@@ -45,6 +45,9 @@ class CacheState:
     # None: a rewrite has produced a snapshot but no turn has consumed it
     # yet, so the next inject still owes the full epoch-start block.
     last_epoch: int | None = None
+    # False until the epoch-start memory block has actually gone out; when
+    # the epoch opens before memory is ready, a later turn retries once.
+    delivered: bool = False
     version: int = 0
     updated_at: float = 0.0
 
@@ -57,6 +60,7 @@ class CacheState:
                 else None
             ),
             "last_epoch": self.last_epoch,
+            "delivered": self.delivered,
             "version": self.version,
             "updated_at": self.updated_at,
         }
@@ -74,6 +78,7 @@ class CacheState:
                 else None
             ),
             last_epoch=int(last_epoch) if last_epoch is not None else None,
+            delivered=bool(raw.get("delivered")),
             version=int(raw.get("version") or 0),
             updated_at=float(raw.get("updated_at") or 0.0),
         )
@@ -147,11 +152,25 @@ class CacheStore:
 
             if changed:
                 state.last_epoch = epoch
+                state.delivered = False
                 state.updated_at = time.time()
                 self._put_locked(agent_id, state)
                 self._clear_seen_locked(agent_id)
 
             return state, changed
+
+    def set_delivered(self, agent_id: str, delivered: bool) -> None:
+        """Record whether this epoch's memory block has gone out."""
+        with self._lock:
+            state = self._load_locked(agent_id)
+
+            if state is None or state.delivered == delivered:
+                return
+
+            state.delivered = delivered
+            state.updated_at = time.time()
+
+            self._put_locked(agent_id, state)
 
     def save_snapshot(
         self,

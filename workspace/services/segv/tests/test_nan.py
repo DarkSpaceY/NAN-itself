@@ -94,6 +94,17 @@ def test_inject_request_uses_the_inbox_text() -> None:
     assert (agent_id, epoch, query) == ("root", 2, "alpha\nbeta")
 
 
+def test_inject_request_keeps_head_and_tail_of_a_long_inbox() -> None:
+    long = "HEAD" + "x" * 3000 + "TAIL"
+
+    _, _, query = inject_request({"inbox": [{"text": long}]})
+
+    assert query.startswith("HEAD")
+    assert query.endswith("TAIL")
+    assert "[...]" in query
+    assert len(query) <= 2000
+
+
 def test_strip_injections_removes_every_service() -> None:
     content = (
         "<injection>\n<service id=\"segv\">\nmine\n</service>\n\n"

@@ -169,6 +169,51 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_grep(args: argparse.Namespace) -> int:
+    agent = _agent(args)
+    pattern = " ".join(args.pattern).strip()
+
+    if not pattern:
+        raise SystemExit("segv: empty pattern")
+
+    payload = _get(
+        args,
+        f"/api/agents/{urllib.parse.quote(agent, safe='')}/grep",
+        pattern=pattern,
+        limit=args.limit,
+        before=args.before,
+        timeout=args.scan_timeout,
+        context=args.context,
+    )
+    hits = payload.get("hits") or []
+
+    def render() -> str:
+        if not hits:
+            if payload.get("truncated"):
+                return (
+                    "no matches in the scanned window (budget reached; "
+                    f"continue with --before {payload['next_before']})"
+                )
+
+            return "no matches"
+
+        lines = [
+            f"[{hit['seq']}] {_clock(hit.get('started_at'))}  {hit['snippet']}"
+            for hit in hits
+        ]
+
+        if payload.get("truncated"):
+            lines.append(
+                f"(scan budget reached; continue with --before {payload['next_before']})"
+            )
+
+        return "\n".join(lines)
+
+    _emit(args, payload, render)
+
+    return 0
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     agent = _agent(args)
     payload = _get(args, "/api/cache/state", agent_id=agent)
@@ -355,6 +400,23 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--no-ce", action="store_true", help="skip the reranker")
     search.add_argument("--full", action="store_true", help="show the chunk text")
     search.set_defaults(handler=cmd_search)
+
+    grep = sub.add_parser(
+        "grep", parents=[common], add_help=False, help="scan raw turns, newest first"
+    )
+    grep.add_argument("pattern", nargs="+", help="substring to find (case-insensitive)")
+    grep.add_argument("--limit", type=int, default=5)
+    grep.add_argument("--before", type=int, default=None, help="scan turns older than SEQ")
+    grep.add_argument(
+        "--scan-timeout",
+        type=float,
+        default=3.0,
+        help="wall-clock budget for the raw scan in seconds",
+    )
+    grep.add_argument(
+        "--context", type=int, default=48, help="snippet chars either side of a match"
+    )
+    grep.set_defaults(handler=cmd_grep)
 
     state = sub.add_parser(
         "state", parents=[common], add_help=False, help="show the snapshot"

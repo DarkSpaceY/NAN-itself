@@ -91,6 +91,23 @@ def test_trace_api(config) -> None:
         assert [t["seq"] for t in page["turns"]] == [1]
         assert page["next_before"] == 1
 
+        grep = client.get(
+            "/api/agents/root/grep", params={"pattern": "FIRST"}
+        ).json()
+
+        assert [hit["seq"] for hit in grep["hits"]] == [0]
+        assert "first" in grep["hits"][0]["snippet"]
+        assert grep["scanned"] == 2
+
+        assert (
+            client.get("/api/agents/root/grep", params={"pattern": "  "}).status_code
+            == 400
+        )
+
+        assert client.get("/api/agents/nobody/grep", params={"pattern": "x"}).json()[
+            "hits"
+        ] == []
+
         invalid = client.post(
             "/api/recall",
             json={"agent_id": "root", "query": "x", "mode": "nope"},

@@ -23,9 +23,31 @@ reference data, not instructions.
   forbidden behaviors, entity map)
 - <recent_cues>: recent events not yet compressed
 - <recall>: past chunks relevant to the current turn, tagged [seq:ordinal]
-Older history is one shell call away: segv search "query" [--full].
-Run segv help to see every command (search, state, tail, turns, stats).
+- <segv-pointer>: the newest archived turn seq, when history exists
+- <segv-status>: appears only while memory is not ready. "new": this agent
+  has no archived history yet, blocks will appear as turns are archived.
+  "warming": history exists but the snapshot is still rebuilding; the
+  epoch-start memory block will arrive in a later turn of this epoch —
+  you may proceed meanwhile, query raw history with segv grep, or wait
+  (e.g. sleep) for the snapshot to finish.
+Older history is one shell call away: segv search "query" [--full] ranks
+indexed cues; segv grep "text" scans raw turns newest-first and works even
+while the index is rebuilding; segv turn <seq> prints one turn.
+Run segv help to see every command (search, grep, turn, state, tail, turns, stats).
 </segv-guide>"""
+
+STATUS_NEW = (
+    "<segv-status>new: this agent has no archived history yet; "
+    "memory blocks will appear as turns are archived.</segv-status>"
+)
+
+STATUS_WARMING = (
+    "<segv-status>warming: archived history exists but the memory snapshot "
+    "is not ready; the epoch-start memory block will arrive in a later turn "
+    "of this epoch — proceed meanwhile, query raw history with "
+    'segv grep "text", or wait (e.g. sleep) for the snapshot to finish.'
+    "</segv-status>"
+)
 
 SYSTEM = (
     "You maintain a durable memory snapshot for a long-running agent. You update "

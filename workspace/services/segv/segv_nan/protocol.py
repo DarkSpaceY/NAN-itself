@@ -14,6 +14,12 @@ from segv.record import TurnRecord
 
 _INJECTION_RE = re.compile(r"<injection(?:\s[^>]*)?>.*?</injection>", re.DOTALL)
 
+# The inbox seeds recall as one query. Over budget, keep both ends: the
+# head carries the oldest open request, the tail the newest user turn.
+QUERY_CHARS = 2000
+QUERY_MARK = "\n[...]\n"
+QUERY_HEAD = QUERY_CHARS // 2
+
 
 def strip_injections(text: str) -> str:
     """Remove every injected service block from a user observation."""
@@ -57,6 +63,19 @@ def _float(value: Any) -> float | None:
 
     except (TypeError, ValueError):
         return None
+
+
+def _clip(text: str, limit: int = QUERY_CHARS) -> str:
+    """Cut an over-budget query to keep both its head and its tail."""
+    if len(text) <= limit:
+        return text
+
+    if limit <= QUERY_HEAD + len(QUERY_MARK):
+        return text[:limit]
+
+    keep = limit - QUERY_HEAD - len(QUERY_MARK)
+
+    return text[:QUERY_HEAD] + QUERY_MARK + text[-keep:]
 
 
 def _headline(body: dict[str, Any]) -> str:
@@ -143,6 +162,6 @@ def inject_request(body: dict[str, Any]) -> tuple[str, int, str]:
         if isinstance(message, dict)
     ]
 
-    query = "\n".join(part for part in parts if part)[-2000:].strip()
+    query = _clip("\n".join(part for part in parts if part)).strip()
 
     return agent_id, epoch, query

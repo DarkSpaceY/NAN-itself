@@ -302,7 +302,7 @@ def test_new_epoch_injects_snapshot_and_tail_once(tmp_path: Path) -> None:
     l0, fact, cache, _ = _setup(
         tmp_path,
         tail_cues=5,
-        recall_k=1,
+        recall_k=3,
         replies=[_reply("stable goal")],
     )
 
@@ -320,6 +320,8 @@ def test_new_epoch_injects_snapshot_and_tail_once(tmp_path: Path) -> None:
     assert "<goal>\nstable goal\n</goal>" in first
     assert "<recent_cues>" in first
     assert "[2:0]" in first
+    # A tail cue must not come back through recall in the same delivery.
+    assert first.count("[2:0]") == 1
     assert (2, 0) in cache.store.seen("root", 1)
 
     second = cache.inject("root", 1, "alpha")
@@ -362,6 +364,72 @@ def test_recall_never_repeats_and_survives_a_restart(tmp_path: Path) -> None:
 
     assert len(set(seen)) == 3
 
+    fact.close()
+    l0.close()
+
+
+def test_new_agent_epoch_reports_new_and_defers_delivery(tmp_path: Path) -> None:
+    l0, fact, cache, _ = _setup(tmp_path, tail_cues=5, recall_k=1)
+
+    # No L0 turns and no cache state: the epoch opens with the notice only.
+    first = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" in first
+    assert "<segv-status>new:" in first
+    # The guide's prose mentions the tags; only the blocks carry a newline.
+    assert "<memory>\n" not in first
+    assert "<recent_cues>\n" not in first
+    assert "<segv-pointer>latest" not in first
+
+    # A turn is archived and ingested; the same epoch retries once.
+    _ingest(l0, fact, 1000.0, "one")
+
+    second = cache.inject("root", 0, "alpha")
+
+    # The guide's prose mentions <segv-status>; the notice itself says "new:".
+    assert "segv-status>new:" not in second
+    assert "<recent_cues>\n" in second
+    assert "<segv-pointer>latest archived turn is seq 0" in second
+    assert "[0:0]" in second
+
+    # Delivered: later turns of this epoch go back to recall-only.
+    third = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" not in third
+    assert "<recent_cues>\n" not in third
+
+    cache.close()
+    fact.close()
+    l0.close()
+
+
+def test_known_agent_epoch_reports_warming_until_snapshot_lands(tmp_path: Path) -> None:
+    l0, fact, cache, compressor = _setup(
+        tmp_path, recall_k=1, replies=[_reply("warm goal")]
+    )
+
+    # L0 has history, but nothing is compressed and tail_cues=0 hides the tail.
+    _ingest(l0, fact, 1000.0, "one")
+
+    first = cache.inject("root", 0, "alpha")
+
+    assert "<segv-status>warming:" in first
+    assert "<recent_cues>\n" not in first
+
+    assert cache.compress("root", force=True) is True
+
+    # The deferred delivery: same epoch, snapshot now exists.
+    second = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" in second
+    assert "<goal>\nwarm goal\n</goal>" in second
+
+    third = cache.inject("root", 0, "alpha")
+
+    assert "<memory>" not in third
+    assert "<segv-guide>" not in third
+
+    cache.close()
     fact.close()
     l0.close()
 
@@ -423,12 +491,43 @@ def test_cli_search_reads_the_shell_agent(monkeypatch, capsys) -> None:
     assert payload["hits"][0]["event"] == "a cue"
 
 
+def test_cli_grep_scans_raw_turns(monkeypatch, capsys) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> _FakeResponse:
+        captured["url"] = request.full_url
+
+        return _FakeResponse(
+            {
+                "pattern": "alpha",
+                "scanned": 2,
+                "hits": [
+                    {"seq": 2, "started_at": 1700000000.0, "snippet": "alpha two"},
+                    {"seq": 0, "started_at": 1699999000.0, "snippet": "alpha one"},
+                ],
+            }
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("NAN_AGENT_ID", "root")
+
+    assert cli.main(["grep", "alpha", "--json"]) == 0
+
+    assert "/api/agents/root/grep?" in captured["url"]
+    assert "pattern=alpha" in captured["url"]
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert [hit["seq"] for hit in payload["hits"]] == [2, 0]
+
+
 def test_cli_help_and_missing_agent(monkeypatch, capsys) -> None:
     assert cli.main(["help"]) == 0
 
     out = capsys.readouterr().out
 
     assert "search" in out
+    assert "grep" in out
     assert "state" in out
     assert "tail" in out
 

@@ -280,6 +280,31 @@ def build_app(
             service.store.turns, agent_id, limit=min(limit, 500), before=before
         )
 
+    @app.get("/api/agents/{agent_id}/grep")
+    async def agent_grep(
+        agent_id: str,
+        pattern: str,
+        limit: int = 5,
+        before: int | None = None,
+        timeout: float = 3.0,
+        context: int = 48,
+    ) -> JSONResponse:
+        pattern = pattern.strip()
+
+        if not pattern:
+            return JSONResponse({"error": "pattern is required"}, status_code=400)
+
+        result = await asyncio.to_thread(
+            service.store.grep,
+            agent_id,
+            pattern,
+            limit=min(max(limit, 1), 50),
+            timeout=min(max(timeout, 0.1), 60.0),
+            context=min(max(context, 16), 400),
+        )
+
+        return JSONResponse(result)
+
     @app.get("/api/stream")
     async def stream(request: Request) -> StreamingResponse:
         queue = service.subscribe()

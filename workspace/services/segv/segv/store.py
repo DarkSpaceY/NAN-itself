@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import struct
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -581,6 +582,94 @@ class Store:
 
         return self._decode(value)
 
+    def grep(
+        self,
+        agent_id: str,
+        pattern: str,
+        *,
+        limit: int = 5,
+        before: int | None = None,
+        timeout: float = 3.0,
+        context: int = 48,
+    ) -> dict[str, Any]:
+        """
+        Substring scan over one agent's archived turns, newest first; the
+        first `limit` matches win. Works with or without the fact layer,
+        so it answers during a backfill window.
+
+        `timeout` bounds the scan's wall clock (it always examines at
+        least one turn); `context` is the snippet window either side of
+        the match. `truncated` marks a budget stop, `next_before` is the
+        `before` value that resumes the scan where it stopped.
+        """
+        meta = self.meta(agent_id)
+
+        pattern = pattern.strip()
+
+        empty = {
+            "pattern": pattern,
+            "hits": [],
+            "scanned": 0,
+            "truncated": False,
+            "next_before": None,
+        }
+
+        if meta is None or not pattern:
+            return empty
+
+        needle = pattern.lower()
+
+        latest = int(meta.get("next_seq") or 0) - 1
+        seq = latest if before is None else min(before - 1, latest)
+
+        deadline = time.monotonic() + max(0.0, timeout)
+
+        hits: list[dict[str, Any]] = []
+        scanned = 0
+        truncated = False
+
+        while seq >= 0 and len(hits) < limit:
+            if scanned and time.monotonic() >= deadline:
+                truncated = True
+
+                break
+
+            record = self.turn(agent_id, seq)
+
+            seq -= 1
+
+            if record is None:  # evicted by retention
+                continue
+
+            scanned += 1
+
+            text = _grep_text(record)
+
+            index = text.lower().find(needle)
+
+            if index < 0:
+                continue
+
+            hits.append(
+                {
+                    "seq": int(record.get("seq") or 0),
+                    "turn_id": str(record.get("turn_id") or ""),
+                    "started_at": record.get("started_at"),
+                    "snippet": _snippet(text, index, len(needle), context=context),
+                }
+            )
+
+        # The caller passes this back as `before` to resume older.
+        resume = seq + 1 if seq >= 0 and (truncated or len(hits) >= limit) else None
+
+        return {
+            "pattern": pattern,
+            "hits": hits,
+            "scanned": scanned,
+            "truncated": truncated,
+            "next_before": resume,
+        }
+
     def seq_of(self, uid: str) -> tuple[str, int] | None:
         """Resolve a turn id to its (agent, seq) pointer."""
         with self._lock:
@@ -801,3 +890,27 @@ class Store:
 
 def _water_start(start: float) -> bytes:
     return TIME_PREFIX + struct.pack(">d", max(0.0, start)) + SEP
+
+
+def _grep_text(record: dict[str, Any]) -> str:
+    """The searchable surface of one stored turn: summary + message text."""
+    parts = [str(record.get("summary") or "")]
+
+    for message in record.get("messages") or []:
+        if isinstance(message, dict):
+            content = message.get("content")
+
+            if isinstance(content, str):
+                parts.append(content)
+
+    return "\n".join(parts)
+
+
+def _snippet(text: str, index: int, width: int, *, context: int = 48) -> str:
+    start = max(0, index - context)
+
+    end = min(len(text), index + width + context)
+
+    body = text[start:end].replace("\n", " ").strip()
+
+    return ("…" if start else "") + body + ("…" if end < len(text) else "")
