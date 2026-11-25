@@ -5,13 +5,18 @@
   </picture>
 </p>
 
+<div align="center">
+
 # NAN-itself
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![CI](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml/badge.svg)](https://github.com/DarkSpaceY/NAN-itself/actions/workflows/ci.yml)
+[![Repo size](https://img.shields.io/github/repo-size/DarkSpaceY/NAN-itself)](https://github.com/DarkSpaceY/NAN-itself)
 
 **NAN is a local-first, self-extending agent.**
+
+</div>
 
 It runs on your machine and can connect to a local model or a frontier API.
 During operation, it can acquire new capabilities on demand: install a CLI into its sandbox, write a skill file, connect a service.
@@ -22,6 +27,23 @@ Capabilities are files, and NAN uses capabilities through the shell.
 <p align="center">
   <img src="docs/assets/desktop.png" alt="The desktop UI: a request to the root agent, shell calls that list and read the verb modules, and a spawn that hands half the reading to a subagent" width="860">
 </p>
+
+## Looking for collaborators
+
+NAN is early and developed in the open. The project is looking for people
+to build it with, especially:
+
+- **Core runtime** — turn loop, agent lifecycle, sandbox and recovery (`nan/`).
+- **Desktop** — the Electron shell and the React renderer (`electron/`).
+- **Services** — injection services, SEGV and MCP integration
+  (`workspace/services/`, `lib/nan-service-kit/`).
+- **Docs and cross-platform testing** — Linux/WSL2 setup reports, and docs
+  that no longer match the code, are both real tasks.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the development loop and
+the known rough edges. If you want to help, open an issue introducing
+yourself and what you would like to work on; early contributors get to
+shape the design.
 
 ## Quick start
 
@@ -93,6 +115,7 @@ and hold conversations across turns. Closing the window stops the core.
 | [Frontend protocol](docs/for-contributors/frontend-protocol.md) | The event stream contract |
 | [Backend protocol](docs/for-contributors/protocol.md) | HTTP/WS contracts for services and snapshots |
 | [Developing](docs/for-contributors/develop.md) | Test, lint, type-check |
+| [Contributing](CONTRIBUTING.md) | Set up, pick a task, open a PR |
 
 ## Repository layout
 

@@ -94,9 +94,8 @@ uv sync
 
 # --- directory layout -------------------------------------------------
 
-# builtin/services/ (record, vision) and workspace/services/ come with
-# the checkout; the mkdirs only make sure the two territories exist if
-# a user removed them.
+# workspace/services/ ships with the checkout; builtin/services/ is
+# user-owned. The mkdirs only make sure both exist if a user removed them.
 mkdir -p builtin/services workspace/services
 
 # --- desktop ----------------------------------------------------------
