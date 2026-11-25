@@ -292,9 +292,9 @@ def cmd_turns(args: argparse.Namespace) -> int:
             [
                 str(turn.get("seq")),
                 _clock(turn.get("started_at")),
-                str(turn.get("origin") or "-"),
-                str(turn.get("epoch")),
-                _clip(turn.get("reply")),
+                str((turn.get("meta") or {}).get("origin") or "-"),
+                str((turn.get("meta") or {}).get("epoch")),
+                _clip((turn.get("raw") or {}).get("reply") or turn.get("summary")),
             ]
             for turn in turns
         ]

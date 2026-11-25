@@ -9,11 +9,12 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from segv.app import SegvService, build_app
-from segv.config import Config
-from segv.fact.chunk import build_chunks, strip_injections
+from segv.config import CoreConfig
+from segv.fact.chunk import build_chunks
 from segv.fact.config import ChunkConfig, CueConfig, EmbedConfig, FactConfig
 from segv.fact.layer import FactLayer
 from segv.fact.store import HEADER, FactStore
+from segv.record import TurnRecord
 from segv.store import Store
 
 
@@ -64,33 +65,31 @@ class FakeReranker:
         return [float(len(words & set(text.lower().split()))) for text in texts]
 
 
-def _payload(ts: float, rendered: list[dict[str, Any]], reply: str = "ok") -> dict[str, Any]:
-    return {
-        "agent_id": "root",
-        "parent_id": None,
-        "depth": 0,
-        "epoch": 0,
-        "origin": "normal",
-        "started_at": ts,
-        "ended_at": ts + 1.0,
-        "inbox": [],
-        "injections": [],
-        "delta": [],
-        "reply": reply,
-        "thinking": [],
-        "calls": [],
-        "results": [],
-        "llm": {
-            "model": "m",
-            "started_at": ts,
-            "ended_at": ts + 1.0,
-            "usage": {"prompt_tokens": 8, "completion_tokens": 2},
-            "finish_reason": "stop",
+def _record(ts: float, rendered: list[dict[str, Any]], reply: str = "ok") -> TurnRecord:
+    return TurnRecord(
+        agent_id="root",
+        started_at=ts,
+        ended_at=ts + 1.0,
+        messages=rendered,
+        summary=reply,
+        stats={
+            "tokens": 10,
             "retries": 0,
+            "calls": 0,
+            "errors": 0,
+            "reply_chars": len(reply),
+            "thinking_chars": 0,
         },
-        "rendered": rendered,
-        "death": None,
-    }
+        llm_started_at=ts,
+        llm_ended_at=ts + 1.0,
+        raw={"reply": reply},
+    )
+
+
+def _stored(record: TurnRecord) -> dict[str, Any]:
+    return record.to_json(
+        seq=0, turn_id=f"{record.agent_id}:{record.started_at:.6f}"
+    )
 
 
 def _rendered() -> list[dict[str, Any]]:
@@ -99,7 +98,6 @@ def _rendered() -> list[dict[str, Any]]:
             "role": "user",
             "content": (
                 "<delta>\n<state>boot</state>\n</delta>\n\n"
-                '<injection>\n<service id="segv">\nMEMORY_SECRET\n</service>\n</injection>\n\n'
                 '<inbox>\n<user id="u">\nhello alpha\n</user>\n</inbox>'
             ),
         },
@@ -128,7 +126,7 @@ def _layer(l0: Store, config: FactConfig, *, slm: FakeSlm | None = None) -> Fact
 
 
 def test_whole_turn_becomes_one_chunk() -> None:
-    ts, chunks = build_chunks(_payload(1_700_000_000.0, _rendered()), ChunkConfig())
+    ts, chunks = build_chunks(_stored(_record(1_700_000_000.0, _rendered())), ChunkConfig())
 
     assert ts == "2023-11-14T22:13:20Z"
     assert len(chunks) == 1
@@ -138,23 +136,8 @@ def test_whole_turn_becomes_one_chunk() -> None:
     assert "hello alpha" in text
     assert "reply beta" in text
     assert "tool gamma" in text
-    assert "MEMORY_SECRET" not in text
     assert "boot" in text
     assert text.count("[2023-11-14T22:13:20Z] user: ") == 1
-
-
-def test_strip_injections_removes_every_service() -> None:
-    content = (
-        "<injection>\n<service id=\"segv\">\nmine\n</service>\n\n"
-        '<service id="other">\ntheirs\n</service>\n</injection>\n'
-        '<inbox>\n<user id="u">\nkeep me\n</user>\n</inbox>'
-    )
-
-    cleaned = strip_injections(content)
-
-    assert "mine" not in cleaned
-    assert "theirs" not in cleaned
-    assert "keep me" in cleaned
 
 
 def test_long_turn_splits_respecting_the_limit_and_order() -> None:
@@ -165,7 +148,7 @@ def test_long_turn_splits_respecting_the_limit_and_order() -> None:
         {"role": "assistant", "content": "after the split"},
     ]
 
-    _, chunks = build_chunks(_payload(1_700_000_000.0, rendered), ChunkConfig(max_chars=80))
+    _, chunks = build_chunks(_stored(_record(1_700_000_000.0, rendered)), ChunkConfig(max_chars=80))
 
     assert len(chunks) > 1
     assert all(len(chunk.text) <= 80 for chunk in chunks)
@@ -179,7 +162,7 @@ def test_long_turn_splits_respecting_the_limit_and_order() -> None:
 def test_one_cue_per_chunk_covers_every_message(tmp_path: Path) -> None:
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, _rendered()))
+    l0.append(_record(1_700_000_000.0, _rendered()))
 
     slm = FakeSlm()
 
@@ -202,7 +185,7 @@ def test_one_cue_per_chunk_covers_every_message(tmp_path: Path) -> None:
 def test_ingest_stores_two_texts_two_vectors_and_pointer(tmp_path: Path) -> None:
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, _rendered()))
+    l0.append(_record(1_700_000_000.0, _rendered()))
 
     layer = _layer(l0, _fact_config())
 
@@ -228,7 +211,7 @@ def test_ingest_stores_two_texts_two_vectors_and_pointer(tmp_path: Path) -> None
 def test_stored_vectors_are_int8_and_reload_from_disk(tmp_path: Path) -> None:
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, _rendered()))
+    l0.append(_record(1_700_000_000.0, _rendered()))
 
     layer = _layer(l0, _fact_config())
 
@@ -282,7 +265,7 @@ def test_multi_chunk_turn_indexes_every_chunk(tmp_path: Path) -> None:
 
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, rendered))
+    l0.append(_record(1_700_000_000.0, rendered))
 
     slm = FakeSlm()
 
@@ -307,7 +290,7 @@ def test_multi_chunk_turn_indexes_every_chunk(tmp_path: Path) -> None:
 def test_backfill_ingests_existing_l0_turns(tmp_path: Path) -> None:
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, _rendered()))
+    l0.append(_record(1_700_000_000.0, _rendered()))
 
     layer = _layer(l0, _fact_config())
 
@@ -333,7 +316,7 @@ def test_backfill_ingests_existing_l0_turns(tmp_path: Path) -> None:
 def test_dim_mismatch_is_rejected(tmp_path: Path) -> None:
     l0 = Store(tmp_path / "data")
 
-    l0.append(_payload(1_700_000_000.0, _rendered()))
+    l0.append(_record(1_700_000_000.0, _rendered()))
 
     layer = _layer(l0, _fact_config())
 
@@ -351,7 +334,7 @@ def test_dim_mismatch_is_rejected(tmp_path: Path) -> None:
     l0.close()
 
 
-def test_service_recall_endpoint(config: Config) -> None:
+def test_service_recall_endpoint(config: CoreConfig) -> None:
     service = SegvService(config)
 
     fact = _layer(service.store, _fact_config())
@@ -361,9 +344,7 @@ def test_service_recall_endpoint(config: Config) -> None:
     with TestClient(build_app(service)) as client:
         timestamp = 1_700_000_000.0
 
-        body = _payload(timestamp, _rendered())
-
-        assert client.post("/turn", json=body).status_code == 200
+        assert service.store.append(_record(timestamp, _rendered()))
 
         deadline = time.time() + 5.0
         stats: dict[str, Any] = {}

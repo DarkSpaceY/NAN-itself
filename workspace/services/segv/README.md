@@ -61,7 +61,7 @@ flowchart LR
     end
 
     subgraph SEGV["SEGV :9004"]
-        L0[("L0 RocksDB<br/>turn + ledger<br/>4 GiB rolling")]
+        L0[("L0 RocksDB<br/>turn + ledger<br/>20 GiB rolling")]
         W["Fact worker"]
         CH[("chunks<br/>raw + event cue")]
         V[("raw/event dense<br/>int8 vectors + HNSW")]
@@ -125,7 +125,7 @@ flowchart LR
     CP -->|"next"| S
 ```
 
-The `/turn` acknowledgement happens after the L0 write; chunking, cue, embedding, and indexing are all asynchronous and do not block the agent's next turn. Once L0 reaches 4 GiB, the oldest turns are evicted first, pruned to 95%.
+The `/turn` acknowledgement happens after the L0 write; chunking, cue, embedding, and indexing are all asynchronous and do not block the agent's next turn. Once L0 reaches 20 GiB, the oldest turns are evicted first, pruned to 95%.
 
 ### Read Path
 
@@ -231,7 +231,7 @@ Normally it is started by NAN core's `workspace/autostart.sh`, and stops togethe
 | Hub | `127.0.0.1:8901` (archive + inject dual registration) |
 | Model service | Ollama `127.0.0.1:11434` |
 | Config | `config.yaml`, loaded from the file's directory |
-| L0 budget | 4 GiB, pruned to 95% |
+| L0 budget | 20 GiB, pruned to 95% |
 | Inject budget | 8 seconds |
 | Data dirs | `data/` (L0), `data/fact/`, `data/cache/` |
 | Panel | `http://127.0.0.1:9004/` |
@@ -265,7 +265,7 @@ The three models resident together take about **5.4 GB** (macOS unified memory, 
 
 - **Compression is lossy and driven by in-batch evidence**: if the completion evidence for an unresolved item falls in an earlier batch and the current batch does not mention it again, the old entry may persist. The snapshot currently has no retroactive cleanup mechanism.
 - **No retrieval rewriting at injection**: there is no multi-turn query rewriting; references and ellipses rely on semantic matching by CE and cues.
-- **L0 evicts the oldest history at 4 GiB**: evicted turns no longer participate in fact rebuilds; when long-term retention is needed, expand capacity or back up first.
+- **L0 evicts the oldest history at 20 GiB**: evicted turns no longer participate in fact rebuilds; when long-term retention is needed, expand capacity or back up first.
 - **Loopback only, no authentication**: the panel enables CORS so it can run in a sandbox iframe, so other local web pages can in theory read the service API; do not expose the port to untrusted networks.
 - **Single node**: RocksDB, HNSW, and BM25 are all local files with no distributed replicas.
 
@@ -273,16 +273,18 @@ The three models resident together take about **5.4 GB** (macOS unified memory, 
 
 ```text
 workspace/services/segv/
-├── main.py                 # process entry
+├── main.py                 # process entry: core app + NAN adapter + two hub links
 ├── config.yaml             # ports, models, budgets, trigger thresholds
-├── segv/
-│   ├── app.py              # FastAPI, dual HubLink, SSE, panel CORS
+├── segv/                   # core: protocol-neutral memory engine
+│   ├── app.py              # FastAPI trace API, SSE, panel CORS
+│   ├── record.py           # neutral turn record: messages, stats, meta, raw
 │   ├── store.py            # L0: turn, ledger, retention, stats
 │   ├── cli.py              # search / state / tail / turns / turn / stats
 │   ├── fact/               # chunk, cue, embed, BM25/HNSW, RRF, CE
 │   └── cache/              # snapshot, compression, inject, seen
+├── segv_nan/               # NAN adapter: /turn, /inject, payload mapping
 ├── web/                    # timeline + ledger panel (no build step)
-├── tests/                  # 34 tests
+├── tests/                  # 38 tests
 └── docs/assets/            # figures for this document
 ```
 

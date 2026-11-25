@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from segv.record import TurnRecord
 from segv.store import Store, turn_uid
 
 
@@ -15,42 +16,27 @@ def payload(
     origin: str = "normal",
     reply: str = "hi",
     **extra: Any,
-) -> dict[str, Any]:
-    return {
-        "agent_id": agent,
-        "parent_id": None,
-        "depth": 0,
-        "epoch": epoch,
-        "origin": origin,
-        "started_at": ts,
-        "ended_at": ts + 1.0,
-        "inbox": [
-            {
-                "kind": "user",
-                "source": "user",
-                "text": "hello",
-                "event": "send",
-                "received_at": ts,
-            }
-        ],
-        "injections": [],
-        "delta": [],
-        "reply": reply,
-        "thinking": [],
-        "calls": [],
-        "results": [],
-        "llm": {
-            "model": "m",
-            "started_at": ts,
-            "ended_at": ts + 1.0,
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-            "finish_reason": "stop",
+) -> TurnRecord:
+    return TurnRecord(
+        agent_id=agent,
+        started_at=ts,
+        ended_at=ts + 1.0,
+        messages=[{"role": "user", "content": "hello"}],
+        summary=reply,
+        stats={
+            "tokens": 15,
             "retries": 0,
+            "calls": 0,
+            "errors": 0,
+            "reply_chars": len(reply),
+            "thinking_chars": 0,
         },
-        "rendered": [{"role": "user", "content": "hello"}],
-        "death": None,
-        **extra,
-    }
+        epoch=epoch,
+        origin=origin,
+        llm_started_at=ts,
+        llm_ended_at=ts + 1.0,
+        raw={"reply": reply, **extra},
+    )
 
 
 def test_append_stores_the_complete_turn(tmp_path: Path) -> None:
@@ -65,9 +51,10 @@ def test_append_stores_the_complete_turn(tmp_path: Path) -> None:
     assert turn is not None
     assert turn["turn_id"] == uid
     assert turn["seq"] == 0
-    # rendered is part of the stored record: it is this turn's message
-    # run, not the conversation history.
-    assert turn["rendered"] == [{"role": "user", "content": "hello"}]
+    # messages is the chunk input the core owns; raw is the adapter's
+    # payload, stored and returned without being interpreted.
+    assert turn["messages"] == [{"role": "user", "content": "hello"}]
+    assert turn["raw"] == {"reply": "hi"}
 
     store.close()
 

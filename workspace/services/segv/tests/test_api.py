@@ -4,47 +4,35 @@ import time
 
 from fastapi.testclient import TestClient
 from segv.app import SegvService, build_app
+from segv.record import TurnRecord
 
 
 def _client(service: SegvService) -> TestClient:
     return TestClient(build_app(service))
 
 
-def _turn(ts: float, reply: str = "hi") -> dict:
-    return {
-        "agent_id": "root",
-        "parent_id": None,
-        "depth": 0,
-        "epoch": 0,
-        "origin": "normal",
-        "started_at": ts,
-        "ended_at": ts + 1.0,
-        "inbox": [
-            {
-                "kind": "user",
-                "source": "user",
-                "text": "hello",
-                "event": "send",
-                "received_at": ts,
-            }
-        ],
-        "injections": [],
-        "delta": [],
-        "reply": reply,
-        "thinking": [],
-        "calls": [],
-        "results": [],
-        "llm": {
-            "model": "m",
-            "started_at": ts,
-            "ended_at": ts + 1.0,
-            "usage": {"prompt_tokens": 8, "completion_tokens": 2},
-            "finish_reason": "stop",
+def _record(ts: float, reply: str = "hi") -> TurnRecord:
+    return TurnRecord(
+        agent_id="root",
+        started_at=ts,
+        ended_at=ts + 1.0,
+        messages=[{"role": "user", "content": "hello"}],
+        summary=reply,
+        stats={
+            "tokens": 10,
             "retries": 0,
+            "calls": 0,
+            "errors": 0,
+            "reply_chars": len(reply),
+            "thinking_chars": 0,
         },
-        "rendered": [{"role": "user", "content": "hello"}],
-        "death": None,
-    }
+        llm_started_at=ts,
+        llm_ended_at=ts + 1.0,
+        raw={
+            "reply": reply,
+            "rendered": [{"role": "user", "content": "hello"}],
+        },
+    )
 
 
 def test_web_panel_is_readable_from_a_sandboxed_iframe(config) -> None:
@@ -58,17 +46,17 @@ def test_web_panel_is_readable_from_a_sandboxed_iframe(config) -> None:
             assert response.headers["access-control-allow-origin"] == "*"
 
 
-def test_turn_endpoint_and_trace_api(config) -> None:
+def test_trace_api(config) -> None:
     service = SegvService(config, links=[])
 
     with _client(service) as client:
         base = time.time() - 60.0
 
-        assert client.post("/turn", json=_turn(base, "first")).status_code == 200
-        assert client.post("/turn", json=_turn(base + 1, "second")).status_code == 200
+        assert service.store.append(_record(base, "first"))
+        assert service.store.append(_record(base + 1, "second"))
 
-        # Redelivery is accepted and ignored.
-        assert client.post("/turn", json=_turn(base, "first")).status_code == 200
+        # Redelivery is idempotent at the store.
+        assert service.store.append(_record(base, "first")) is None
 
         stats = client.get("/api/stats").json()
 
@@ -82,8 +70,8 @@ def test_turn_endpoint_and_trace_api(config) -> None:
 
         one = client.get("/api/turns/root/0").json()
 
-        assert one["reply"] == "first"
-        assert one["rendered"] == [{"role": "user", "content": "hello"}]
+        assert one["raw"]["reply"] == "first"
+        assert one["messages"] == [{"role": "user", "content": "hello"}]
 
         assert client.get("/api/turns/root/99").status_code == 404
 
@@ -102,6 +90,13 @@ def test_turn_endpoint_and_trace_api(config) -> None:
 
         assert [t["seq"] for t in page["turns"]] == [1]
         assert page["next_before"] == 1
+
+        invalid = client.post(
+            "/api/recall",
+            json={"agent_id": "root", "query": "x", "mode": "nope"},
+        )
+
+        assert invalid.status_code == 400
 
 
 def test_ui_is_served(config) -> None:

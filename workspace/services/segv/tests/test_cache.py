@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 from segv import cli
-from segv.app import SegvService, build_app
 from segv.cache.config import CacheConfig
 from segv.cache.layer import CacheLayer, CueRef, render_refs
 from segv.cache.snapshot import (
@@ -20,11 +18,10 @@ from segv.cache.snapshot import (
     SnapshotError,
     parse_snapshot,
 )
-from segv.config import Config
-from segv.fact.config import FactConfig, SlmConfig
+from segv.fact.config import SlmConfig
 from segv.fact.layer import FactLayer
 from segv.store import Store
-from test_fact import FakeEmbedder, FakeReranker, FakeSlm, _fact_config, _payload
+from test_fact import FakeEmbedder, FakeReranker, FakeSlm, _fact_config, _record
 
 
 class FakeCompressor:
@@ -100,8 +97,8 @@ def _setup(
 
 
 def _ingest(l0: Store, fact: FactLayer, ts: float, label: str) -> tuple[str, int]:
-    payload = _payload(ts, [{"role": "user", "content": f"alpha {label}"}])
-    uid = l0.append(payload)
+    record = _record(ts, [{"role": "user", "content": f"alpha {label}"}])
+    uid = l0.append(record)
 
     assert uid
 
@@ -267,7 +264,7 @@ def test_rewrite_drops_prompt_envelope_tags(tmp_path: Path) -> None:
     l0, fact, cache, compressor = _setup(
         tmp_path, trigger=1, replies=[_reply("tag goal")]
     )
-    payload = _payload(
+    record = _record(
         1000.0,
         [
             {
@@ -276,7 +273,7 @@ def test_rewrite_drops_prompt_envelope_tags(tmp_path: Path) -> None:
             }
         ],
     )
-    uid = l0.append(payload)
+    uid = l0.append(record)
 
     assert uid
 
@@ -315,9 +312,7 @@ def test_new_epoch_injects_snapshot_and_tail_once(tmp_path: Path) -> None:
 
     _ingest(l0, fact, 1002.0, "three")
 
-    first = cache.inject(
-        {"agent_id": "root", "epoch": 1, "inbox": [{"text": "alpha"}]}
-    )
+    first = cache.inject("root", 1, "alpha")
 
     assert "<segv-guide>" in first
     assert "segv help" in first
@@ -327,9 +322,7 @@ def test_new_epoch_injects_snapshot_and_tail_once(tmp_path: Path) -> None:
     assert "[2:0]" in first
     assert (2, 0) in cache.store.seen("root", 1)
 
-    second = cache.inject(
-        {"agent_id": "root", "epoch": 1, "inbox": [{"text": "alpha"}]}
-    )
+    second = cache.inject("root", 1, "alpha")
 
     assert "<memory>" not in second
     assert "<recent_cues>" not in second
@@ -347,10 +340,8 @@ def test_recall_never_repeats_and_survives_a_restart(tmp_path: Path) -> None:
     _ingest(l0, fact, 1001.0, "two")
     _ingest(l0, fact, 1002.0, "three")
 
-    body = {"agent_id": "root", "epoch": 0, "inbox": [{"text": "alpha"}]}
-
-    first = _locs(cache.inject(body))
-    second = _locs(cache.inject(body))
+    first = _locs(cache.inject("root", 0, "alpha"))
+    second = _locs(cache.inject("root", 0, "alpha"))
 
     assert len(first) == 1
     assert len(second) == 1
@@ -361,7 +352,7 @@ def test_recall_never_repeats_and_survives_a_restart(tmp_path: Path) -> None:
     restarted = CacheLayer(l0, fact, cache.config, slm=FakeCompressor())
 
     try:
-        third = _locs(restarted.inject(body))
+        third = _locs(restarted.inject("root", 0, "alpha"))
     finally:
         restarted.close()
 
@@ -373,111 +364,6 @@ def test_recall_never_repeats_and_survives_a_restart(tmp_path: Path) -> None:
 
     fact.close()
     l0.close()
-
-
-def test_inject_endpoint_returns_the_epoch_start_block(tmp_path: Path) -> None:
-    config = Config(
-        service_id="segv",
-        port=9004,
-        hub_url="http://127.0.0.1:1",
-        data_dir="data",
-        max_bytes=0,
-        fact=FactConfig(enabled=False),
-    )
-    config._home = tmp_path
-
-    service = SegvService(config, links=[])
-    fact = FactLayer(
-        service.store,
-        _fact_config(),
-        slm=FakeSlm(),
-        embedder=FakeEmbedder(),
-        reranker=FakeReranker(),
-    )
-    cache_config = CacheConfig(
-        enabled=True,
-        trigger=5,
-        tail_cues=5,
-        recall_k=1,
-        max_items=20,
-        min_retention=0.0,
-        slm=SlmConfig(max_tokens=1200),
-    )
-    cache = CacheLayer(
-        service.store,
-        fact,
-        cache_config,
-        slm=FakeCompressor([_reply("endpoint goal")]),
-    )
-    fact.on_ingested = cache.on_ingested
-
-    service.fact = fact
-    service.cache = cache
-
-    _ingest(service.store, fact, 1000.0, "one")
-
-    assert cache.compress("root", force=True) is True
-
-    with TestClient(build_app(service)) as client:
-        response = client.post(
-            "/inject",
-            json={"agent_id": "root", "epoch": 0, "inbox": [{"text": "alpha"}]},
-        )
-
-        assert response.status_code == 200
-
-        text = response.json()["text"]
-
-        assert "<segv-guide>" in text
-        assert "segv help" in text
-        assert "<memory>" in text
-        assert "endpoint goal" in text
-
-        state = client.get(
-            "/api/cache/state", params={"agent_id": "root"}
-        ).json()
-
-        assert state["last_epoch"] == 0
-        assert state["pointer"] == {"seq": 0, "ordinal": 0}
-
-        second = client.post(
-            "/inject",
-            json={"agent_id": "root", "epoch": 0, "inbox": [{"text": "alpha"}]},
-        ).json()["text"]
-
-        assert "<memory>" not in second
-
-
-def test_inject_endpoint_never_raises(tmp_path: Path) -> None:
-    config = Config(
-        service_id="segv",
-        port=9004,
-        hub_url="http://127.0.0.1:1",
-        data_dir="data",
-        max_bytes=0,
-        fact=FactConfig(enabled=False),
-    )
-    config._home = tmp_path
-
-    service = SegvService(config, links=[])
-
-    def boom(_body: dict[str, Any]) -> str:
-        raise RuntimeError("boom")
-
-    service.cache.inject = boom
-
-    with TestClient(build_app(service)) as client:
-        response = client.post("/inject", json={"agent_id": "root"})
-
-        assert response.status_code == 200
-        assert response.json() == {"text": ""}
-
-        invalid = client.post(
-            "/api/recall",
-            json={"agent_id": "root", "query": "x", "mode": "nope"},
-        )
-
-        assert invalid.status_code == 400
 
 
 # ----------------------------------------------------------------------

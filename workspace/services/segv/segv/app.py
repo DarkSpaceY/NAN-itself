@@ -1,11 +1,11 @@
-"""HTTP surface: the archive endpoint, the trace API, and the panel."""
+"""HTTP surface: the trace API and the panel. Protocol routes plug in."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from .cache.layer import CacheLayer
-from .config import Config
+from .config import CoreConfig
 from .fact.layer import ROUTES, FactLayer
 from .store import Store
 
@@ -28,7 +28,7 @@ class SegvService:
 
     def __init__(
         self,
-        config: Config,
+        config: CoreConfig,
         *,
         links: Any = None,
         fact: Any = None,
@@ -104,7 +104,11 @@ class SegvService:
         self.store.close()
 
 
-def build_app(service: SegvService) -> FastAPI:
+def build_app(
+    service: SegvService,
+    *,
+    routes: Callable[[FastAPI], None] | None = None,
+) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         service.bind_loop(asyncio.get_running_loop())
@@ -112,12 +116,10 @@ def build_app(service: SegvService) -> FastAPI:
         service.start()
 
         logger.info(
-            "segv up on {}:{} (hub {}, store {}, services [{}])",
+            "segv up on {}:{} (store {})",
             service.config.host,
             service.config.port,
-            service.config.hub_url,
             service.store.path,
-            ", ".join(link.config.service_id for link in service.links),
         )
 
         try:
@@ -141,32 +143,6 @@ def build_app(service: SegvService) -> FastAPI:
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
-
-    # -- archive --------------------------------------------------------
-
-    @app.post("/turn")
-    async def turn(body: dict[str, Any]) -> dict[str, str]:
-        # Durable before the ack: the hub drops an archive failure, so a
-        # 2xx that lost the turn would lose memory silently.
-        await asyncio.to_thread(service.store.append, body)
-
-        return {"status": "ok"}
-
-    # -- inject ---------------------------------------------------------
-
-    @app.post("/inject")
-    async def inject(body: dict[str, Any]) -> dict[str, str]:
-        # The hub treats a failure as "service unavailable" and moves on.
-        # A degraded block is more useful than a 500, so this never raises.
-        try:
-            text = await asyncio.to_thread(service.cache.inject, body)
-
-        except Exception:
-            logger.exception("segv-cache inject failed")
-
-            text = ""
-
-        return {"text": text}
 
     # -- cache ----------------------------------------------------------
 
@@ -328,6 +304,9 @@ def build_app(service: SegvService) -> FastAPI:
                 service.unsubscribe(queue)
 
         return StreamingResponse(events(), media_type="text/event-stream")
+
+    if routes is not None:
+        routes(app)
 
     # Static last: "/" is the fallback, never a shadowed route.
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

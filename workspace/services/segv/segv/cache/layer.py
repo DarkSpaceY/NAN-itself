@@ -86,29 +86,6 @@ def _tail(
     return out
 
 
-def _epoch(value: Any) -> int:
-    try:
-        return int(value or 0)
-
-    except (TypeError, ValueError):
-        return 0
-
-
-def _inbox_query(body: dict[str, Any]) -> str:
-    parts: list[str] = []
-
-    for message in body.get("inbox") or []:
-        if not isinstance(message, dict):
-            continue
-
-        text = str(message.get("text") or "").strip()
-
-        if text:
-            parts.append(text)
-
-    return "\n".join(parts)[-2000:].strip()
-
-
 class CacheLayer:
     def __init__(
         self,
@@ -479,18 +456,15 @@ class CacheLayer:
     # Inject
     # ------------------------------------------------------------------
 
-    def inject(self, body: dict[str, Any]) -> str:
+    def inject(self, agent_id: str, epoch: int, query: str) -> str:
         """Return this turn's prompt text; never raise across the boundary."""
         if not self.enabled or self.store is None:
             return ""
 
-        agent_id = str(body.get("agent_id") or "").strip()
+        agent_id = agent_id.strip()
 
         if not agent_id:
             return ""
-
-        epoch = _epoch(body.get("epoch"))
-        query = _inbox_query(body)
 
         with self._agent_lock(agent_id):
             with self._lock:

@@ -1,5 +1,5 @@
 """
-SEGV memory service.
+SEGV memory service: the core plus NAN's protocol adapter.
 
 One process, two hub registrations: `segv-archive` receives every
 committed turn at `POST /turn` and writes it durably to L0; `segv`
@@ -15,7 +15,8 @@ from pathlib import Path
 import uvicorn
 from nan_service_kit import HubLink, setup_logging
 from segv.app import SegvService, build_app
-from segv.config import load_config
+from segv_nan.app import install
+from segv_nan.config import load_config
 
 HERE = Path(__file__).resolve().parent
 
@@ -47,10 +48,10 @@ def main() -> None:
         )
     )
 
-    service = SegvService(config, links=[archive, inject])
+    service = SegvService(config.core(), links=[archive, inject])
 
     uvicorn.run(
-        build_app(service),
+        build_app(service, routes=lambda app: install(app, service)),
         host=config.host,
         port=config.port,
         log_level="warning",

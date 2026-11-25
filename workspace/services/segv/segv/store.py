@@ -1,7 +1,7 @@
 """
 L0: the turn archive. RocksDB (rocksdict), one column family, prefixes.
 
-    T <agent_id>\\0 <seq:8B BE>     -> zstd(complete turn json, rendered included)
+    T <agent_id>\\0 <seq:8B BE>     -> zstd(complete turn json, messages and raw included)
     X <started_at:8B BE>\\0 <agent>\\0 <seq:8B>
                                     -> ended_at, llm window, stored size
     M <agent_id>                    -> agent meta (json)
@@ -31,6 +31,8 @@ from typing import Any
 import zstandard
 from loguru import logger
 from rocksdict import DBCompressionType, Options, Rdict, WriteBatch
+
+from .record import TurnRecord
 
 TURN_PREFIX = b"T"
 TIME_PREFIX = b"X"
@@ -146,43 +148,28 @@ class AgentMeta:
         )
 
 
-def summarize(payload: dict[str, Any], seq: int) -> dict[str, Any]:
+def summarize(record: dict[str, Any], seq: int) -> dict[str, Any]:
     """One ledger row: identity, span, and a headline, without a second read."""
-    llm = payload.get("llm") or {}
+    stats = record.get("stats") or {}
 
-    usage = llm.get("usage") or {}
-
-    inbox = payload.get("inbox") or []
-
-    results = payload.get("results") or []
-
-    reply = payload.get("reply") or ""
-
-    thinking = payload.get("thinking") or []
-
-    headline = reply.strip().splitlines()[0] if reply.strip() else ""
-
-    if not headline and inbox:
-        headline = str(inbox[-1].get("text") or "")
+    meta = record.get("meta") or {}
 
     return {
-        "agent_id": str(payload.get("agent_id") or ""),
+        "agent_id": str(record.get("agent_id") or ""),
         "seq": seq,
-        "started_at": float(payload.get("started_at") or 0.0),
-        "ended_at": payload.get("ended_at"),
-        "depth": int(payload.get("depth") or 0),
-        "parent_id": payload.get("parent_id"),
-        "origin": str(payload.get("origin") or "normal"),
-        "epoch": int(payload.get("epoch") or 0),
-        "tokens": int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0),
-        "retries": int(llm.get("retries") or 0),
-        "calls": len(payload.get("calls") or []),
-        "errors": sum(1 for r in results if not r.get("output")),
-        "reply_chars": len(reply),
-        "thinking_chars": sum(
-            len(block.get("text") or "") for block in thinking if isinstance(block, dict)
-        ),
-        "summary": headline[:160],
+        "started_at": float(record.get("started_at") or 0.0),
+        "ended_at": record.get("ended_at"),
+        "depth": int(meta.get("depth") or 0),
+        "parent_id": meta.get("parent_id"),
+        "origin": str(meta.get("origin") or "normal"),
+        "epoch": int(meta.get("epoch") or 0),
+        "tokens": int(stats.get("tokens") or 0),
+        "retries": int(stats.get("retries") or 0),
+        "calls": int(stats.get("calls") or 0),
+        "errors": int(stats.get("errors") or 0),
+        "reply_chars": int(stats.get("reply_chars") or 0),
+        "thinking_chars": int(stats.get("thinking_chars") or 0),
+        "summary": str(record.get("summary") or "")[:160],
     }
 
 
@@ -310,22 +297,20 @@ class Store:
     # Write
     # ------------------------------------------------------------------
 
-    def append(self, payload: dict[str, Any]) -> str | None:
+    def append(self, record: TurnRecord) -> str | None:
         """
         Store one completed turn. Returns its id, or None when the
-        payload is unusable or this turn is already archived (the hub
+        record is unusable or this turn is already archived (the hub
         may re-deliver after a core restart).
         """
-        agent_id = str(payload.get("agent_id") or "")
+        agent_id = record.agent_id
 
-        started_at = payload.get("started_at")
-
-        if not agent_id or started_at is None:
+        if not agent_id:
             logger.warning("segv drop: turn without agent_id/started_at")
 
             return None
 
-        started = float(started_at)
+        started = float(record.started_at)
 
         uid = turn_uid(agent_id, started)
 
@@ -346,22 +331,20 @@ class Store:
 
             meta.count += 1
 
-            meta.parent_id = payload.get("parent_id")
+            meta.parent_id = record.parent_id
 
-            meta.depth = int(payload.get("depth") or 0)
+            meta.depth = int(record.depth or 0)
 
             meta.first = started if meta.first is None else min(meta.first, started)
 
             meta.last = started if meta.last is None else max(meta.last, started)
 
-            death = payload.get("death")
+            if record.death:
+                meta.last_death = record.death
 
-            if isinstance(death, dict):
-                meta.last_death = str(death.get("reason") or "") or None
-
-            epoch = int(payload.get("epoch") or 0)
-
-            bucket = meta.epochs.setdefault(str(epoch), [started, started, 0])
+            bucket = meta.epochs.setdefault(
+                str(int(record.epoch or 0)), [started, started, 0]
+            )
 
             bucket[0] = min(bucket[0], started)
 
@@ -369,18 +352,13 @@ class Store:
 
             bucket[2] += 1
 
-            record = {
-                **payload,
-                "seq": seq,
-                "turn_id": uid,
-                "origin": payload.get("origin") or "normal",
-            }
-
             data = self._compressor.compress(
-                json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode()
+                json.dumps(
+                    record.to_json(seq=seq, turn_id=uid),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode()
             )
-
-            llm = record.get("llm") or {}
 
             write = WriteBatch()
 
@@ -392,9 +370,9 @@ class Store:
                 _time_key(started, agent_id, seq),
                 struct.pack(
                     ">dddQ",
-                    float(record.get("ended_at") or started),
-                    float(llm.get("started_at") or 0.0),
-                    float(llm.get("ended_at") or 0.0),
+                    float(record.ended_at or started),
+                    float(record.llm_started_at or 0.0),
+                    float(record.llm_ended_at or 0.0),
                     len(data),
                 ),
             )

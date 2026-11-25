@@ -1276,13 +1276,19 @@ function closeDrawer() {
 
 function renderDrawer() {
   const drawer = $("#drawer");
-  const turn = state.drawer;
+  const stored = state.drawer;
 
-  if (!turn) {
+  if (!stored) {
     drawer.hidden = true;
     drawer.textContent = "";
     return;
   }
+
+  // The core archives the adapter's payload verbatim under `raw`; the
+  // drawer renders that shape, not the core's envelope around it.
+  const turn = stored.raw && Object.keys(stored.raw).length
+    ? { ...stored, ...stored.raw }
+    : stored;
 
   drawer.hidden = false;
 

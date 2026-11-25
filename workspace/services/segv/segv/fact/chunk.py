@@ -1,13 +1,12 @@
 """Turn -> chunks.
 
 A chunk is the unit fact stores: two texts, two vectors, one pointer.
-Ingestion prefers the whole turn in one chunk. Only when the rendered run
-does not fit do we cut, in this order: rendered list elements (messages),
-top-level sections (delta / injection / inbox), inner list elements, then
-paragraphs and sentences.
+Ingestion prefers the whole turn in one chunk. Only when the message run
+does not fit do we cut, in this order: message elements, top-level
+sections, inner list elements, then paragraphs and sentences.
 
-Every '<injection>' block is excluded from the observation: per-turn
-service contributions are volatile, and system messages never enter.
+Messages arrive already cleaned by the adapter: injected service blocks
+and system messages never reach this layer.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ _TAG_RE = re.compile(r"<\s*(/?)\s*([A-Za-z_][\w:.-]*)((?:\s[^<>]*?)?)(/?)\s*>")
 
 @dataclass
 class Part:
-    """One rendered list element, or one piece of a long element."""
+    """One message element, or one piece of a long element."""
 
     role: str
     body: str
@@ -60,14 +59,6 @@ def iso_timestamp(value: Any) -> str:
         seconds = 0.0
 
     return datetime.fromtimestamp(seconds, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-_INJECTION_RE = re.compile(r"<injection(?:\s[^>]*)?>.*?</injection>", re.DOTALL)
-
-
-def strip_injections(text: str) -> str:
-    """Remove every injected service block from a user observation."""
-    return _INJECTION_RE.sub("", text).strip()
 
 
 def split_sections(text: str) -> list[str]:
@@ -245,9 +236,6 @@ def _message_body(message: dict[str, Any], config: ChunkConfig) -> str:
     if not isinstance(content, str):
         content = "" if content is None else str(content)
 
-    if role == "user":
-        content = strip_injections(content)
-
     lines = [content.strip()] if content.strip() else []
 
     if role == "assistant" and config.include_tool_calls:
@@ -282,18 +270,18 @@ def _pack(parts: list[Part], max_chars: int) -> list[ChunkDraft]:
 
 
 def build_chunks(
-    payload: dict[str, Any], config: ChunkConfig
+    record: dict[str, Any], config: ChunkConfig
 ) -> tuple[str, list[ChunkDraft]]:
     """Build the ordered chunk drafts for one archived turn."""
-    ts = iso_timestamp(payload.get("started_at"))
-    rendered = payload.get("rendered") or []
+    ts = iso_timestamp(record.get("started_at"))
+    messages = record.get("messages") or []
 
-    if not isinstance(rendered, list):
+    if not isinstance(messages, list):
         return ts, []
 
     parts: list[Part] = []
 
-    for message in rendered:
+    for message in messages:
         if not isinstance(message, dict):
             continue
 

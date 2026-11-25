@@ -1,7 +1,7 @@
 """The fact layer: worker, ingestion, and four-route recall.
 
 Ingestion is off the archive path. `/turn` writes L0 and returns; this
-layer reads the rendered run from L0, builds chunks, cues and vectors, and
+layer reads the message run from L0, builds chunks, cues and vectors, and
 commits them with a marker. Recall fuses four routes with the frozen v2
 weights, reranks the head with the cross-encoder, and fuses again.
 """

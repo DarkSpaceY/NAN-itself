@@ -9,7 +9,7 @@ One record per chunk, self-describing and compressed:
     S \\0 dim                           -> embedding dimension guard
 
 The record is the fact: raw chunk text, cue text, two int8 vectors, and the
-L0 pointer (agent_id, seq). There is no rendered JSON in this layer.
+L0 pointer (agent_id, seq). There is no turn text in this layer.
 
 BM25 uses the frozen v2 parameters (k1=1.5, b=0) and the same idf
 calculation as rank_bm25, so scores match the experiment. Dense search is

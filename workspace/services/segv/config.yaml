@@ -19,7 +19,7 @@ surface:                    # the trace UI, served by this service
 
 data_dir: "data"            # RocksDB home, relative to this directory
 
-max_bytes: 4294967296       # L0 budget: 4 GiB rolling, oldest turns pruned first
+max_bytes: 21474836480      # L0 budget: 20 GiB rolling, oldest turns pruned first
 prune_to: 0.95              # retention deletes down to this fraction of max_bytes
 
 ledger_limit: 300           # rows per page of the global time order
