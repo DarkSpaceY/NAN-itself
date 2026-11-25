@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "MCP gateway: holds the configured MCP servers and exposes their tools to the sandbox shell"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp>=2.14.1",
+    "fastmcp>=2.14.1,<3",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "loguru>=0.7.3",

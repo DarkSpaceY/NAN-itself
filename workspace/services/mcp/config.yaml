@@ -24,14 +24,6 @@ servers:
     command: npx
     args: ["--yes", "@cyanheads/calculator-mcp-server@0.4.0"]
 
-  - name: command
-    command: uvx
-    args: ["mcp-shell-server==1.1.4"]
-
-  - name: files
-    command: npx
-    args: ["--yes", "@modelcontextprotocol/server-filesystem@2026.7.10", "{workspace}"]
-
   - name: playwright
     command: npx
     args: ["--yes", "@playwright/mcp@0.0.79", "--headless"]
