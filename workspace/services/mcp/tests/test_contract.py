@@ -6,10 +6,9 @@ prompt text alone, and unregisters on exit.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from main import MCPService, build_app, load_config
 from nan_service_kit import HubLink
 from nan_service_kit.testing import FRESH_TURN, StubHub, assert_registered
-
-from main import MCPService, build_app, load_config
 
 
 def test_inject_contract():

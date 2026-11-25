@@ -18,7 +18,6 @@ import asyncio
 import contextlib
 import json
 import os
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +35,20 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = HERE / "config.yaml"
 
 CACHE_DIR = "cache"  # package-manager caches; regenerable, safe to delete
+
+
+def _error(code: str, message: str) -> dict[str, Any]:
+    """A failed call result with a machine-readable code."""
+    return {"ok": False, "error": {"code": code, "message": message}}
+
+
+def _maybe_json(text: str) -> Any:
+    """Tool text is usually JSON; keep plain text as a string."""
+    try:
+        return json.loads(text)
+
+    except json.JSONDecodeError:
+        return text
 
 
 class ServerSpec:
@@ -173,33 +186,38 @@ class MCPServer:
     async def call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         async with self._lock:
             if self._client is None:
-                return {"ok": False, "error": f"server {self.spec.name} is not running"}
+                return _error("server_unavailable", f"server {self.spec.name} is not running")
 
             try:
                 result = await asyncio.wait_for(
                     self._client.call_tool(tool, arguments), timeout=self.config.call_timeout
                 )
 
-            except asyncio.TimeoutError:
-                return {
-                    "ok": False,
-                    "error": f"{self.spec.name}.{tool} timed out after {self.config.call_timeout}s",
-                }
+            except TimeoutError:
+                return _error(
+                    "timeout",
+                    f"{self.spec.name}.{tool} timed out after {self.config.call_timeout}s",
+                )
 
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return _error("tool_error", str(exc))
 
         texts = [
             block.text for block in result.content if type(block).__name__ == "TextContent"
         ]
 
+        text = "\n".join(texts).strip()
+
+        if result.is_error:
+            return _error("tool_error", text or f"{self.spec.name}.{tool} returned an error")
+
         if texts:
-            return {"ok": not result.is_error, "result": "\n".join(texts)}
+            return {"ok": True, "result": _maybe_json(text)}
 
         if getattr(result, "data", None) is not None:
-            return {"ok": not result.is_error, "result": json.dumps(result.data, default=str)}
+            return {"ok": True, "result": result.data}
 
-        return {"ok": not result.is_error, "result": ""}
+        return {"ok": True, "result": ""}
 
 
 class MCPService:
@@ -222,6 +240,8 @@ class MCPService:
         self._config_mtime: float = config_path.stat().st_mtime
 
         self._running: dict[str, MCPServer] = {}
+
+        self._failed: dict[str, str] = {}
 
         self._lifecycle = asyncio.Lock()
 
@@ -258,6 +278,8 @@ class MCPService:
             if current is not None:
                 await current.stop()
 
+                self._running.pop(spec.name, None)
+
             server = MCPServer(spec, self.config)
 
         try:
@@ -266,10 +288,14 @@ class MCPService:
         except Exception as exc:
             logger.warning("MCP server {}: failed to start: {}", spec.name, exc)
 
+            self._failed[spec.name] = str(exc)
+
             return
 
         async with self._lifecycle:
             self._running[spec.name] = server
+
+            self._failed.pop(spec.name, None)
 
     async def reload_if_changed(self) -> None:
         try:
@@ -304,6 +330,10 @@ class MCPService:
 
                     del self._running[name]
 
+            for name in list(self._failed):
+                if name not in wanted:
+                    del self._failed[name]
+
         for spec in self.specs:
             await self._ensure(spec)
 
@@ -326,8 +356,11 @@ class MCPService:
             return ""
 
         text = (
-            f"External MCP tool servers are reachable through `mcp` (on PATH) or `{HERE}/mcp.sh`; "
-            "run either with `--help` for list, schema and call."
+            f"External MCP tool servers: `mcp` (on PATH) or `{HERE}/mcp.sh`; "
+            "`mcp list` shows connected tools and unavailable servers, "
+            "`mcp schema <server> <tool>` shows the arguments, "
+            "and `mcp call <server> <tool> '<json>'` prints the tool result. "
+            "On failure the call exits non-zero and writes a JSON error to stderr."
         )
 
         names = sorted({spec.name for spec in self.specs})
@@ -379,20 +412,26 @@ def build_app(service: MCPService) -> FastAPI:
             {"name": name, "tools": server.tools} for name, server in sorted(service._running.items())
         ]
 
-        return {"servers": servers}
+        return {"servers": servers, "unavailable": dict(sorted(service._failed.items()))}
 
     @app.get("/schema/{server}/{tool}")
     async def schema(server: str, tool: str) -> dict[str, Any]:
         entry = service._running.get(server)
 
         if entry is None:
-            return {"ok": False, "error": f"unknown server: {server}"}
+            return _error("unknown_server", f"unknown server: {server}")
 
         for candidate in entry.tools:
             if candidate["name"] == tool:
-                return {"ok": True, "server": server, "tool": tool, "schema": candidate["input_schema"]}
+                return {
+                    "ok": True,
+                    "server": server,
+                    "tool": tool,
+                    "description": candidate.get("description", ""),
+                    "schema": candidate["input_schema"],
+                }
 
-        return {"ok": False, "error": f"unknown tool: {server}.{tool}"}
+        return _error("unknown_tool", f"unknown tool: {server}.{tool}")
 
     @app.post("/call")
     async def call(body: dict[str, Any]) -> dict[str, Any]:
@@ -400,15 +439,21 @@ def build_app(service: MCPService) -> FastAPI:
 
         tool = str(body.get("tool", ""))
 
-        arguments = body.get("arguments") or {}
+        arguments = body.get("arguments", {})
+
+        if arguments is None:
+            arguments = {}
 
         entry = service._running.get(server)
 
         if entry is None:
-            return {"ok": False, "error": f"unknown server: {server}"}
+            return _error("unknown_server", f"unknown server: {server}")
 
         if not isinstance(arguments, dict):
-            return {"ok": False, "error": "arguments must be a JSON object"}
+            return _error("invalid_arguments", "arguments must be a JSON object")
+
+        if not any(candidate["name"] == tool for candidate in entry.tools):
+            return _error("unknown_tool", f"unknown tool: {server}.{tool}")
 
         return await entry.call(tool, arguments)
 

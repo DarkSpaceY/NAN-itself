@@ -53,11 +53,13 @@ async def web_search(
     pageno: int = 1,
     max_results: int = DEFAULT_MAX_RESULTS,
     timeout: float = DEFAULT_TIMEOUT_S,
+    diagnostics: bool = False,
 ) -> Any:
     """Search the web with the embedded SearXNG core.
 
     Returns a JSON object with `results` (url/title/content/
-    engine/score), `engine_stats`, `elapsed_sec` and `result_count`.
+    engine/score), `elapsed_sec` and `result_count`. The per-engine
+    `engine_stats` table is included only when `diagnostics` is true.
 
     Args:
         query: search query text.
@@ -72,6 +74,7 @@ async def web_search(
         pageno: result page number, starting at 1.
         max_results: maximum number of results returned.
         timeout: per-search timeout in seconds.
+        diagnostics: include the full per-engine status table.
     """
     argv = [
         _uvx_command(),
@@ -129,10 +132,15 @@ async def web_search(
         raise RuntimeError(f"searxng-cli exited with {process.returncode}: {detail}")
 
     try:
-        return json.loads(stdout.decode("utf-8", "replace"))
+        data = json.loads(stdout.decode("utf-8", "replace"))
 
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"searxng-cli produced invalid JSON: {exc}") from exc
+
+    if not diagnostics and isinstance(data, dict):
+        data.pop("engine_stats", None)
+
+    return data
 
 
 if __name__ == "__main__":
