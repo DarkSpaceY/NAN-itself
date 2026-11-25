@@ -326,8 +326,8 @@ class MCPService:
             return ""
 
         text = (
-            f"External MCP tool servers are reachable through `{HERE}/mcp.sh`; "
-            "run it with `--help` for list, schema and call."
+            f"External MCP tool servers are reachable through `mcp` (on PATH) or `{HERE}/mcp.sh`; "
+            "run either with `--help` for list, schema and call."
         )
 
         names = sorted({spec.name for spec in self.specs})

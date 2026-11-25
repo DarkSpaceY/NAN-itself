@@ -1,0 +1,4 @@
+#!/bin/sh
+# Workspace tools. NAN's shell verb puts this directory on PATH, so an
+# agent can run `mcp ...` by bare name.
+exec "$(dirname "$0")/../services/mcp/mcp.sh" "$@"
