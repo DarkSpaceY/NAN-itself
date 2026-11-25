@@ -116,6 +116,7 @@ class MCPServer:
         cache_env = {
             "npm_config_cache": str(cache / "npm"),
             "UV_CACHE_DIR": str(cache / "uv"),
+            "UV_TOOL_DIR": str(cache / "uv-tools"),
             "PLAYWRIGHT_BROWSERS_PATH": str(cache / "playwright"),
         }
 
