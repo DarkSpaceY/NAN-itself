@@ -3,7 +3,7 @@
 ## Setup
 
     uv sync                      # runtime + dev tools
-    npm --prefix frontend ci     # for the tsc / vitest hooks
+    npm --prefix electron ci     # for the tsc / vitest hooks
     uv run pre-commit install
 
 ## Test

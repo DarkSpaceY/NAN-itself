@@ -1,13 +1,14 @@
 #!/bin/sh
-# NAN-itself bootstrap installer: clones the repository, installs
-# dependencies, builds the web UI and prepares the directory layout.
+# NAN-itself installer: prepares python dependencies, installs the
+# desktop shell and builds the renderer. Run it inside a checkout, or
+# pipe it to sh to clone one into ~/nan.
 #
 # Usage:
+#   sh scripts/install.sh
 #   curl -fsSL https://raw.githubusercontent.com/DarkSpaceY/NAN-itself/main/scripts/install.sh | sh
-#   or: sh install.sh
 #
 # Environment overrides:
-#   NAN_HOME  install directory (default: ~/nan)
+#   NAN_HOME  clone directory when run outside a checkout (default: ~/nan)
 #   NAN_REPO  repository URL    (default: the GitHub repository)
 #   NAN_REF   branch or tag     (default: main)
 
@@ -15,17 +16,15 @@ set -eu
 
 REPO_URL="${NAN_REPO:-https://github.com/DarkSpaceY/NAN-itself.git}"
 REPO_REF="${NAN_REF:-main}"
-INSTALL_DIR="${NAN_HOME:-$HOME/nan}"
 
 log() { printf '\n==> %s\n' "$*"; }
-warn() { printf 'warning: %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 # --- platform ---------------------------------------------------------
 
 case "$(uname -s)" in
-    Darwin) OS=macos ;;
-    Linux) OS=linux ;;
+    Darwin) ;;
+    Linux) ;;
     MINGW*|MSYS*|CYGWIN*)
         die "native Windows is not supported; install WSL2 and run this inside it
        (guide: https://learn.microsoft.com/en-us/windows/wsl/install)" ;;
@@ -34,6 +33,38 @@ case "$(uname -s)" in
 esac
 
 command -v git >/dev/null 2>&1 || die "git is required but not installed"
+command -v npm >/dev/null 2>&1 || die "Node.js 18+ (npm) is required for the desktop UI"
+
+# --- locate the tree --------------------------------------------------
+
+# Running from a checkout (sh scripts/install.sh) prepares that tree;
+# a piped install has no script path and clones into NAN_HOME.
+SCRIPT_DIR=""
+
+if [ -f "$0" ]; then
+    SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+fi
+
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../pyproject.toml" ]; then
+    INSTALL_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+    log "using the checkout at $INSTALL_DIR"
+else
+    INSTALL_DIR="${NAN_HOME:-$HOME/nan}"
+
+    # An existing checkout is used as it is: this installer never pulls,
+    # resets or otherwise overwrites local work (config/nan.yaml holds the
+    # user's key and builtin/ is user-owned). Updating is a deliberate git
+    # operation the user performs.
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        log "using the existing checkout at $INSTALL_DIR (left untouched)"
+    else
+        log "cloning NAN-itself ($REPO_REF) into $INSTALL_DIR"
+        git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR"
+    fi
+fi
+
+cd "$INSTALL_DIR"
 
 # --- uv ---------------------------------------------------------------
 
@@ -45,21 +76,6 @@ else
     export PATH="$HOME/.local/bin:$PATH"
     command -v uv >/dev/null 2>&1 || die "uv installation failed"
 fi
-
-# --- clone ------------------------------------------------------------
-
-# An existing checkout is used as it is: this installer never pulls,
-# resets or otherwise overwrites local work (config/nan.yaml holds the
-# user's key and builtin/ is user-owned). Updating is a deliberate git
-# operation the user performs.
-if [ -d "$INSTALL_DIR/.git" ]; then
-    log "using the existing checkout at $INSTALL_DIR (left untouched)"
-else
-    log "cloning NAN-itself ($REPO_REF) into $INSTALL_DIR"
-    git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$INSTALL_DIR"
-fi
-
-cd "$INSTALL_DIR"
 
 # --- configuration ----------------------------------------------------
 
@@ -83,16 +99,10 @@ uv sync
 # a user removed them.
 mkdir -p builtin/services workspace/services
 
-# --- web UI -----------------------------------------------------------
+# --- desktop ----------------------------------------------------------
 
-if command -v npm >/dev/null 2>&1; then
-    log "building the web UI (frontend/dist)"
-    (cd frontend && npm install --no-fund --no-audit && npm run build)
-else
-    warn "npm not found: skipping the web UI build"
-    warn "the gateway starts without it, serving only /ws and /surfaces"
-    warn "install Node.js 18+ and run: cd frontend && npm install && npm run build"
-fi
+log "installing the desktop shell and building the renderer (electron/)"
+(cd electron && npm install --no-fund --no-audit && npm run build)
 
 # --- done -------------------------------------------------------------
 
@@ -105,5 +115,6 @@ Next steps:
   2. Review %s/nan/persona.md.
   3. Run:
        cd %s && uv run nan
-  The web UI comes up on http://127.0.0.1:8765 once frontend/dist exists.
+  The NAN window opens once the gateway is up; services reach it on
+  http://127.0.0.1:8765.
 ' "$CONFIG" "$INSTALL_DIR" "$INSTALL_DIR"

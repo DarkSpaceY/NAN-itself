@@ -14,8 +14,8 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./renderer/src/*"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["renderer/src", "renderer/tests", "vite.config.ts"]
 }

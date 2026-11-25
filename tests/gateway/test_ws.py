@@ -52,7 +52,7 @@ async def _until(ws: Any, kind: str) -> dict:
 
 async def _serve(gateway: Gateway, port: int) -> tuple[asyncio.Task[None], str]:
     PATHS.frontend = Path("/nonexistent/nan-frontend")
-    task = asyncio.create_task(gateway.serve(open_browser=False))
+    task = asyncio.create_task(gateway.serve())
 
     await _wait_port(port)
 

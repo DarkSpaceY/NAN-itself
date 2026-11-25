@@ -54,7 +54,7 @@ extend-exclude = [
     "workspace",
     "builtin",
     "data",
-    "frontend",
+    "electron",
     "legacy",
 ]
 

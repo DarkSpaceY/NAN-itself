@@ -46,19 +46,19 @@ git-ignored because it holds your key -- then fill in the active model
       api_key: ""
       model: ""
 
-Build the web UI (from the repo root):
+Build the desktop UI (from the repo root):
 
-    cd frontend && npm install && npm run build && cd ..
+    cd electron && npm install && npm run build && cd ..
 
 Run:
 
     uv run nan
 
-The web UI comes up on `http://127.0.0.1:8765` once
-`frontend/dist/index.html` exists; without it the gateway still
-serves `/ws` and `/surfaces`. Talk to the root agent; it can spawn
-subagents, run shell commands in its sandboxed workspace, and hold
-conversations across turns.
+The NAN window opens once the gateway is up. The gateway keeps
+listening on `http://127.0.0.1:8765` for services; the window loads
+the renderer served from the same process. Talk to the root agent; it
+can spawn subagents, run shell commands in its sandboxed workspace,
+and hold conversations across turns. Closing the window stops the core.
 
 ## How it works
 
@@ -101,7 +101,7 @@ conversations across turns.
     builtin/      user-owned resources: skills, services/, autostart.sh
     workspace/    agent-writable territory: services/, autostart.sh
     config/       nan.yaml, the configuration file
-    frontend/     the desktop UI, built to frontend/dist
+    electron/     the desktop shell; renderer built to electron/renderer/dist
     scripts/      install.sh
     tests/        the core pytest suite, one directory per feature
     docs/         this documentation

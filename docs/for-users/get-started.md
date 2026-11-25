@@ -10,14 +10,15 @@
   [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install),
   where bubblewrap and the Unix shell the runtime builds on are
   available. See the note in the README.
-- Node.js 18+ for the web UI (optional: the core starts and serves
-  `/ws` and `/surfaces` without it).
+- Node.js 18+ (npm): the desktop window is an Electron shell, and
+  the renderer is built with Vite.
 
 ## Install
 
 One-liner for macOS or Linux: installs uv if missing, clones to
-`~/nan` (override with `NAN_HOME`), syncs dependencies, and builds
-the web UI:
+`~/nan` (override with `NAN_HOME`), syncs dependencies, installs the
+desktop shell and builds the renderer. Run inside a checkout, it
+prepares that tree instead of cloning:
 
     curl -fsSL https://raw.githubusercontent.com/DarkSpaceY/NAN-itself/main/scripts/install.sh | sh
 
@@ -25,9 +26,9 @@ Or install manually. Sync the python dependencies:
 
     uv sync
 
-Build the web UI:
+Install the desktop shell and build the renderer:
 
-    cd frontend && npm install && npm run build
+    cd electron && npm install && npm run build
 
 ## Configure
 
@@ -57,10 +58,10 @@ What starts:
 - the agent loop (the root agent starts it; each agent runs
   event-driven by default, or self-rotating with
   `agent.autonomous_interval > 0`)
-- the gateway web UI on `http://127.0.0.1:8765` (serving
-  `frontend/dist`; without `frontend/dist/index.html` the gateway
-  still serves `/ws` and `/surfaces`, and the browser opens once the
-  port accepts connections)
+- the gateway on `http://127.0.0.1:8765`, serving
+  `electron/renderer/dist` and the WebSocket the window uses
+- the desktop window (Electron) once the gateway is bound; closing
+  the window stops the core
 - the injection registry on `127.0.0.1:8901`
 - the autostart scripts, if enabled and present: `builtin/autostart.sh`
   (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
@@ -74,7 +75,7 @@ flowchart LR
         HUB["injection registry<br/>:8901"]
         AUTO["autostart scripts"]
     end
-    BROWSER["browser"] <-->|"HTTP + WebSocket"| GW
+    WINDOW["desktop window<br/>(Electron)"] <-->|"HTTP + WebSocket"| GW
     GW -->|"user input"| ROOT
     ROOT -->|"events (sink)"| GW
     SVC["services"] -->|"register / heartbeat"| HUB
@@ -84,9 +85,8 @@ flowchart LR
     style PROC fill:transparent,stroke:#2563eb,stroke-width:2px
 ```
 
-Open the gateway URL and talk to the agent. Input goes to the
-root agent's inbox; its replies and subagent output stream into
-the UI.
+Talk to the agent in the window. Input goes to the root agent's
+inbox; its replies and subagent output stream into the UI.
 
 ## First tools
 

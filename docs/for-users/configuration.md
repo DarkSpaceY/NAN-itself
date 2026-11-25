@@ -102,7 +102,8 @@ Paths are fixed in `nan.config.Paths`.
 | `paths.snapshots` | `<repo>/snapshots` | Per-agent recovery snapshots; kept outside the sandbox so a command cannot erase them |
 | `paths.package` | `<repo>/nan` | The package root (read-only to agents) |
 | `paths.persona` | `<repo>/nan/persona.md` | The global persona, re-read every turn |
-| `paths.frontend` | `<repo>/frontend/dist` | The built desktop served by the gateway |
+| `paths.electron` | `<repo>/electron` | The desktop shell package |
+| `paths.frontend` | `<repo>/electron/renderer/dist` | The built renderer served by the gateway |
 | `paths.autostart` | `<repo>/builtin/autostart.sh` | Boot script, owned by the user (unsandboxed) |
 | `paths.agent_autostart` | `<repo>/workspace/autostart.sh` | Boot script, writable by agents (sandboxed) |
 | `paths.config` | `<repo>/config/nan.yaml` | This file |

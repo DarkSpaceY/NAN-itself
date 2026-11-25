@@ -7,12 +7,22 @@ import react from "@vitejs/plugin-react";
 const GATEWAY_PORT = 8765;
 const GATEWAY = `127.0.0.1:${GATEWAY_PORT}`;
 
+const RENDERER = path.resolve(__dirname, "renderer");
+
 export default defineConfig({
+  // The renderer is the Vite root; the window loads the same build from
+  // the gateway, so dev and production share one document layout.
+  root: RENDERER,
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(RENDERER, "src"),
     },
+  },
+  build: {
+    outDir: path.resolve(RENDERER, "dist"),
+    // outDir sits outside the Vite root: emptying it must be explicit.
+    emptyOutDir: true,
   },
   server: {
     // 固定端口：被占用时直接失败，绝不静默切到 5174。

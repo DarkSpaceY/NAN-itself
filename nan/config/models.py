@@ -39,7 +39,8 @@ class Paths(BaseModel):
     builtin: Path = _REPO_ROOT / "builtin"  # read-only resources
     snapshots: Path = _REPO_ROOT / "snapshots"  # per-agent recovery state, outside the sandbox
     persona: Path = _PACKAGE_DIR / "persona.md"  # re-read every turn
-    frontend: Path = _REPO_ROOT / "frontend" / "dist"  # built desktop
+    electron: Path = _REPO_ROOT / "electron"  # desktop shell and renderer
+    frontend: Path = _REPO_ROOT / "electron" / "renderer" / "dist"  # built renderer
     autostart: Path = _REPO_ROOT / "builtin" / "autostart.sh"  # user-owned, unsandboxed
     agent_autostart: Path = _REPO_ROOT / "workspace" / "autostart.sh"  # agent-writable, sandboxed
 

@@ -46,7 +46,7 @@ async def test_entry_guard_rejects_forged_host_and_origin() -> None:
 
     PATHS.frontend = Path("/nonexistent/nan-frontend")
     gateway = Gateway(settings=cfg)
-    task = asyncio.create_task(gateway.serve(open_browser=False))
+    task = asyncio.create_task(gateway.serve())
 
     try:
         await _wait_port(port)

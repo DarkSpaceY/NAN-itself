@@ -13,13 +13,13 @@ restores from it.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import contextlib
 import os
 import signal
 import uuid
 from enum import Enum
+from pathlib import Path
 
 from loguru import logger
 
@@ -37,6 +37,7 @@ from nan.utils.autostart import Autostart
 from nan.utils.net import PortUnavailableError, ensure_port_available
 
 _SHUTDOWN_TIMEOUT = 10.0
+_WINDOW_SHUTDOWN_TIMEOUT = 5.0
 _SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 
@@ -49,13 +50,16 @@ class CoreState(Enum):
     STOPPED = "stopped"
 
 
+class DesktopUnavailableError(RuntimeError):
+    """A startup refusal whose message is meant for the user."""
+
+
 class Core:
     """Owns the lifecycle and the wired components."""
 
-    def __init__(self, *, open_browser: bool = True) -> None:
+    def __init__(self) -> None:
         self._state = CoreState.INIT
         self._boot_id = uuid.uuid4().hex[:12]
-        self._open_browser = open_browser
         self._stop: asyncio.Event | None = None
 
         self._settings: Settings | None = None
@@ -68,6 +72,9 @@ class Core:
         self._autostart: Autostart | None = None
 
         self._gateway_task: asyncio.Task[None] | None = None
+        self._window_binary: Path | None = None
+        self._window: asyncio.subprocess.Process | None = None
+        self._window_task: asyncio.Task[None] | None = None
         self._signal_handlers: list[int] = []
 
     # ------------------------------------------------------------------
@@ -102,6 +109,20 @@ class Core:
             self._settings.injection.port,
             "injection registry",
         )
+
+        # The desktop is the only entry: refuse a boot that cannot open
+        # its window, with the command that fixes it.
+        self._window_binary = self._settings.paths.electron / "node_modules" / ".bin" / "electron"
+
+        if not self._window_binary.is_file():
+            raise DesktopUnavailableError(
+                "desktop dependencies are missing: run `npm install` in electron/"
+            )
+
+        if not (self._settings.paths.frontend / "index.html").is_file():
+            raise DesktopUnavailableError(
+                "the desktop UI is not built: run `npm run build` in electron/"
+            )
 
         self._llm = LLMProvider(self._settings)
         self._hub = InjectionHub(self._settings)
@@ -153,10 +174,8 @@ class Core:
         if self._root.task is None:
             self._root.start()
 
-        self._gateway_task = asyncio.create_task(
-            self._gateway.serve(open_browser=self._open_browser),
-            name="gateway",
-        )
+        self._gateway_task = asyncio.create_task(self._gateway.serve(), name="gateway")
+        self._window_task = asyncio.create_task(self._open_window(), name="window")
 
         self._install_signals()
         self._state = CoreState.RUNNING
@@ -187,6 +206,7 @@ class Core:
         # Everything after it is best-effort cleanup.
         self._suspend_root()
 
+        await self._stop_window()
         await self._await_root_task()
         await self._stop_autostart()
         await self._close_gateway()
@@ -288,6 +308,83 @@ class Core:
 
         except Exception:
             logger.exception("LLM close failed")
+
+    # ------------------------------------------------------------------
+    # desktop window
+    # ------------------------------------------------------------------
+
+    async def _open_window(self) -> None:
+        """Open the Electron window once the gateway is bound; stop on close."""
+        gateway = self._gateway
+        gateway_task = self._gateway_task
+        assert gateway is not None and gateway_task is not None
+
+        ready = asyncio.create_task(gateway.wait_until_ready(), name="gateway-ready")
+
+        try:
+            done, _ = await asyncio.wait(
+                {ready, gateway_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+        finally:
+            if not ready.done():
+                ready.cancel()
+
+                with contextlib.suppress(asyncio.CancelledError):
+                    await ready
+
+        # The gateway exited (bind failure) or shutdown started first.
+        if ready not in done:
+            return
+
+        assert self._window_binary is not None and self._settings is not None
+
+        url = f"http://{gateway.host}:{gateway.port}/?boot={self._boot_id}"
+
+        try:
+            self._window = await asyncio.create_subprocess_exec(
+                str(self._window_binary),
+                str(self._settings.paths.electron),
+                env={**os.environ, "NAN_URL": url},
+            )
+
+        except OSError as error:
+            logger.error("Failed to start the desktop window: {}", error)
+            self._request_stop()
+
+            return
+
+        logger.info("Desktop window opened: {}", url)
+
+        code = await self._window.wait()
+
+        logger.info("Desktop window closed (exit code {})", code)
+        self._request_stop()
+
+    async def _stop_window(self) -> None:
+        window = self._window
+
+        if window is not None and window.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                window.terminate()
+
+            try:
+                await asyncio.wait_for(window.wait(), timeout=_WINDOW_SHUTDOWN_TIMEOUT)
+
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    window.kill()
+
+                await window.wait()
+
+        task = self._window_task
+
+        if task is not None and not task.done():
+            task.cancel()
+
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     # ------------------------------------------------------------------
     # signals
@@ -435,22 +532,15 @@ class Core:
         self._autostart.start()
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="nan", description="Run the NAN core.")
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="do not open a browser window; the desktop shell loads the gateway itself",
-    )
-    args = parser.parse_args(argv)
-
+def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
         try:
-            asyncio.run(Core(open_browser=not args.no_browser).run())
+            asyncio.run(Core().run())
 
-        except PortUnavailableError as error:
-            # Startup refusals (occupied ports, unusable address) are
-            # configuration errors, not bugs: one line, exit non-zero.
+        except (PortUnavailableError, DesktopUnavailableError) as error:
+            # Startup refusals (occupied ports, missing desktop build)
+            # are configuration errors, not bugs: one line, exit
+            # non-zero.
             logger.error("{}", error)
 
             raise SystemExit(1) from error

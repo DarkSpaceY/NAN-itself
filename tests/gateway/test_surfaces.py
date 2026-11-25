@@ -54,7 +54,7 @@ async def test_surface_registration_broadcast_and_replay(no_sink: None) -> None:
     cfg = Settings()
     cfg.gateway.port = port
     gateway = Gateway(settings=cfg)
-    task = asyncio.create_task(gateway.serve(open_browser=False))
+    task = asyncio.create_task(gateway.serve())
 
     try:
         await _wait_port(port)
@@ -115,7 +115,7 @@ async def test_surface_update_replaces_without_removal(no_sink: None) -> None:
     cfg = Settings()
     cfg.gateway.port = port
     gateway = Gateway(settings=cfg)
-    task = asyncio.create_task(gateway.serve(open_browser=False))
+    task = asyncio.create_task(gateway.serve())
 
     try:
         await _wait_port(port)
@@ -163,7 +163,7 @@ async def test_surface_expires_without_heartbeat(no_sink: None) -> None:
     cfg.gateway.port = port
     cfg.gateway.surface_ttl = 1.0
     gateway = Gateway(settings=cfg)
-    task = asyncio.create_task(gateway.serve(open_browser=False))
+    task = asyncio.create_task(gateway.serve())
 
     try:
         await _wait_port(port)

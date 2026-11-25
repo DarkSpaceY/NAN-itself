@@ -30,7 +30,7 @@ prompt injection, and the shell as the universal tool surface.
     builtin/      user-owned resources: skills, services/, autostart.sh
     workspace/    agent-writable territory: services/, autostart.sh
     config/       nan.yaml, the configuration file
-    frontend/     the desktop UI, built to frontend/dist
+    electron/     the desktop shell; renderer built to electron/renderer/dist
     scripts/      install.sh
     tests/        the core pytest suite
     docs/         this documentation

@@ -12,7 +12,7 @@ event.
 
 ## Layout
 
-    frontend/src/
+    electron/renderer/src/
     ├── main.tsx          composition root: store, hub, transport, react root
     ├── transport/        the upstream channel
     │   ├── ws.ts         WebSocket client: hello, replay, reconnect, ping
@@ -36,7 +36,7 @@ event.
 
 - `kernel/` imports nothing from `shell/`, `surfaces/` or
   `transport/`. It is reducers and lookups over plain objects, so
-  `frontend/tests/` runs them under vitest with no DOM.
+  `electron/renderer/tests/` runs them under vitest with no DOM.
 - `transport/` imports `kernel/` (protocol + hub) and reports
   connection state through `GlobalStore`; it does not import
   `shell/`.
@@ -148,16 +148,17 @@ in real CSS pixels and adapts with ordinary CSS. Only the chrome
 
 ## Build, dev, test
 
-    cd frontend
+    cd electron
     npm install
-    npm run dev     # vite; proxies /ws to 127.0.0.1:8765
-    npm run build   # tsc --noEmit && vite build -> dist/
+    npm run dev     # vite on :5173; proxies /ws to 127.0.0.1:8765
+    npm run build   # tsc --noEmit && vite build -> renderer/dist/
     npm test        # vitest over the kernel and transport
 
 The dev proxy rewrites the `Origin` header to the gateway's own
 address, since the dev server's origin would otherwise fail the
-entry guard. In production the gateway serves `dist/` itself, so
-the page and the socket share one loopback origin.
+entry guard. The desktop window loads the built bundle, so changes
+reach it after `npm run build`; the gateway serves `renderer/dist/`
+itself, so the page and the socket share one loopback origin.
 
 `?mock` swaps in `MockTransport` (a scripted stream, no core
 process); `?ws=ws://host:port/ws` overrides the socket URL for

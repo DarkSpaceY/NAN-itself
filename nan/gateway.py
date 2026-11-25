@@ -2,7 +2,7 @@
 WS gateway: bridge the process-wide event sink to the UI.
 
     ws://127.0.0.1:8765/ws
-    http://127.0.0.1:8765/  (frontend static files)
+    http://127.0.0.1:8765/  (built renderer static files)
 
 Server-authoritative stream:
 
@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -66,6 +65,10 @@ class Gateway:
         self._server: uvicorn.Server | None = None
         self._clients: set[WebSocket] = set()
 
+        # Set once this gateway's own socket is bound; the core waits
+        # on it before starting the desktop window.
+        self._ready = asyncio.Event()
+
         # service_id -> (surface spec, last heartbeat); entries whose
         # heartbeat stops expire after surface_ttl.
         self._surfaces: dict[str, tuple[dict[str, Any], float]] = {}
@@ -97,14 +100,15 @@ class Gateway:
     @property
     def frontend_dir(self) -> Path | None:
         """
-        The built desktop at frontend/dist; None when index.html is missing.
+        The built renderer at electron/renderer/dist; None when
+        index.html is missing.
         """
         built = self._settings.paths.frontend
 
         if (built / "index.html").is_file():
             return built
 
-        logger.warning("frontend build not found ({}); run `npm run build` in frontend/", built)
+        logger.warning("renderer build not found ({}); run `npm run build` in electron/", built)
 
         return None
 
@@ -112,8 +116,8 @@ class Gateway:
     # Lifecycle
     # ==================================================================
 
-    async def serve(self, open_browser: bool = True) -> None:
-        """Start the HTTP + WebSocket server; open the browser when asked."""
+    async def serve(self) -> None:
+        """Start the HTTP + WebSocket server."""
         app = self._build_app()
 
         self._server = uvicorn.Server(
@@ -125,13 +129,12 @@ class Gateway:
         reaper = asyncio.create_task(self._reap_surfaces(), name="surface-reaper")
 
         try:
-            # The browser opens only after our own socket is bound.
+            # The desktop window opens only after this socket is bound.
             # "Something accepts on the port" is not enough: a stale
             # instance would answer while this boot silently failed.
             await self._wait_until_serving(server_task)
 
-            if open_browser:
-                self._open_browser()
+            self._ready.set()
 
             await server_task
 
@@ -140,6 +143,10 @@ class Gateway:
 
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
+
+    async def wait_until_ready(self) -> None:
+        """Block until this gateway's own socket is bound."""
+        await self._ready.wait()
 
     def _build_app(self) -> FastAPI:
         """The HTTP surface: entry guard, WS, panels, static desktop."""
@@ -227,7 +234,7 @@ class Gateway:
 
                 return {"error": "Frontend not built"}
 
-            logger.info(f"Frontend static files served from {frontend_dir}")
+            logger.info(f"Renderer static files served from {frontend_dir}")
 
         else:
             logger.warning("Frontend directory not found, skipping static file serving")
@@ -253,15 +260,6 @@ class Gateway:
             await asyncio.sleep(0.01)
 
         raise RuntimeError(f"gateway did not start on {self.host}:{self.port} within 10s")
-
-    def _open_browser(self) -> None:
-        url = f"http://{self.host}:{self.port}/"
-
-        if webbrowser.open(url):
-            logger.info(f"🌐 Opened browser at {url}")
-
-        else:
-            logger.warning(f"Could not open browser, please navigate to {url}")
 
     async def close(self) -> None:
         """Shut the server down."""

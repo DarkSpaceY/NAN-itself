@@ -1,5 +1,5 @@
 # Pre-commit: the same checks CI runs, minus the packaging step.
-# Install: uv sync && npm --prefix frontend ci && uv run pre-commit install
+# Install: uv sync && npm --prefix electron ci && uv run pre-commit install
 # Run all: uv run pre-commit run --all-files
 #
 # Every hook runs through uv, so the ruff/style version is the one in
@@ -7,7 +7,7 @@
 # the formatter cannot disagree with the one committed to the repo.
 #
 # Hooks are scoped by path: a Python-only commit never pays for the
-# frontend build and vice versa.
+# desktop build and vice versa.
 repos:
   - repo: local
     hooks:
@@ -89,28 +89,28 @@ repos:
         pass_filenames: false
         files: ^lib/nan-service-kit/
 
-      # ---- Frontend ----
-      # npm --prefix runs the script with frontend/ as its cwd, so the
+      # ---- Desktop ----
+      # npm --prefix runs the script with electron/ as its cwd, so the
       # hook does not need a shell to cd first.
       - id: tsc
         name: tsc
-        entry: npm --prefix frontend run check
+        entry: npm --prefix electron run check
         language: system
         pass_filenames: false
-        files: ^frontend/.*\.(ts|tsx)$
+        files: ^electron/renderer/.*\.(ts|tsx)$
 
       - id: vitest
         name: vitest
-        entry: npm --prefix frontend run test
+        entry: npm --prefix electron run test
         language: system
         pass_filenames: false
-        files: ^frontend/.*\.(ts|tsx)$
+        files: ^electron/renderer/.*\.(ts|tsx)$
 
       # CI runs the production build; a CSS import or vite config
       # mistake is invisible to tsc and vitest alone.
       - id: build
         name: build
-        entry: npm --prefix frontend run build
+        entry: npm --prefix electron run build
         language: system
         pass_filenames: false
-        files: ^frontend/
+        files: ^electron/
