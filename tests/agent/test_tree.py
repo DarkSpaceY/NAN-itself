@@ -270,3 +270,44 @@ async def test_agent_exited_reason_is_the_death_reason(tmp_path: Path, no_sink: 
     assert exits[child.agent_id]["report"] == "done"
     assert exits[killed.agent_id]["reason"] == f"killed by parent {root.agent_id}"
     assert exits[killed.agent_id]["report"] is None
+
+
+async def test_identity_block_opens_the_epoch_observation(tmp_path: Path, no_sink: None) -> None:
+    """Role, depth and parent open an epoch's first observation: a
+    context clear drops turns, never who the agent is."""
+    llm = FakeLLM()
+
+    root = make_agent(tmp_path=tmp_path, llm=llm, agent={"autonomous_interval": 0.0})
+
+    root.deliver(InboxMessage.from_parent("root identity probe", source="test"))
+
+    root.start()
+
+    # The root's first turn opens the epoch, so its observation
+    # carries the identity block; the child's adds parent and finish.
+    await await_until(lambda: bool(root.turns) and root.turns[-1].phase == "committed")
+
+    child, err = await root.spawn_child("identity probe")
+
+    assert err is None and child is not None
+
+    await await_until(lambda: bool(child.turns) and child.turns[-1].phase == "committed")
+
+    assert root.turns[0].rendered is not None
+    assert child.turns[0].rendered is not None
+
+    root_observation = root.turns[0].rendered[0].content
+    child_observation = child.turns[0].rendered[0].content
+
+    assert root_observation.startswith(f'<self id="{root.agent_id}" role="root" depth="0"/>')
+    assert "You are the root" in root_observation
+
+    assert child_observation.startswith(
+        f'<self id="{child.agent_id}" role="child" depth="1" parent="{root.agent_id}"/>'
+    )
+    assert "finish(report)" in child_observation
+
+    root.request_death("test cleanup")
+
+    with pytest.raises(asyncio.CancelledError):
+        await root._task

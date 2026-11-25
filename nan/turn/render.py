@@ -67,9 +67,10 @@ def freeze_turn(turn: Turn) -> Turn:
 
 def _observation_message(turn: Turn) -> Message:
     """
-    The unified observation schema. Three ordered sections, each
+    The unified observation schema. Four ordered sections, each
     omitted entirely when empty:
 
+        <self>       role, depth and parent (an epoch's first turn)
         <delta>      system state changes since last turn
         <injection>  service contributions this turn
         <inbox>      messages, tagged by the SENDER'S role
@@ -77,6 +78,7 @@ def _observation_message(turn: Turn) -> Message:
     sections = [
         section
         for section in (
+            _identity_section(turn),
             _delta_section(turn),
             _injection_section(turn),
             _inbox_section(turn),
@@ -87,6 +89,28 @@ def _observation_message(turn: Turn) -> Message:
     return Message(
         role="user",
         content="\n\n".join(sections) or "(no input this turn)",
+    )
+
+
+def _identity_section(turn: Turn) -> str | None:
+    """The agent's own block, only on an epoch's first turn: role,
+    depth and parent are fixed for the agent's lifetime."""
+    if turn.origin not in ("first", "context_cleared"):
+        return None
+
+    role = "root" if turn.parent_id is None else "child"
+
+    attrs = f'id="{turn.agent_id}" role="{role}" depth="{turn.depth}"'
+
+    if turn.parent_id is None:
+        return f"<self {attrs}/>\nYou are the root: resident, never finish yourself."
+
+    attrs += f' parent="{turn.parent_id}"'
+
+    return (
+        f"<self {attrs}/>\n"
+        f"You are a child of {turn.parent_id}: an ordinary reply stays "
+        "with you; end the task with finish(report)."
     )
 
 
