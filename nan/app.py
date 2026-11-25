@@ -54,6 +54,25 @@ class DesktopUnavailableError(RuntimeError):
     """A startup refusal whose message is meant for the user."""
 
 
+def _resolve_electron(electron_dir: Path) -> Path | None:
+    """
+    The real Electron executable, not the npm CLI shim.
+
+    `node_modules/.bin/electron` starts with `#!/usr/bin/env node`, so
+    it needs node on PATH; the packaged binary does not. `path.txt`
+    names the platform's binary inside `dist/`.
+    """
+    package = electron_dir / "node_modules" / "electron"
+    pointer = package / "path.txt"
+
+    if not pointer.is_file():
+        return None
+
+    binary = package / "dist" / pointer.read_text(encoding="utf-8").strip()
+
+    return binary if binary.is_file() else None
+
+
 class Core:
     """Owns the lifecycle and the wired components."""
 
@@ -112,9 +131,9 @@ class Core:
 
         # The desktop is the only entry: refuse a boot that cannot open
         # its window, with the command that fixes it.
-        self._window_binary = self._settings.paths.electron / "node_modules" / ".bin" / "electron"
+        self._window_binary = _resolve_electron(self._settings.paths.electron)
 
-        if not self._window_binary.is_file():
+        if self._window_binary is None:
             raise DesktopUnavailableError(
                 "desktop dependencies are missing: run `npm install` in electron/"
             )
