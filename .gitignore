@@ -58,3 +58,4 @@ legacy/
 # vision is being rewritten; the ignore goes away with the rewrite
 builtin/services/vision/
 .nan/
+.uv/
