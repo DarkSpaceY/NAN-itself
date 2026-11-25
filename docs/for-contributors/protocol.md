@@ -148,7 +148,7 @@ idempotent, and always returns `{"status": "ok"}`.
 
 ```json
 { "services": [
-  { "service_id": "record", "endpoint": "http://127.0.0.1:9002/turn",
+  { "service_id": "system", "endpoint": "http://127.0.0.1:9001/turn",
     "mode": "archive", "last_seen": 1761192000.123, "timeout": null } ] }
 ```
 
@@ -204,7 +204,7 @@ The hub diffs the live set against the set this agent saw last and
 appends `DeltaEvent("service", line)` entries:
 
 ```
-+record online
++system online
 -weather offline
 ```
 
@@ -281,13 +281,17 @@ renders `INTERRUPTED`:
 interrupted: agent stopped during execution
 ```
 
-The observation is one user message with up to three sections, in this
+The observation is one user message with up to four sections, in this
 order, each omitted when empty:
 
 ```
+<self id="9d21" role="child" depth="1" parent="root_id"/>
+You are a child of root_id: an ordinary reply stays with you; end the
+task with finish(report).
+
 <delta>
 <service>
-+record online
++system online
 </service>
 </delta>
 
@@ -304,7 +308,12 @@ hello
 </inbox>
 ```
 
-When all three are empty the message is `(no input this turn)`.
+When all four are empty the message is `(no input this turn)`.
+
+`<self>` is synthesized from the turn's identity (`render._identity_section`)
+and appears only on an epoch's first turn (`origin` `first` or
+`context_cleared`): id, role, depth and parent are fixed for the agent's
+lifetime.
 
 `<delta>` groups `DeltaEvent`s by section in first-seen order. Sections
 are `service`, `subagent` (spawned, died), and `agent` (paused,
@@ -330,17 +339,23 @@ text is the report.
 
 The verb definitions handed to the model are exactly the role's set:
 a root runs `ROOT_VERBS` (no `finish`, because it stays resident); a
-child runs all six. Each definition carries a name, a description, and
+child runs all seven. Each definition carries a name, a description, and
 a JSON Schema with `additionalProperties: false`.
 
 | Verb | Arguments | Available to | Effect |
 |------|-----------|--------------|--------|
 | `spawn` | `task` | root, child | create a child; its id returns in the result |
 | `send` | `direction` (`up` \| `down`), `child_id` (down only), `text` | root, child | deliver text to the parent or to a spawned child |
-| `shell` | `command`, `cwd`?, `env`?, `stdin`?, `background`? | root, child | run bash in the workspace; the timeout is fixed by the user, and `background` starts a job whose log later calls poll |
+| `shell` | `command`, `cwd`?, `env`?, `stdin`?, `background`? | root, child | run bash in the workspace; `background` returns the job at once, otherwise the inline wait is `shell_timeout`, after which the command keeps running as a job |
+| `jobs` | `action` (`list` \| `status` \| `logs` \| `wait` \| `input` \| `stop`), `job_id` (all but `list`), `offset`?, `max_bytes`?, `timeout`?, `text`?, `eof`? | root, child | work with background shell jobs: list, status, new log output from a byte offset, wait, stdin/EOF, stop |
 | `sleep` | `seconds` | root, child | wait before the next step |
 | `kill` | `child_id` | root, child | kill a child; its subtree dies with it |
 | `finish` | `report` | child only | submit the report upstream and die |
+
+Shell commands run with the caller's `NAN_AGENT_ID` set and with
+`<workspace>/bin` appended to `PATH` (`shell.py`): a command can read
+its own agent id, and scripts under `bin/` are callable by bare name
+without shadowing system commands.
 
 A malformed tool call is not fatal: its parse error becomes that
 call's result, the same channel as a failed verb. Every result text is

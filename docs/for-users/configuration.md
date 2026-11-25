@@ -2,7 +2,9 @@
 
 Configuration lives in `config/nan.yaml`, read at startup into one
 `Settings` instance that the composition root hands to every
-component; restart the core after editing it. The file is git-ignored
+component; restart the core after editing it. The gateway and injection
+ports are fixed: when either is taken at boot, NAN exits instead of
+choosing another. The file is git-ignored
 (it holds your key);
 `config/nan.yaml.example` is the committed template, and a fresh
 checkout starts by copying it. NAN itself reads this file; the
@@ -38,8 +40,9 @@ Example -- a local 27B model behind llama.cpp:
 |-----|---------|---------|
 | `autonomous_interval` | `0.0` | `>0`: each agent starts a spontaneous turn every N seconds, while inbox input or a verb result still opens one immediately (the cadence then restarts); `<=0`: event-driven -- a turn starts on inbox input, and a turn that called verbs runs again so the model can read the results |
 | `history_char_limit` | `100000` | Rendered-history size cap; exceeding it clears the whole history and starts a new context epoch |
-| `shell_timeout` | `30.0` | `shell` verb execution timeout; the model cannot change it |
+| `shell_timeout` | `30.0` | `shell` inline wait; on expiry the command keeps running as a background job. The model cannot change it |
 | `shell_output_limit` | `20000` | `shell` verb output truncation size (head + tail kept, middle elided) |
+| `job_log_limit` | `8388608` | Per-job log cap in bytes; past it the log stops growing (a truncation marker is appended) while the pty keeps draining |
 | `backoff` | `[1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]` | Model-call retry ladder (seconds); a retryable failure re-runs the same model call after each delay, and running out parks the turn (root) or ends the agent (child) |
 | `max_depth` | `3` | Spawn depth limit; `-1` = unlimited |
 | `max_children` | `5` | Per-agent children limit; `-1` = unlimited |

@@ -22,8 +22,9 @@ llm:
 agent:
   autonomous_interval: 0.0  # >0: self-rotating loop (seconds); <=0: event-driven
   history_char_limit: 100000
-  shell_timeout: 30.0       # user setting; the model cannot change it
+  shell_timeout: 30.0       # inline wait; then the command becomes a background job
   shell_output_limit: 20000 # shell verb output truncation (head+tail)
+  job_log_limit: 8388608    # per-job log cap (bytes); the pty keeps draining past it
   backoff: [1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 60.0]  # turn-failure backoff ladder (s)
   max_depth: 3              # -1: unlimited
   max_children: 5           # -1: unlimited, per agent
@@ -55,7 +56,7 @@ injection:
 
 gateway:
   host: 127.0.0.1
-  port: 8765
+  port: 8765                # fixed: a taken port refuses the boot
   surface_ttl: 30.0         # seconds without a panel heartbeat before the window is dropped
   dedup_cache_size: 256     # inbound `mid` dedup entries; overflow evicts the oldest half
 

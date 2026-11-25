@@ -10,7 +10,7 @@
 
     uv run pytest tests/ -q
 
-The suite (249 tests) is organized one directory per core feature:
+The suite (289 tests) is organized one directory per core feature:
 
     tests/agent/        the loop (control fold, pause/resume, epochs,
                         persona, pacing, failed-turn terminal), the spawn

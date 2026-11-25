@@ -107,9 +107,10 @@ flowchart LR
   appends, a new window does not take the active slot, closing
   empties the workspace while keeping the window, and
   unregistering removes it.
-- **Memory is bounded.** Exited agent nodes are capped at 512,
-  exited timelines at 16, and the agent being viewed is pinned
-  so its transcript survives its own exit.
+- **Memory is bounded.** Exited timelines are capped at 16, and
+  the agent being viewed is pinned so its transcript survives its
+  own exit; the small identity nodes are kept so the tree stays
+  navigable.
 - **The kernel is pure.** Reducers return the same reference when
   nothing changed, so a duplicate or unknown event does not wake
   subscribers.

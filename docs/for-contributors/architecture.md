@@ -18,7 +18,7 @@ follows the actual layout.
     │   ├── control.py    Status -> Action (the loop's fold)
     │   ├── engine.py     the turn engine (one model call)
     │   ├── failure.py    one failure classification
-    │   └── verbs/        spawn / sleep / shell / send / kill / finish
+    │   └── verbs/        spawn / sleep / shell / jobs / send / kill / finish
     ├── turn/
     │   ├── model.py      the Turn record
     │   ├── render.py     deterministic prompt rendering
@@ -37,6 +37,7 @@ follows the actual layout.
     │   └── types.py      protocol shapes (ServiceEntry)
     ├── utils/
     │   ├── loopback.py   entry guard primitives
+    │   ├── net.py        fixed-port availability check
     │   └── autostart.py  boot scripts and process groups
     └── config/           pydantic-settings, YAML source
 
@@ -307,10 +308,11 @@ flowchart TD
 - **Pause** is a latch: the tree stays alive, only the parked turn's
   snapshot is written, and a restart lifts it (it is process-scoped).
 
-## The three channel types
+## The observation sections
 
-A turn's observation is one rendered message built from three ordered
-sections, each omitted when empty (`turn/render.py`):
+A turn's observation is one rendered message built from four ordered
+sections, each omitted when empty (`turn/render.py`): a synthesized
+`<self>` block on an epoch's first turn, then the three channels below.
 
 | Channel | Holds | Written at | Lifetime |
 | --- | --- | --- | --- |
@@ -318,10 +320,19 @@ sections, each omitted when empty (`turn/render.py`):
 | `injections` | per-service contributions this turn, `ok=False` marks a failure | `engine.inject` | on the turn, durable |
 | `inbox` | contentful messages: user input, parent messages, child sends and finish reports | `deliver`, drained by `_open_turn` | on the turn, durable |
 
+`<self>` has no stored channel: it is synthesized from `agent_id` /
+`parent_id` / `depth` when `origin` is `first` or `context_cleared`
+(`render._identity_section`), and tells the agent whether it is root or
+a child and who its parent is.
+
 The boundary is one sentence: **state changes ride `<delta>`; content
 that a reader must read rides `<inbox>`**.
 
 ```
+<self id="9d21" role="child" depth="1" parent="root_id"/>
+You are a child of root_id: an ordinary reply stays with you; end the
+task with finish(report).
+
 <delta>
 <service>+echo online</service>
 <subagent>+9d21 spawned</subagent>
@@ -344,7 +355,8 @@ report text
 </inbox>
 ```
 
-A turn that observed nothing renders `(no input this turn)`; an
+A turn without a `<self>` block that observed nothing renders
+`(no input this turn)`; an
 in-flight turn renders its observation alone. `render_turn` is a pure
 function of the turn, so the same turn renders to the same bytes,
 and a failed service's body is prefixed with `[service error] `.
@@ -528,26 +540,29 @@ stream for the web UI and carries input back to the root's inbox.
 stateDiagram-v2
     [*] --> INIT
     INIT --> RUNNING: initialize + serve
-    RUNNING --> STOPPING: SIGTERM / SIGINT
+    RUNNING --> STOPPING: SIGTERM / SIGINT / window closed
     STOPPING --> STOPPED: shutdown done
     STOPPED --> [*]
 ```
 
 `Core.run` (`app.py`):
 
-1. `_initialize`: build provider / hub / sandbox, create the workspace,
-   `sink.reset(boot_id)`, load snapshots, `restore` (or build a fresh
-   root when nothing is on disk).
+1. `_initialize`: refuse a boot whose gateway or injection port is
+   taken, resolve the Electron binary, build provider / hub / sandbox,
+   create the workspace, `sink.reset(boot_id)`, load snapshots,
+   `restore` (or build a fresh root when nothing is on disk).
 2. `_serve`: start the hub (the socket must be bound), start autostart
-   scripts, start the root if restore did not, start the gateway,
-   install signal handlers, `RUNNING`.
-3. `_wait_for_stop` waits for the stop event or the gateway exiting; a
-   gateway exit is logged and the core keeps serving.
+   scripts, start the root if restore did not, start the gateway, open
+   the desktop window once the gateway is bound, install signal
+   handlers, `RUNNING`.
+3. `_wait_for_stop` waits for the stop event (a signal or the window
+   closing) or the gateway exiting; a gateway exit is logged and the
+   core keeps serving.
 4. `_shutdown` is `STOPPING`: `root.suspend()` **synchronously** (so the
-   snapshot is written before the first await), then await the root
-   task with a 10s budget (cancel, 10s again), then stop autostart,
-   close the gateway, stop the hub, close the provider, remove the
-   signal handlers, `STOPPED`.
+   snapshot is written before the first await), then stop the window
+   (5s budget, then kill), await the root task with a 10s budget
+   (cancel, 10s again), then stop autostart, close the gateway, stop
+   the hub, close the provider, remove the signal handlers, `STOPPED`.
 
 Each step is best-effort and logged: one failing component leaves
 the rest of the shutdown running.

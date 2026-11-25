@@ -55,7 +55,7 @@ sequenceDiagram
      reply is prompt text, recorded as an `Injection`.
    - `archive` -- the complete turn once it ends; your reply is an
      acknowledgement and the hub does not record it. This is the mode
-     for services whose work is recording, such as `record`.
+     for services whose work is recording, such as a conversation log.
      A process may hold both modes as two `service_id`s.
 
    An `inject` service may also declare `timeout` -- its read budget
@@ -320,6 +320,6 @@ What it owns, so you do not write it again:
       assert_registered(stub, config)      # what you register, in one shape
       assert_turn_text(client, "hello")   # {"text": <str>} and nothing else
 
-  `system`, `network`, `mcp` and `record` each keep a
-  `tests/test_contract.py` built exactly this way; copy it.
+  `system`, `network` and `mcp` each keep a `tests/test_contract.py`
+  built exactly this way; copy it.
 

@@ -77,8 +77,8 @@ outside the sandbox. `workspace/autostart.sh` runs inside the same
 sandbox as shell commands, and agents may write it to set up their
 own boot services, so its writes stay confined.
 
-**Agent authority limits.** `shell_timeout` and
-`shell_output_limit` come from user configuration; tools and
+**Agent authority limits.** `shell_timeout`, `shell_output_limit`
+and `job_log_limit` come from user configuration; tools and
 skills are plain files reached through the sandboxed shell. The
 persona file is core config the agent cannot rewrite.
 

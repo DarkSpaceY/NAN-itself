@@ -15,7 +15,7 @@ transport or prompt labels and stay as they are.
 | Turn | one observation -> one model call -> verb run | `Turn` |
 | Phase | where a turn stands | `TurnPhase`: observed -> injected -> thought -> acted -> committed |
 | Epoch | one continuous context; cleared when history outgrows the limit | `Turn.epoch`, `origin="context_cleared"` |
-| Observation | the per-turn user message built from delta / injection / inbox | `render._observation_message` |
+| Observation | the per-turn user message built from self / delta / injection / inbox | `render._observation_message` |
 | Inbox | messages delivered, not yet observed | `InboxMessage`, `Agent._inbox` |
 | Delta | system-state lines (services, children, pause/resume) | `DeltaEvent`, `note_delta`, `_record_delta` |
 | Injection | service prompt contributions for this turn | `Injection` |
@@ -53,11 +53,11 @@ are the one place a module may name a type from above.
         ├── llm          DTOs (types.py) + transport (provider.py)
         ├── config       Settings schema + YAML source
         ├── events       sink singleton
-        └── utils        loopback policy
+        └── utils        loopback policy + port guard
 
 The layers, bottom up:
 
-1. **Leaves.** `events.py`, `utils/loopback.py`,
+1. **Leaves.** `events.py`, `utils/loopback.py`, `utils/net.py`,
    `config/models.py`, `llm/types.py` import nothing else from
    `nan`. Any layer may import these.
 2. **Runtime infrastructure.** `config` (the schema; the
@@ -94,7 +94,7 @@ Three rules cover the cases that do not fit the ladder:
   runtime points at the ownership boundary: redraw it rather than
   defer the import.
 - **Intra-package loading order.** `agent/verbs/__init__.py`
-  imports the six verb classes inside `_build_registry()`, after
+  imports the seven verb classes inside `_build_registry()`, after
   `Verb` and `VerbOutcome` exist. Verb modules import the
   package only.
 - **Package re-exports.** `nan/llm/__init__.py` exports the DTOs

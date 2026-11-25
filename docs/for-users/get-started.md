@@ -67,6 +67,9 @@ What starts:
   (user-owned, unsandboxed) and `workspace/autostart.sh` (agent-writable,
   sandboxed); the core stops what they start when it exits
 
+Both ports are fixed: if either is taken, NAN exits instead of choosing
+another.
+
 ```mermaid
 flowchart LR
     subgraph PROC["core process"]
@@ -93,5 +96,5 @@ inbox; its replies and subagent output stream into the UI.
 The agent reaches the outside world through `shell`. Tools and
 skills are plain files under `builtin/` (read-only) and
 `workspace/` (agent-writable); the agent invokes them with ordinary
-shell commands inside the execution sandbox. A script dropped into
-`workspace/` is available to the next shell call.
+shell commands inside the execution sandbox. An executable script in
+`workspace/bin/` is callable by bare name on the next shell call.

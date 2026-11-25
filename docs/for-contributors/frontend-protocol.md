@@ -139,10 +139,10 @@ Conventions:
   carries no `agent_id`, and it marks root input from the user
 - optional fields are omitted; fields documented as always present
   carry null instead
-- `verb_result.text` is exactly the text the model received;
-  the only truncation is `shell_output_limit`, applied by the
-  shell verb itself (head + tail kept); `output_delta.text` is
-  one untruncated stream chunk
+- `verb_result.text` is exactly the text the model received; the
+  shell verb applies `shell_output_limit` (head + tail kept), and
+  `jobs logs` returns at most `max_bytes` (default 8000, capped at
+  64000); `output_delta.text` is one untruncated stream chunk
 
 ### Lifecycle
 
@@ -203,7 +203,8 @@ reads).
 
 | verb | `arguments` | `detail` | renders as |
 |---|---|---|---|
-| `shell` | `{command, cwd?, env?, stdin?, background?}` | `{exit_code, timed_out}`; a background job `{job_id, pid, pgid}`; on a deny-list hit `{refused, reason}`, on a timeout only `{timed_out: true}` | terminal block |
+| `shell` | `{command, cwd?, env?, stdin?, background?}` | `{exit_code}` when it finished inline; a still-running job `{job_id, pid, pgid, promoted}`; on a deny-list hit `{refused, reason}` | terminal block |
+| `jobs` | `{action, job_id?, offset?, max_bytes?, timeout?, text?, eof?}` | `{action, job_id?}` plus action facts: `offset` / `size` for `logs`, `exited` / `exit_code` for `wait`, `written` / `eof` for `input`, `exit_code` for `stop` | job list or log block |
 | `spawn` | `{task}` | `{child_id, depth}` | child-agent card linked to `child_id` |
 | `send` | `{direction, child_id?, text}` | `{direction, to?}` -- `to` only for `down` | message bubble, up/down |
 | `kill` | `{child_id}` | `{target_id}` | destructive action marker |
