@@ -10,15 +10,10 @@ set -u
 
 : "${NAN_WORKSPACE:?NAN_WORKSPACE must be set by the core}"
 
-# This script runs inside the sandbox: writes are limited to the
-# workspace, so the common package-manager and library caches are
-# redirected here for every launch below (a cold sync or download
-# would otherwise write under $HOME and fail).
-export UV_CACHE_DIR="$NAN_WORKSPACE/.cache/uv"
-export PIP_CACHE_DIR="$NAN_WORKSPACE/.cache/pip"
-export npm_config_cache="$NAN_WORKSPACE/.cache/npm"
-export PLAYWRIGHT_BROWSERS_PATH="$NAN_WORKSPACE/.cache/ms-playwright"
-export XDG_CACHE_HOME="$NAN_WORKSPACE/.cache"
+# This script runs inside the sandbox with HOME and the XDG
+# directories already pointing into the workspace, so the common
+# package-manager and library caches land in <workspace>/home
+# without per-tool exports here.
 
 LOG="$NAN_WORKSPACE/autostart.log"
 

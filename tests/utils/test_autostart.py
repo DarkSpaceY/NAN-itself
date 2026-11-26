@@ -106,3 +106,47 @@ async def test_autostart_without_scripts_starts_nothing(tmp_path: Path) -> None:
     assert autostart._tasks == []
 
     await autostart.stop()
+
+
+async def _wait_for(path: Path, timeout: float = 5.0) -> str:
+    loop = asyncio.get_running_loop()
+
+    deadline = loop.time() + timeout
+
+    while loop.time() < deadline:
+        if path.is_file():
+            return path.read_text()
+
+        await asyncio.sleep(0.05)
+
+    return ""
+
+
+async def test_sandbox_env_reaches_only_the_sandboxed_script(tmp_path: Path) -> None:
+    # The user's boot script runs with the real environment; the
+    # agent's runs inside the sandbox and gets the extra values
+    # (the workspace home) without leaking into the user's script.
+    user_script = tmp_path / "user.sh"
+    agent_script = tmp_path / "agent.sh"
+    user_marker = tmp_path / "user.txt"
+    agent_marker = tmp_path / "agent.txt"
+
+    for script, marker in ((user_script, user_marker), (agent_script, agent_marker)):
+        script.write_text(
+            f'#!/usr/bin/env bash\nprintf "%s" "${{NAN_TEST_HOME:-unset}}" > "{marker}"\n',
+            encoding="utf-8",
+        )
+
+    autostart = Autostart(
+        (("user", user_script, False), ("agent", agent_script, True)),
+        env=dict(os.environ),
+        wrap=lambda command: command,
+        sandbox_env={"NAN_TEST_HOME": "/agent/home"},
+    )
+
+    autostart.start()
+
+    assert await _wait_for(user_marker) == "unset"
+    assert await _wait_for(agent_marker) == "/agent/home"
+
+    await autostart.stop()

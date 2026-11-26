@@ -26,6 +26,8 @@ wheels/
 config/nan.yaml
 
 # Runtime directories (gitignored)
+# The agent's home: caches, configs and dotfiles, all regenerable
+workspace/home/
 logs/
 turns/
 cache/

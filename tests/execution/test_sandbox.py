@@ -112,13 +112,14 @@ def test_wrap_linux_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     wrapped = sb.wrap("echo hi")
 
-    assert wrapped.startswith("bwrap --bind / /")
+    assert wrapped.startswith("bwrap --ro-bind / /")
     assert "--tmpfs /tmp" in wrapped
     assert f"--bind {sb.workspace.resolve()} {sb.workspace.resolve()}" in wrapped
 
-    home = Path.home().resolve()
-
-    assert f"--ro-bind {home} {home}" in wrapped
+    # only the workspace is writable: the root stays read-only, so
+    # /etc, /usr and /var cannot be written through the sandbox
+    assert "--bind / /" not in wrapped
+    assert f"--ro-bind {sb.package_dir.resolve()} {sb.package_dir.resolve()}" in wrapped
     assert shlex.split(wrapped)[-3:] == ["bash", "-c", "echo hi"]
 
 

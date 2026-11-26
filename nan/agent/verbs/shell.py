@@ -12,7 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 from nan.agent.verbs import Verb, VerbOutcome
 from nan.config.models import Settings
-from nan.execution import Job, job_directory, read_output, start_pump, write_stdin
+from nan.execution import (
+    Job,
+    home_environment,
+    job_directory,
+    read_output,
+    start_pump,
+    write_stdin,
+)
 from nan.llm.types import VerbDefinition
 
 if TYPE_CHECKING:
@@ -342,8 +349,9 @@ def _environment(
     The command's environment: the inherited one, then a quiet
     terminal (the pty would otherwise invite colors and progress
     bars into the log), then the model's overlay, then the core's
-    identity last so a command cannot impersonate another agent.
-    `<workspace>/bin` trails PATH: tools there are callable by bare
+    own settings last so a command cannot impersonate another agent
+    or reach the user's home. `<workspace>/bin` and the agent's
+    `~/.local/bin` trail PATH: tools there are callable by bare
     name, but can never shadow a system command (the model can write
     into the workspace).
     """
@@ -360,12 +368,14 @@ def _environment(
         "NO_COLOR": "1",
         "CLICOLOR": "0",
         **overlay,
+        **home_environment(workspace),
         "NAN_AGENT_ID": agent_id,
     }
 
-    tools = workspace / "bin"
+    (workspace / "home").mkdir(parents=True, exist_ok=True)
 
-    if tools.is_dir():
-        env["PATH"] = f"{env.get('PATH', '')}{os.pathsep}{tools}"
+    trailing = [workspace / "home" / ".local" / "bin", workspace / "bin"]
+
+    env["PATH"] = os.pathsep.join([env.get("PATH", ""), *(str(p) for p in trailing)])
 
     return env, None

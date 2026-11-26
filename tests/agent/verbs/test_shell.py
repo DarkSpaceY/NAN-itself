@@ -144,6 +144,27 @@ async def test_the_model_cannot_override_the_agent_identity(tmp_path: Path, no_s
     assert f"agent={root.agent_id}" in result.text
 
 
+async def test_home_points_inside_the_workspace(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    result = await _shell(root, 'echo "$HOME"; echo "$XDG_CACHE_HOME"')
+
+    home = (tmp_path / "workspace" / "home").resolve()
+
+    assert str(home) in result.text
+    assert str(home / ".cache") in result.text
+    assert home.is_dir()
+
+
+async def test_the_model_cannot_override_home(tmp_path: Path, no_sink: Any) -> None:
+    root = make_agent(tmp_path=tmp_path)
+
+    result = await _shell(root, 'echo "$HOME"', env={"HOME": str(tmp_path)})
+
+    assert str(tmp_path / "workspace" / "home") in result.text
+    assert result.text.strip().endswith(str((tmp_path / "workspace" / "home").resolve()))
+
+
 async def test_stdin_is_written_when_the_command_starts(tmp_path: Path, no_sink: Any) -> None:
     root = make_agent(tmp_path=tmp_path)
 

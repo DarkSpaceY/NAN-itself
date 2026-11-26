@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .home import home_environment
 from .jobs import (
     Job,
     JobRegistry,
@@ -21,6 +22,7 @@ __all__ = [
     "Sandbox",
     "SandboxUnavailableError",
     "close_stdin",
+    "home_environment",
     "job_directory",
     "kill_group",
     "read_output",

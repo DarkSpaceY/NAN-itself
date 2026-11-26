@@ -27,7 +27,7 @@ from nan.agent import Agent
 from nan.boot import restore
 from nan.config import Settings
 from nan.events import sink
-from nan.execution import Sandbox
+from nan.execution import Sandbox, home_environment
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
@@ -545,6 +545,7 @@ class Core:
                 "NAN_INJECTION_PORT": str(self._settings.injection.port),
                 "NAN_CORE_PID": str(os.getpid()),
             },
+            sandbox_env=home_environment(self._settings.paths.workspace),
             wrap=sandbox.wrap,
         )
 

@@ -240,22 +240,19 @@ def _bwrap_command(
     builtin_dir: Path,
 ) -> str:
     """
-    Bubblewrap equivalent: the filesystem is writable, the home
-    directory, the nan package and the builtin tree are re-mounted
-    read-only, and the workspace is bound read-write on top.
+    Bubblewrap has no rule engine, so the same policy is expressed
+    with mounts: the root is bound read-only -- reads, network and
+    process behaviour are not restricted -- and only the workspace
+    is bound read-write on top. /tmp is a private tmpfs, writable
+    like the macOS temp locations.
     """
     parts = [
         "bwrap",
-        "--bind / /",
+        "--ro-bind / /",
         "--dev-bind /dev /dev",
         "--proc /proc",
         "--tmpfs /tmp",
     ]
-
-    home = Path.home().resolve()
-
-    if home != Path("/"):
-        parts.append(f"--ro-bind {shlex.quote(str(home))} {shlex.quote(str(home))}")
 
     package = package_dir.resolve()
 

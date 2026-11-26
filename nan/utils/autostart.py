@@ -16,7 +16,8 @@ ANCHOR_SECONDS), or its pid -- which is the group id the core signals
 at shutdown -- could be reaped and recycled into an unrelated process.
 
 This module knows nothing about settings: the core hands it the
-scripts, the environment and the sandbox wrapper it should use.
+scripts, the environment, the sandbox wrapper it should use, and the
+extra environment a script gets when it runs inside that sandbox.
 """
 
 from __future__ import annotations
@@ -51,9 +52,11 @@ class Autostart:
         *,
         env: Mapping[str, str],
         wrap: Callable[[str], str],
+        sandbox_env: Mapping[str, str] | None = None,
     ) -> None:
         self._scripts = tuple(scripts)
         self._env = dict(env)
+        self._sandbox_env = dict(sandbox_env or {})
         self._wrap = wrap
 
         # Process-group ids, in launch order. Each is the pid of its
@@ -89,9 +92,11 @@ class Autostart:
             if wrapped:
                 command = self._wrap(command)
 
+            env = {**self._env, **self._sandbox_env} if wrapped else self._env
+
             proc = await asyncio.create_subprocess_shell(
                 command,
-                env=self._env,
+                env=env,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 start_new_session=True,

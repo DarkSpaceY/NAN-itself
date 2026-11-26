@@ -61,10 +61,15 @@ elsewhere.
 blacklist: everything is allowed except writes, which stay confined
 to the workspace and temp locations; the nan package (persona),
 `config/` and builtin resources are read-only. Reads, network, IPC
-and app launching stay open. When the sandbox tool is present, every
-shell command runs inside it. `sandbox.required: true` (the default)
-refuses to start without one; setting it to `false` runs commands
-unwrapped with a one-time warning.
+and app launching stay open. Shell commands get `HOME=<workspace>/home`
+with the XDG directories under it, so tools keep their caches and
+configs inside the workspace and start without the user's identity (no
+git config, SSH keys or registry credentials); the home directory is a
+convenience boundary, not a confidentiality one, because reads stay
+open. When the sandbox tool is present, every shell command runs
+inside it. `sandbox.required: true` (the default) refuses to start
+without one; setting it to `false` runs commands unwrapped with a
+one-time warning.
 
 Before wrapping, a configurable regex list (`sandbox.deny`) rejects
 known destructive command shapes: root deletes, raw disk writes,

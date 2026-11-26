@@ -352,10 +352,12 @@ a JSON Schema with `additionalProperties: false`.
 | `kill` | `child_id` | root, child | kill a child; its subtree dies with it |
 | `finish` | `report` | child only | submit the report upstream and die |
 
-Shell commands run with the caller's `NAN_AGENT_ID` set and with
-`<workspace>/bin` appended to `PATH` (`shell.py`): a command can read
-its own agent id, and scripts under `bin/` are callable by bare name
-without shadowing system commands.
+Shell commands run with the caller's `NAN_AGENT_ID` set, with
+`<workspace>/home` as `HOME` (the XDG directories follow it), and with
+`<workspace>/bin` and the agent's `~/.local/bin` appended to `PATH`
+(`shell.py`): a command can read its own agent id, tools resolve their
+caches and configs inside the workspace instead of the user's account,
+and scripts are callable by bare name without shadowing system commands.
 
 A malformed tool call is not fatal: its parse error becomes that
 call's result, the same channel as a failed verb. Every result text is
