@@ -65,9 +65,7 @@ class ServerSpec:
 
         self.args: list[str] = [self._expand(a, placeholders) for a in args]
 
-        self.cwd: str | None = (
-            self._expand(raw["cwd"], placeholders) if raw.get("cwd") else None
-        )
+        self.cwd: str | None = self._expand(raw["cwd"], placeholders) if raw.get("cwd") else None
 
         env = raw.get("env", {})
 
@@ -165,9 +163,7 @@ class MCPServer:
                 for tool in tools
             ]
 
-            logger.info(
-                "MCP server {}: up ({} tools)", self.spec.name, len(self.tools)
-            )
+            logger.info("MCP server {}: up ({} tools)", self.spec.name, len(self.tools))
 
     async def stop(self) -> None:
         async with self._lock:
@@ -202,9 +198,7 @@ class MCPServer:
             except Exception as exc:
                 return _error("tool_error", str(exc))
 
-        texts = [
-            block.text for block in result.content if type(block).__name__ == "TextContent"
-        ]
+        texts = [block.text for block in result.content if type(block).__name__ == "TextContent"]
 
         text = "\n".join(texts).strip()
 
@@ -242,6 +236,10 @@ class MCPService:
         self._running: dict[str, MCPServer] = {}
 
         self._failed: dict[str, str] = {}
+
+        # Names inside a start attempt right now. Kept apart from the
+        # queued specs, which have not been touched yet.
+        self._starting: set[str] = set()
 
         self._lifecycle = asyncio.Lock()
 
@@ -282,6 +280,8 @@ class MCPService:
 
             server = MCPServer(spec, self.config)
 
+        self._starting.add(spec.name)
+
         try:
             await server.start()
 
@@ -291,6 +291,9 @@ class MCPService:
             self._failed[spec.name] = str(exc)
 
             return
+
+        finally:
+            self._starting.discard(spec.name)
 
         async with self._lifecycle:
             self._running[spec.name] = server
@@ -357,7 +360,7 @@ class MCPService:
 
         text = (
             f"External MCP tool servers: `mcp` (on PATH) or `{HERE}/mcp.sh`; "
-            "`mcp list` shows connected tools, servers still starting from a cold boot, and unavailable ones, "
+            "`mcp list` shows connected tools, queued and starting servers, and unavailable ones, "
             "`mcp schema <server> <tool>` shows the arguments, "
             "and `mcp call <server> <tool> '<json>'` prints the tool result. "
             "On failure the call exits non-zero and writes a JSON error to stderr."
@@ -409,21 +412,25 @@ def build_app(service: MCPService) -> FastAPI:
     @app.get("/tools")
     async def tools() -> dict[str, Any]:
         servers = [
-            {"name": name, "tools": server.tools} for name, server in sorted(service._running.items())
+            {"name": name, "tools": server.tools}
+            for name, server in sorted(service._running.items())
         ]
 
-        # Configured but neither up nor failed: the background starter
-        # is still working through them (a first npx/uvx run downloads
-        # packages), so the catalog is incomplete rather than empty.
-        starting = sorted(
+        # Configured, but not up, failed, or being started right now:
+        # the background starter has not reached them yet, so the
+        # catalog is incomplete rather than empty.
+        pending = sorted(
             spec.name
             for spec in service.specs
-            if spec.name not in service._running and spec.name not in service._failed
+            if spec.name not in service._running
+            and spec.name not in service._failed
+            and spec.name not in service._starting
         )
 
         return {
             "servers": servers,
-            "starting": starting,
+            "starting": sorted(service._starting),
+            "pending": pending,
             "unavailable": dict(sorted(service._failed.items())),
         }
 

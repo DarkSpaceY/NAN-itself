@@ -69,11 +69,12 @@ def test_http_surface_without_servers():
 
     data = client.get("/tools").json()
 
-    # Nothing is up yet, so every configured server is still starting:
-    # the catalog is incomplete, not empty.
+    # Nothing is up yet: every configured server is still queued, and
+    # none of them is inside a start attempt.
     assert data["servers"] == []
     assert data["unavailable"] == {}
-    assert data["starting"] == sorted(spec.name for spec in service.specs)
+    assert data["starting"] == []
+    assert data["pending"] == sorted(spec.name for spec in service.specs)
 
     assert client.post("/turn", json={}).json() == {"text": ""}
 
@@ -97,8 +98,25 @@ def test_tools_reports_failed_servers():
 
     assert data["unavailable"] == {"playwright": "npx not found"}
 
-    # A failed server is unavailable, not still starting.
+    # A failed server is unavailable, not still starting or queued.
     assert "playwright" not in data["starting"]
+    assert "playwright" not in data["pending"]
+
+
+def test_tools_separates_starting_from_queued_servers():
+    service = MCPService(load_config())
+
+    service._starting.add("search")
+
+    client = TestClient(build_app(service))
+
+    data = client.get("/tools").json()
+
+    # Only the server inside a start attempt counts as starting; the
+    # rest are queued until the background starter reaches them.
+    assert data["starting"] == ["search"]
+    assert "search" not in data["pending"]
+    assert data["pending"] == sorted(spec.name for spec in service.specs if spec.name != "search")
 
 
 class _StubEntry:
@@ -119,9 +137,7 @@ def test_call_validates_the_tool_and_arguments():
 
     assert unknown["error"]["code"] == "unknown_tool"
 
-    invalid = client.post(
-        "/call", json={"server": "stub", "tool": "echo", "arguments": []}
-    ).json()
+    invalid = client.post("/call", json={"server": "stub", "tool": "echo", "arguments": []}).json()
 
     assert invalid["error"]["code"] == "invalid_arguments"
 

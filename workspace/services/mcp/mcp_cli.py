@@ -222,17 +222,22 @@ def _render_list(data: Any, full: bool) -> None:
 
             print(f"  {tool.get('name', '')}{suffix}")
 
-    starting = [str(name) for name in data.get("starting") or []]
+    pending = sorted(str(name) for name in data.get("pending") or [])
 
-    for name in sorted(starting):
-        print(f"starting: {name}")
+    if pending:
+        print(f"pending: {', '.join(pending)}")
+
+    starting = sorted(str(name) for name in data.get("starting") or [])
+
+    if starting:
+        print(f"starting: {', '.join(starting)}")
 
     unavailable = data.get("unavailable") or {}
 
     for name in sorted(unavailable):
         print(f"unavailable: {name} ({_oneline(unavailable[name])})")
 
-    if not servers and not starting and not unavailable:
+    if not servers and not pending and not starting and not unavailable:
         print("no MCP servers configured")
 
 
@@ -245,9 +250,7 @@ def _render_schema(data: Any, raw: bool) -> None:
 
             raise CliError(code, str(error.get("message") or ""), _status_for(code))
 
-        raise CliError(
-            "unknown_tool", str(error or "schema unavailable"), EXIT_UNAVAILABLE
-        )
+        raise CliError("unknown_tool", str(error or "schema unavailable"), EXIT_UNAVAILABLE)
 
     schema = data.get("schema") or {}
 
@@ -339,14 +342,14 @@ def _parser() -> Parser:
             "Examples:\n"
             "  mcp list\n"
             "  mcp schema search web_search\n"
-            "  mcp call search web_search '{\"query\":\"uv python\",\"max_results\":3}'\n"
+            '  mcp call search web_search \'{"query":"uv python","max_results":3}\'\n'
         ),
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
     list_parser = sub.add_parser(
-        "list", help="Connected servers, ones still starting, and unavailable ones."
+        "list", help="Connected servers, queued and starting ones, and unavailable ones."
     )
 
     list_mode = list_parser.add_mutually_exclusive_group()
@@ -377,7 +380,10 @@ def _parser() -> Parser:
 
 
 def _fail(code: str, message: str, status: int) -> int:
-    print(json.dumps({"error": {"code": code, "message": message}}, ensure_ascii=False), file=sys.stderr)
+    print(
+        json.dumps({"error": {"code": code, "message": message}}, ensure_ascii=False),
+        file=sys.stderr,
+    )
 
     return status
 

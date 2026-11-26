@@ -58,25 +58,33 @@ def test_list_full_includes_descriptions(monkeypatch, capsys):
 
 
 def test_list_reports_servers_still_starting(monkeypatch, capsys):
-    # A cold boot: the gateway is up, servers are still being spawned.
+    # A cold boot: the gateway is up, one server is spawning, the rest
+    # are still queued behind it.
     monkeypatch.setattr(
         mcp_cli,
         "_get",
-        lambda path: {"servers": [], "starting": ["playwright", "search"], "unavailable": {}},
+        lambda path: {
+            "servers": [],
+            "starting": ["search"],
+            "pending": ["playwright"],
+            "unavailable": {},
+        },
     )
 
     assert mcp_cli.main(["list"]) == 0
 
     out = capsys.readouterr().out
 
-    assert "starting: playwright" in out
     assert "starting: search" in out
+    assert "pending: playwright" in out
     assert "no MCP servers configured" not in out
 
 
 def test_list_without_configuration_says_so(monkeypatch, capsys):
     monkeypatch.setattr(
-        mcp_cli, "_get", lambda path: {"servers": [], "starting": [], "unavailable": {}}
+        mcp_cli,
+        "_get",
+        lambda path: {"servers": [], "starting": [], "pending": [], "unavailable": {}},
     )
 
     assert mcp_cli.main(["list"]) == 0
@@ -112,9 +120,7 @@ def test_schema_prints_a_table(monkeypatch, capsys):
 
 
 def test_call_prints_parsed_json(monkeypatch, capsys):
-    monkeypatch.setattr(
-        mcp_cli, "_post", lambda path, body: {"ok": True, "result": {"value": 4}}
-    )
+    monkeypatch.setattr(mcp_cli, "_post", lambda path, body: {"ok": True, "result": {"value": 4}})
 
     assert mcp_cli.main(["call", "calc", "add", '{"a": 2}']) == 0
 
