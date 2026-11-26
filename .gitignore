@@ -28,10 +28,6 @@ config/nan.yaml
 # Runtime directories (gitignored)
 # The agent's home: caches, configs and dotfiles, all regenerable
 workspace/home/
-# The agent's own index and long-term content
-workspace/AGENT.md
-workspace/projects/
-workspace/notes/
 logs/
 turns/
 cache/
