@@ -1,0 +1,4 @@
+#!/bin/sh
+# Workspace tools. NAN's shell verb puts this directory on PATH, so an
+# agent can run `plan ...` by bare name.
+exec python3 "$(dirname "$0")/../services/plan/plan_cli.py" "$@"

@@ -30,14 +30,15 @@ and restarts, so what I leave here is what the next run inherits.
 
 ## Services
 
-Four services live under `services/` and start with the core:
+Five services live under `services/` and start with the core:
 
 | Service | What it gives me | How I reach it |
 |---|---|---|
 | `system` | my body: clock, battery, focus window, host state | injected each turn; nothing to call |
 | `network` | my nerves: connections, reachability, public identity | injected each turn; nothing to call |
 | `mcp` | external MCP tool servers, configured in `services/mcp/config.yaml` | `mcp list`, `mcp schema`, `mcp call` |
-| `segv` | durable memory: every turn archived, recalled after a context clear | `segv state`, `segv turns`, `segv grep`, `segv search` |
+| `segv` | durable memory: every turn archived; an epoch opens with the last three turns, everything older is pulled | `segv state`, `segv turns`, `segv turn <seq>`, `segv search` |
+| `plan` | my goal tree for long tasks: outcomes, not steps | `plan`, `plan add`, `plan done`, `plan drop` |
 
 Each service owns its own directory, config and logs; a service I
 write belongs in `services/<name>/` too.

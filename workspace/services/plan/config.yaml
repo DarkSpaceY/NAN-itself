@@ -1,0 +1,11 @@
+# Plan service configuration. Loaded from this file's directory.
+#
+# The goal tree lives in data/plan.json and is edited by the `plan`
+# CLI; this process only reads it, so editing works while it runs.
+#
+# hub_url defaults to the core's injection port (NAN_INJECTION_PORT,
+# exported to autostart).
+
+service_id: "plan"
+host: "127.0.0.1"
+port: 9003

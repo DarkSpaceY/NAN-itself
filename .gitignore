@@ -38,6 +38,8 @@ snapshots/
 turns.*/
 # segv service runtime state (the RocksDB archive itself)
 workspace/services/segv/data/
+# plan service state: the agent's goal tree
+workspace/services/plan/data/
 *.log
 *.log.*
 workspace/*.pid
