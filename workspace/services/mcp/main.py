@@ -357,7 +357,7 @@ class MCPService:
 
         text = (
             f"External MCP tool servers: `mcp` (on PATH) or `{HERE}/mcp.sh`; "
-            "`mcp list` shows connected tools and unavailable servers, "
+            "`mcp list` shows connected tools, servers still starting from a cold boot, and unavailable ones, "
             "`mcp schema <server> <tool>` shows the arguments, "
             "and `mcp call <server> <tool> '<json>'` prints the tool result. "
             "On failure the call exits non-zero and writes a JSON error to stderr."
@@ -412,7 +412,20 @@ def build_app(service: MCPService) -> FastAPI:
             {"name": name, "tools": server.tools} for name, server in sorted(service._running.items())
         ]
 
-        return {"servers": servers, "unavailable": dict(sorted(service._failed.items()))}
+        # Configured but neither up nor failed: the background starter
+        # is still working through them (a first npx/uvx run downloads
+        # packages), so the catalog is incomplete rather than empty.
+        starting = sorted(
+            spec.name
+            for spec in service.specs
+            if spec.name not in service._running and spec.name not in service._failed
+        )
+
+        return {
+            "servers": servers,
+            "starting": starting,
+            "unavailable": dict(sorted(service._failed.items())),
+        }
 
     @app.get("/schema/{server}/{tool}")
     async def schema(server: str, tool: str) -> dict[str, Any]:

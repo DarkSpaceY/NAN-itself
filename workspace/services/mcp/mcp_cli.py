@@ -222,13 +222,18 @@ def _render_list(data: Any, full: bool) -> None:
 
             print(f"  {tool.get('name', '')}{suffix}")
 
+    starting = [str(name) for name in data.get("starting") or []]
+
+    for name in sorted(starting):
+        print(f"starting: {name}")
+
     unavailable = data.get("unavailable") or {}
 
     for name in sorted(unavailable):
         print(f"unavailable: {name} ({_oneline(unavailable[name])})")
 
-    if not servers and not unavailable:
-        print("no MCP servers running")
+    if not servers and not starting and not unavailable:
+        print("no MCP servers configured")
 
 
 def _render_schema(data: Any, raw: bool) -> None:
@@ -340,7 +345,9 @@ def _parser() -> Parser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = sub.add_parser("list", help="Connected servers plus unavailable ones.")
+    list_parser = sub.add_parser(
+        "list", help="Connected servers, ones still starting, and unavailable ones."
+    )
 
     list_mode = list_parser.add_mutually_exclusive_group()
 

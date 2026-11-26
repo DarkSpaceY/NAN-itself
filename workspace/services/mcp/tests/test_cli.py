@@ -57,6 +57,33 @@ def test_list_full_includes_descriptions(monkeypatch, capsys):
     assert "web_search — Search" in capsys.readouterr().out
 
 
+def test_list_reports_servers_still_starting(monkeypatch, capsys):
+    # A cold boot: the gateway is up, servers are still being spawned.
+    monkeypatch.setattr(
+        mcp_cli,
+        "_get",
+        lambda path: {"servers": [], "starting": ["playwright", "search"], "unavailable": {}},
+    )
+
+    assert mcp_cli.main(["list"]) == 0
+
+    out = capsys.readouterr().out
+
+    assert "starting: playwright" in out
+    assert "starting: search" in out
+    assert "no MCP servers configured" not in out
+
+
+def test_list_without_configuration_says_so(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_cli, "_get", lambda path: {"servers": [], "starting": [], "unavailable": {}}
+    )
+
+    assert mcp_cli.main(["list"]) == 0
+
+    assert "no MCP servers configured" in capsys.readouterr().out
+
+
 def test_schema_prints_a_table(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_cli,

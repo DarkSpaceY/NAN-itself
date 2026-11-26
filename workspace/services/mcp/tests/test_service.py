@@ -67,7 +67,14 @@ def test_http_surface_without_servers():
 
     client = TestClient(build_app(service))
 
-    assert client.get("/tools").json() == {"servers": [], "unavailable": {}}
+    data = client.get("/tools").json()
+
+    # Nothing is up yet, so every configured server is still starting:
+    # the catalog is incomplete, not empty.
+    assert data["servers"] == []
+    assert data["unavailable"] == {}
+    assert data["starting"] == sorted(spec.name for spec in service.specs)
+
     assert client.post("/turn", json={}).json() == {"text": ""}
 
     missing = client.post("/call", json={"server": "search", "tool": "x"})
@@ -86,7 +93,12 @@ def test_tools_reports_failed_servers():
 
     client = TestClient(build_app(service))
 
-    assert client.get("/tools").json()["unavailable"] == {"playwright": "npx not found"}
+    data = client.get("/tools").json()
+
+    assert data["unavailable"] == {"playwright": "npx not found"}
+
+    # A failed server is unavailable, not still starting.
+    assert "playwright" not in data["starting"]
 
 
 class _StubEntry:
