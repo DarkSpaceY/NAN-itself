@@ -2,10 +2,11 @@
 Execution-level sandbox for agent shell commands.
 
 macOS wraps commands in ``sandbox-exec -p <profile>``; the
-Seatbelt profile is built in memory on every wrap: write access
-only to the workspace and temp directories, the nan package and
-the builtin tree explicitly read-only, reads and network open.
-Linux uses the bubblewrap equivalent.
+Seatbelt profile is built in memory on every wrap as a blacklist:
+everything is allowed except writes, which reach only the
+workspace and temp directories, with the nan package and the
+builtin tree explicitly read-only. Linux uses the bubblewrap
+equivalent.
 
 Two autostart scripts exist, with different authority:
 
@@ -194,9 +195,10 @@ def _seatbelt_profile(
     builtin_dir: Path,
 ) -> str:
     """
-    deny default; reads and network open; writes only to the
-    workspace and temp locations; the nan package and builtin
-    tree stay read-only.
+    allow everything, then deny writes outside the workspace and
+    temp locations; the nan package and builtin tree stay
+    read-only. Rules are ordered, so the workspace allow follows
+    the blanket write deny and the read-only dirs come last.
     """
     tmpdir = tempfile.gettempdir()
 
@@ -209,8 +211,8 @@ def _seatbelt_profile(
 
     lines = [
         "(version 1)",
-        "(deny default)",
-        "(allow file-read*)",
+        "(allow default)",
+        "(deny file-write*)",
         "(allow file-write*",
     ]
 
@@ -218,19 +220,13 @@ def _seatbelt_profile(
 
     lines += [
         '    (literal "/dev/null")',
-        '    (literal "/dev/dtrace-helper")',
+        '    (literal "/dev/dtracehelper")',
+        '    (literal "/dev/tty")',
         ")",
         "(deny file-write*",
         f'    (subpath "{package_dir.resolve()}")',
         f'    (subpath "{builtin_dir.resolve()}")',
         ")",
-        "(allow network*)",
-        "(allow process*)",
-        "(allow file-ioctl)",
-        "(allow sysctl-read)",
-        "(allow mach-lookup)",
-        "(allow system-socket)",
-        "(allow iokit-get-properties)",
     ]
 
     return "\n".join(lines) + "\n"
@@ -244,24 +240,35 @@ def _bwrap_command(
     builtin_dir: Path,
 ) -> str:
     """
-    Bubblewrap equivalent: / read-only, /dev and /proc provided,
-    /tmp and the workspace writable on top, network untouched.
+    Bubblewrap equivalent: the filesystem is writable, the home
+    directory, the nan package and the builtin tree are re-mounted
+    read-only, and the workspace is bound read-write on top.
     """
     parts = [
         "bwrap",
-        "--ro-bind / /",
+        "--bind / /",
         "--dev-bind /dev /dev",
         "--proc /proc",
         "--tmpfs /tmp",
-        f"--bind {shlex.quote(str(workspace.resolve()))} {shlex.quote(str(workspace.resolve()))}",
-        f"--ro-bind {shlex.quote(str(package_dir.resolve()))} {shlex.quote(str(package_dir.resolve()))}",
     ]
 
+    home = Path.home().resolve()
+
+    if home != Path("/"):
+        parts.append(f"--ro-bind {shlex.quote(str(home))} {shlex.quote(str(home))}")
+
+    package = package_dir.resolve()
+
+    parts.append(f"--ro-bind {shlex.quote(str(package))} {shlex.quote(str(package))}")
+
     if builtin_dir.exists():
-        parts.append(
-            f"--ro-bind {shlex.quote(str(builtin_dir.resolve()))} "
-            f"{shlex.quote(str(builtin_dir.resolve()))}"
-        )
+        builtin = builtin_dir.resolve()
+
+        parts.append(f"--ro-bind {shlex.quote(str(builtin))} {shlex.quote(str(builtin))}")
+
+    workspace = workspace.resolve()
+
+    parts.append(f"--bind {shlex.quote(str(workspace))} {shlex.quote(str(workspace))}")
 
     parts += ["--", "bash", "-c", shlex.quote(command)]
 

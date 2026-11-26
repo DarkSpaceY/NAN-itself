@@ -57,13 +57,14 @@ elsewhere.
 ## Process boundaries
 
 **Execution sandbox.** Shell verbs run under an OS-level sandbox
-(macOS `sandbox-exec` SBPL, Linux bubblewrap): writes confined to
-the workspace and temp locations; the nan package (persona),
-`config/` and builtin resources read-only. Reads and network access
-stay open. When the sandbox tool is present, every shell command runs
-inside it. `sandbox.required: true` (the default) refuses to start
-without one; setting it to `false` runs commands unwrapped with a
-one-time warning.
+(macOS `sandbox-exec` SBPL, Linux bubblewrap). The policy is a
+blacklist: everything is allowed except writes, which stay confined
+to the workspace and temp locations; the nan package (persona),
+`config/` and builtin resources are read-only. Reads, network, IPC
+and app launching stay open. When the sandbox tool is present, every
+shell command runs inside it. `sandbox.required: true` (the default)
+refuses to start without one; setting it to `false` runs commands
+unwrapped with a one-time warning.
 
 Before wrapping, a configurable regex list (`sandbox.deny`) rejects
 known destructive command shapes: root deletes, raw disk writes,
@@ -91,6 +92,11 @@ matters.
 
 - Shell commands have network access: the sandbox confines what
   they write, not where they connect.
+- Shell commands can start other programs: `open`, `osascript` and
+  anything that hands work to launchd run *outside* the sandbox
+  with the user's authority. The write bound covers the sandboxed
+  command, not what it launches, so a script written to the
+  workspace and executed through those routes is not confined.
 - A model-generated service/tool file may reference paths outside
   the workspace; the sandbox confines execution, but file *writes*
   through non-shell channels are not separately fenced.

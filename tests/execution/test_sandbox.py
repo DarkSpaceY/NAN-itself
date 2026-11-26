@@ -75,21 +75,20 @@ def test_seatbelt_profile_generation(tmp_path: Path, monkeypatch: pytest.MonkeyP
     )
 
     assert "(version 1)" in text
-    assert "(deny default)" in text
-    assert "(allow file-read*)" in text
-    assert "(allow network*)" in text
+    assert "(allow default)" in text
+    assert "(deny file-write*" in text
     assert f'(subpath "{workspace.resolve()}")' in text
     assert '(subpath "/private/tmp")' in text
     assert '(subpath "/var/folders")' in text
 
-    # the read-only guarantee: package + builtin denied for writes
-    deny_section = text[text.index("(deny file-write*") :]
+    # the read-only guarantee comes last, so it wins over the allow list
+    read_only = text[text.rindex("(deny file-write*") :]
 
-    assert f'(subpath "{sb.package_dir.resolve()}")' in deny_section
-    assert f'(subpath "{sb.builtin_dir.resolve()}")' in deny_section
+    assert f'(subpath "{sb.package_dir.resolve()}")' in read_only
+    assert f'(subpath "{sb.builtin_dir.resolve()}")' in read_only
 
-    # workspace is writable: its only mention sits before the deny
-    assert text.index(f'(subpath "{workspace.resolve()}")') < text.index("(deny file-write*")
+    # workspace is writable: its allow precedes the read-only deny
+    assert text.index(f'(subpath "{workspace.resolve()}")') < text.rindex("(deny file-write*")
 
 
 def test_wrap_darwin_quotes_command(
@@ -102,7 +101,7 @@ def test_wrap_darwin_quotes_command(
     parts = shlex.split(wrapped)
 
     assert parts[:2] == ["sandbox-exec", "-p"]
-    assert "(deny default)" in parts[2]
+    assert "(allow default)" in parts[2]
     assert parts[3:] == ["bash", "-c", "echo hi > out.txt"]
 
 
@@ -113,9 +112,13 @@ def test_wrap_linux_bwrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     wrapped = sb.wrap("echo hi")
 
-    assert wrapped.startswith("bwrap --ro-bind / /")
+    assert wrapped.startswith("bwrap --bind / /")
     assert "--tmpfs /tmp" in wrapped
     assert f"--bind {sb.workspace.resolve()} {sb.workspace.resolve()}" in wrapped
+
+    home = Path.home().resolve()
+
+    assert f"--ro-bind {home} {home}" in wrapped
     assert shlex.split(wrapped)[-3:] == ["bash", "-c", "echo hi"]
 
 
