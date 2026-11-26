@@ -120,8 +120,16 @@ class Snapshot:
             or self.entity_map
         )
 
-    def render(self) -> str:
+    def render(self, *, version: int | None = None, freshness: str = "") -> str:
         """The block the model receives at an epoch boundary."""
+        attrs = ""
+
+        if version is not None:
+            attrs += f' version="{version}"'
+
+        if freshness:
+            attrs += f' freshness="{freshness}"'
+
         blocks: list[str] = []
 
         if self.goal:
@@ -148,7 +156,7 @@ class Snapshot:
         if not blocks:
             return ""
 
-        return "<memory>\n" + "\n".join(blocks) + "\n</memory>"
+        return f"<memory{attrs}>\n" + "\n".join(blocks) + "\n</memory>"
 
 
 def _render_items(section: str, items: list[Item]) -> str:

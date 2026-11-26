@@ -187,7 +187,7 @@ def test_inject_endpoint_returns_the_epoch_start_block(config) -> None:
 
         assert "<segv-guide>" in text
         assert "segv help" in text
-        assert "<memory>" in text
+        assert '<memory version="1"' in text
         assert "endpoint goal" in text
 
         state = client.get(

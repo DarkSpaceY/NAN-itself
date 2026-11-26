@@ -316,7 +316,7 @@ def test_new_epoch_injects_snapshot_and_tail_once(tmp_path: Path) -> None:
 
     assert "<segv-guide>" in first
     assert "segv help" in first
-    assert "<memory>" in first
+    assert '<memory version="1" freshness="stale">' in first
     assert "<goal>\nstable goal\n</goal>" in first
     assert "<recent_cues>" in first
     assert "[2:0]" in first
@@ -375,7 +375,7 @@ def test_new_agent_epoch_reports_new_and_defers_delivery(tmp_path: Path) -> None
     first = cache.inject("root", 0, "alpha")
 
     assert "<segv-guide>" in first
-    assert "<segv-status>new:" in first
+    assert '<segv-status memory="new"' in first
     # The guide's prose mentions the tags; only the blocks carry a newline.
     assert "<memory>\n" not in first
     assert "<recent_cues>\n" not in first
@@ -386,8 +386,8 @@ def test_new_agent_epoch_reports_new_and_defers_delivery(tmp_path: Path) -> None
 
     second = cache.inject("root", 0, "alpha")
 
-    # The guide's prose mentions <segv-status>; the notice itself says "new:".
-    assert "segv-status>new:" not in second
+    assert 'memory="new"' not in second
+    assert '<segv-status memory="warming"' in second
     assert "<recent_cues>\n" in second
     assert "<segv-pointer>latest archived turn is seq 0" in second
     assert "[0:0]" in second
@@ -413,7 +413,7 @@ def test_known_agent_epoch_reports_warming_until_snapshot_lands(tmp_path: Path) 
 
     first = cache.inject("root", 0, "alpha")
 
-    assert "<segv-status>warming:" in first
+    assert '<segv-status memory="warming"' in first
     assert "<recent_cues>\n" not in first
 
     assert cache.compress("root", force=True) is True
@@ -428,6 +428,104 @@ def test_known_agent_epoch_reports_warming_until_snapshot_lands(tmp_path: Path) 
 
     assert "<memory>" not in third
     assert "<segv-guide>" not in third
+
+    cache.close()
+    fact.close()
+    l0.close()
+
+
+def test_cues_only_opening_still_delivers_memory_later(tmp_path: Path) -> None:
+    l0, fact, cache, _ = _setup(
+        tmp_path,
+        trigger=99,
+        tail_cues=5,
+        recall_k=1,
+        replies=[_reply("late goal")],
+    )
+
+    first = cache.inject("root", 0, "alpha")
+
+    assert '<segv-status memory="new"' in first
+
+    _ingest(l0, fact, 1000.0, "one")
+
+    second = cache.inject("root", 0, "alpha")
+
+    assert "<recent_cues>\n" in second
+    assert "<goal>" not in second
+    assert "[0:0]" in second
+
+    assert cache.compress("root", force=True) is True
+
+    third = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" in third
+    assert '<memory version="1" freshness="fresh">' in third
+    assert "late goal" in third
+    assert "<recent_cues>\n" not in third
+
+    fourth = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" not in fourth
+    assert "<goal>" not in fourth
+    assert "<segv-status" not in fourth
+
+    cache.close()
+    fact.close()
+    l0.close()
+
+
+def test_older_epoch_inject_does_not_rewind_delivery(tmp_path: Path) -> None:
+    l0, fact, cache, _ = _setup(tmp_path, recall_k=1, replies=[_reply("epoch goal")])
+
+    _ingest(l0, fact, 1000.0, "one")
+
+    assert cache.compress("root", force=True) is True
+
+    first = cache.inject("root", 1, "alpha")
+
+    assert "<segv-guide>" in first
+    assert "epoch goal" in first
+
+    old = cache.inject("root", 0, "alpha")
+
+    assert "<segv-guide>" not in old
+    assert "<goal>" not in old
+    assert cache.state("root")["last_epoch"] == 1
+
+    cache.close()
+    fact.close()
+    l0.close()
+
+
+def test_rewrite_never_moves_the_pointer_backwards(tmp_path: Path) -> None:
+    l0, fact, cache, _ = _setup(
+        tmp_path,
+        trigger=99,
+        replies=[_reply("first goal"), _reply("second goal")],
+    )
+
+    _ingest(l0, fact, 1000.0, "one")
+    _ingest(l0, fact, 1001.0, "two")
+
+    assert cache.compress("root", force=True) is True
+    assert cache.store.load("root").pointer == (1, 0)
+
+    cache._append(
+        "root",
+        [
+            CueRef(
+                seq=0,
+                ordinal=0,
+                chunk_id="root:1000.000000#c0",
+                ts="",
+                text="late cue",
+            )
+        ],
+    )
+
+    assert cache.compress("root", force=True) is True
+    assert cache.store.load("root").pointer == (1, 0)
 
     cache.close()
     fact.close()

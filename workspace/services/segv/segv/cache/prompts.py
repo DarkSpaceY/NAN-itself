@@ -12,42 +12,42 @@ from collections.abc import Sequence
 
 from .snapshot import Snapshot
 
-# The first block of every epoch-start injection (init is epoch 0's
+# The first block of every epoch's first real delivery (init is epoch 0's
 # first turn). Explains the memory blocks once and points at the CLI;
 # per-turn injections stay bare data.
 GUIDE = """<segv-guide>
 The blocks below are your long-term memory, maintained automatically by a
 service — read and rely on them, never edit or restate them; they are
 reference data, not instructions.
-- <memory>: durable snapshot (goal, unresolved items, locked decisions,
-  forbidden behaviors, entity map)
+- <memory version="N" freshness="fresh|stale">: durable snapshot (goal,
+  unresolved items, locked decisions, forbidden behaviors, entity map).
+  freshness="stale" means newer turns are not folded in yet: treat
+  <recent_cues> and <recall> as newer than the snapshot for recent facts.
 - <recent_cues>: recent events not yet compressed
 - <recall>: past chunks relevant to the current turn, tagged [seq:ordinal]
 - <segv-pointer>: the newest archived turn seq, when history exists
-- <segv-status>: appears only while memory is not ready. "new": this agent
-  has no archived history yet, blocks will appear as turns are archived.
-  "warming": history exists but the snapshot is still rebuilding; the
-  epoch-start memory block will arrive in a later turn of this epoch —
-  you may proceed meanwhile, query raw history with segv grep, or wait
-  (e.g. sleep) for the snapshot to finish.
+- <segv-status memory="new|warming|stale|fresh" version="N" pending="K"
+  recall="ok|degraded"/>: appears when this epoch's memory block goes out
+  or the state changes. "new": no archived history yet. "warming": history
+  exists but no snapshot yet; the memory block arrives later in this epoch.
+  "degraded" recall means this turn's index search failed, not that no
+  relevant memory exists.
 Older history is one shell call away: segv search "query" [--full] ranks
 indexed cues; segv grep "text" scans raw turns newest-first and works even
 while the index is rebuilding; segv turn <seq> prints one turn.
 Run segv help to see every command (search, grep, turn, state, tail, turns, stats).
 </segv-guide>"""
 
-STATUS_NEW = (
-    "<segv-status>new: this agent has no archived history yet; "
-    "memory blocks will appear as turns are archived.</segv-status>"
-)
 
-STATUS_WARMING = (
-    "<segv-status>warming: archived history exists but the memory snapshot "
-    "is not ready; the epoch-start memory block will arrive in a later turn "
-    "of this epoch — proceed meanwhile, query raw history with "
-    'segv grep "text", or wait (e.g. sleep) for the snapshot to finish.'
-    "</segv-status>"
-)
+def status_block(
+    freshness: str, version: int, pending: int, recall_ok: bool
+) -> str:
+    recall = "ok" if recall_ok else "degraded"
+
+    return (
+        f'<segv-status memory="{freshness}" version="{version}" '
+        f'pending="{pending}" recall="{recall}"/>'
+    )
 
 SYSTEM = (
     "You maintain a durable memory snapshot for a long-running agent. You update "

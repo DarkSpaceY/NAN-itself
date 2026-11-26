@@ -173,7 +173,7 @@ sequenceDiagram
 
     A->>H: next turn starts (inject)
     H->>S: POST /inject (8s budget)
-    S->>C: epoch state, snapshot + tail (epoch start)
+    S->>C: epoch ledger, snapshot + tail (first real block)
     C-->>S: snapshot / tail / seen
     S->>F: four-way recall (no CE)
     F-->>S: top-k chunks
@@ -190,7 +190,7 @@ sequenceDiagram
 |---|---|---|---|
 | **L0** | full JSON of completed turns, global time-ordered ledger | `data/` RocksDB | No, the only source of truth |
 | **fact** | chunks (raw text + event cue), two int8 vector routes, HNSW, BM25 | `data/fact/` | Yes, rebuilt from L0 |
-| **cache** | five-section snapshot, pending cue, epoch tail, seen set | `data/cache/` | Yes, rebuilt from fact |
+| **cache** | five-section snapshot, pending cue, epoch tail, delivery ledger | `data/cache/` | Yes, rebuilt from fact |
 
 L0 is the only layer that needs backup; fact and cache are rebuilt on the next start after deletion.
 
@@ -210,8 +210,8 @@ The compression input is **the previous snapshot + this batch's raw chunks** (no
 
 Injection has two timings:
 
-- **Epoch start** (init or context cleared): inject `guide` + `memory` (snapshot) + `recent_cues` (uncompressed tail);
-- **Subsequent turns of the same epoch**: inject only `recall`. A seen set is maintained per `(agent_id, epoch)`, so the same chunk is never recalled twice.
+- **First real block of an epoch** (init or context cleared): `guide` + `memory` (snapshot, annotated with `version` and `freshness`) + `recent_cues` (uncompressed tail). The block goes out when a snapshot or cue first exists; a cues-only opening does not consume the memory delivery, so a snapshot that lands later in the same epoch is still delivered once.
+- **Subsequent turns of the same epoch**: inject only `recall`. The epoch ledger records delivered refs and the delivered memory version, so the same chunk is never recalled twice and memory is not re-sent within the epoch. `<segv-status>` reports `freshness` (`new` / `warming` / `stale` / `fresh`), pending cues, and whether recall degraded.
 
 All injection blocks (including SEGV's own) are stripped as a whole at the chunking stage and never re-enter the fact store. Any exception inside `/inject` returns empty text only and never fails the agent's turn.
 
@@ -281,7 +281,7 @@ workspace/services/segv/
 │   ├── store.py            # L0: turn, ledger, retention, stats
 │   ├── cli.py              # search / state / tail / turns / turn / stats
 │   ├── fact/               # chunk, cue, embed, BM25/HNSW, RRF, CE
-│   └── cache/              # snapshot, compression, inject, seen
+│   └── cache/              # snapshot, compression, inject, epoch ledger
 ├── segv_nan/               # NAN adapter: /turn, /inject, payload mapping
 ├── web/                    # timeline + ledger panel (no build step)
 ├── tests/                  # 38 tests

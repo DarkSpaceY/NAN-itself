@@ -21,7 +21,7 @@ from ..fact.layer import FactLayer
 from ..fact.slm import Slm
 from ..store import Store
 from .config import CacheConfig
-from .prompts import GUIDE, STATUS_NEW, STATUS_WARMING, rewrite_prompt
+from .prompts import GUIDE, rewrite_prompt, status_block
 from .snapshot import Snapshot, SnapshotError, parse_snapshot
 from .store import CacheState, CacheStore
 
@@ -86,16 +86,24 @@ def _tail(
     return out
 
 
-def _status_notice(l0: Store, agent_id: str) -> str:
-    """Why the epoch-start memory block is absent: no history, or warming."""
-    try:
-        known = l0.meta(agent_id) is not None
+def _freshness(
+    l0: Store,
+    agent_id: str,
+    has_memory: bool,
+    pending_after: list[CueRef],
+) -> str:
+    """new: no history; warming: history but no snapshot; stale: newer cues."""
+    if not has_memory:
+        try:
+            known = l0.meta(agent_id) is not None
 
-    except Exception:
-        # If L0 cannot be read, history may exist: warming is the safer claim.
-        known = True
+        except Exception:
+            # If L0 cannot be read, history may exist: warming is the safer claim.
+            known = True
 
-    return STATUS_WARMING if known else STATUS_NEW
+        return "warming" if known else "new"
+
+    return "stale" if pending_after else "fresh"
 
 
 def _pointer_block(l0: Store, agent_id: str) -> str:
@@ -116,46 +124,6 @@ def _pointer_block(l0: Store, agent_id: str) -> str:
         "with segv turn <seq>, or scan raw history newest-first with "
         'segv grep "text".</segv-pointer>'
     )
-
-
-def _epoch_start(
-    l0: Store,
-    agent_id: str,
-    state: CacheState,
-    pending: list[CueRef],
-    config: CacheConfig,
-) -> tuple[list[str], list[CueRef], bool]:
-    """GUIDE plus the memory that exists; a status notice when none does."""
-    tail = _tail(pending, state.pointer, config.tail_cues, config.tail_chars)
-
-    snapshot_text = state.snapshot.render()
-
-    if not snapshot_text and not tail:
-        blocks = [GUIDE, _status_notice(l0, agent_id)]
-
-        pointer = _pointer_block(l0, agent_id)
-
-        if pointer:
-            blocks.append(pointer)
-
-        return blocks, [], False
-
-    blocks = [GUIDE]
-
-    if snapshot_text:
-        blocks.append(snapshot_text)
-
-    tail_text = render_refs("recent_cues", tail)
-
-    if tail_text:
-        blocks.append(tail_text)
-
-    pointer = _pointer_block(l0, agent_id)
-
-    if pointer:
-        blocks.append(pointer)
-
-    return blocks, tail, True
 
 
 class CacheLayer:
@@ -400,6 +368,13 @@ class CacheLayer:
         last = batch[-1]
         pointer = last.key
 
+        if state is not None and state.pointer is not None:
+            # A chunk that arrived late can sit before the committed pointer.
+            # Fold it into the snapshot, but never move the pointer backwards.
+            pointer = max(state.pointer, pointer)
+
+        done = {ref.key for ref in batch}
+
         # Commit and prune together: an epoch-start inject holds _lock while
         # it reads the pointer and the pending cues, so it sees one side of
         # this rewrite or the other, never a torn state.
@@ -414,7 +389,7 @@ class CacheLayer:
             remaining = [
                 ref
                 for ref in self._pending.get(agent_id, ())
-                if (ref.seq, ref.ordinal) > pointer
+                if ref.key not in done
             ]
             self._pending[agent_id] = remaining
             have = self._have.get(agent_id)
@@ -539,98 +514,130 @@ class CacheLayer:
             return ""
 
         with self._agent_lock(agent_id):
+            try:
+                fallback, epoch_state, _changed, _stale = self.store.begin_epoch(
+                    agent_id, epoch
+                )
+
+            except Exception:
+                logger.exception("segv-cache epoch begin failed for {}", agent_id)
+
+                return ""
+
+            # Read the snapshot and pending under the same lock a rewrite
+            # commits under, so the pair cannot come from two versions.
             with self._lock:
-                try:
-                    state, changed = self.store.begin_epoch(agent_id, epoch)
-
-                except Exception:
-                    logger.exception(
-                        "segv-cache epoch begin failed for {}", agent_id
-                    )
-
-                    return ""
-
                 pending = list(self._pending.get(agent_id, ()))
 
+                state = self.store.load(agent_id) or fallback
+
+            pointer = state.pointer
+
+            pending_after = [
+                ref for ref in pending if pointer is None or ref.key > pointer
+            ]
+
+            has_memory = not state.snapshot.is_empty
+
+            freshness = _freshness(self.l0, agent_id, has_memory, pending_after)
+
+            memory_text = (
+                state.snapshot.render(version=state.version, freshness=freshness)
+                if has_memory
+                else ""
+            )
+
+            tail = _tail(
+                pending, pointer, self.config.tail_cues, self.config.tail_chars
+            )
+
+            fresh_tail = [ref for ref in tail if ref.key not in epoch_state.refs]
+
+            # Memory goes out once per epoch, when it first exists. A cues-only
+            # opening does not consume this: memory still arrives later.
+            deliver_memory = bool(memory_text) and epoch_state.delivered_version is None
+
+            full = not epoch_state.opened or deliver_memory
+
             blocks: list[str] = []
-            tail: list[CueRef] = []
-            seen: set[tuple[int, int]] = set()
+            sent: list[CueRef] = []
 
-            if changed:
-                epoch_blocks, tail, ready = _epoch_start(
-                    self.l0, agent_id, state, pending, self.config
-                )
-                blocks.extend(epoch_blocks)
+            if full:
+                blocks.append(GUIDE)
 
-                seen |= {ref.key for ref in tail}
+                if memory_text:
+                    blocks.append(memory_text)
 
-                if ready:
-                    try:
-                        self.store.set_delivered(agent_id, True)
+                if fresh_tail:
+                    blocks.append(render_refs("recent_cues", fresh_tail))
 
-                    except Exception:
-                        logger.exception(
-                            "segv-cache delivered write failed for {}", agent_id
-                        )
+                    sent = fresh_tail
 
-                if pending:
-                    self._enqueue(agent_id, True)
+                pointer_text = _pointer_block(self.l0, agent_id)
 
-            else:
-                try:
-                    seen = self.store.seen(agent_id, epoch)
+                if pointer_text:
+                    blocks.append(pointer_text)
 
-                except Exception:
-                    logger.exception(
-                        "segv-cache seen read failed for {}/{}", agent_id, epoch
-                    )
+            seen = set(epoch_state.refs) | {ref.key for ref in sent}
 
-                if not state.delivered:
-                    # The epoch opened before memory was ready. Deliver the
-                    # epoch-start block on the first turn where it exists.
-                    epoch_blocks, tail, ready = _epoch_start(
-                        self.l0, agent_id, state, pending, self.config
-                    )
-
-                    if ready:
-                        blocks.extend(epoch_blocks)
-
-                        seen |= {ref.key for ref in tail}
-
-                        try:
-                            self.store.set_delivered(agent_id, True)
-
-                        except Exception:
-                            logger.exception(
-                                "segv-cache delivered write failed for {}", agent_id
-                            )
-
-                        if pending:
-                            self._enqueue(agent_id, True)
-
-            recall = self._recall(agent_id, query, seen)
+            recall, recall_ok = self._recall(agent_id, query, seen)
 
             if recall:
                 blocks.append(render_refs("recall", recall))
 
-            marks = [ref.key for ref in recall] + [ref.key for ref in tail]
+            status_key = f"{freshness}|{recall_ok}"
 
-            if marks:
+            if full or status_key != epoch_state.status_key:
+                shown = (
+                    state.version
+                    if deliver_memory
+                    else (epoch_state.delivered_version or 0)
+                )
+
+                status = status_block(
+                    freshness, shown, len(pending_after), recall_ok
+                )
+
+                blocks.insert(1 if full else 0, status)
+
+                epoch_state.status_key = status_key
+
+            dirty = False
+
+            if sent or recall or full:
+                epoch_state.refs |= {ref.key for ref in sent}
+                epoch_state.refs |= {ref.key for ref in recall}
+
+                dirty = True
+
+            if deliver_memory:
+                epoch_state.delivered_version = state.version
+
+                dirty = True
+
+            if sent or deliver_memory:
+                epoch_state.opened = True
+
+                dirty = True
+
+            if dirty:
                 try:
-                    self.store.mark_seen(agent_id, epoch, marks)
+                    self.store.save_epoch(agent_id, epoch_state)
 
                 except Exception:
                     logger.exception(
-                        "segv-cache seen persist failed for {}/{}", agent_id, epoch
+                        "segv-cache epoch persist failed for {}/{}",
+                        agent_id,
+                        epoch_state.epoch,
                     )
 
             return "\n\n".join(blocks)
 
     def _recall(
         self, agent_id: str, query: str, seen: set[tuple[int, int]]
-    ) -> list[CueRef]:
+    ) -> tuple[list[CueRef], bool]:
         if not query:
-            return []
+            return [], True
 
         try:
             hits = self.fact.search(
@@ -645,7 +652,7 @@ class CacheLayer:
         except Exception:
             logger.exception("segv-cache recall failed for {}", agent_id)
 
-            return []
+            return [], False
 
         out: list[CueRef] = []
 
@@ -671,7 +678,7 @@ class CacheLayer:
             if len(out) >= self.config.recall_k:
                 break
 
-        return out
+        return out, True
 
     # ------------------------------------------------------------------
     # Read
@@ -684,22 +691,42 @@ class CacheLayer:
         state: CacheState | None = self.store.load(agent_id)
 
         with self._lock:
-            pending = len(self._pending.get(agent_id, ()))
+            pending = list(self._pending.get(agent_id, ()))
 
         epoch = state.last_epoch if state is not None else None
+
+        epoch_state = (
+            self.store.load_epoch(agent_id, epoch) if epoch is not None else None
+        )
+
+        pointer = state.pointer if state is not None else None
+
+        pending_after = [
+            ref for ref in pending if pointer is None or ref.key > pointer
+        ]
 
         return {
             "enabled": True,
             "agent_id": agent_id,
             "pointer": (
-                {"seq": state.pointer[0], "ordinal": state.pointer[1]}
-                if state is not None and state.pointer is not None
+                {"seq": pointer[0], "ordinal": pointer[1]}
+                if pointer is not None
                 else None
             ),
             "last_epoch": epoch,
             "version": state.version if state is not None else 0,
             "updated_at": state.updated_at if state is not None else 0.0,
-            "pending": pending,
+            "pending": len(pending_after),
+            "delivered_version": (
+                epoch_state.delivered_version if epoch_state is not None else None
+            ),
+            "opened": bool(epoch_state.opened) if epoch_state is not None else False,
+            "freshness": _freshness(
+                self.l0,
+                agent_id,
+                state is not None and not state.snapshot.is_empty,
+                pending_after,
+            ),
             "seen": (
                 self.store.seen_size(agent_id, epoch)
                 if epoch is not None
