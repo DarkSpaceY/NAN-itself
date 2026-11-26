@@ -15,7 +15,9 @@ set -u
 # package-manager and library caches land in <workspace>/home
 # without per-tool exports here.
 
-LOG="$NAN_WORKSPACE/autostart.log"
+LOG="$NAN_WORKSPACE/logs/autostart.log"
+
+mkdir -p "$(dirname "$LOG")"
 
 note() {
     echo "[autostart] $*" >> "$LOG"
