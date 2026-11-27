@@ -24,12 +24,13 @@ wheels/
 # The live config holds the API key; config/nan.yaml.example is the
 # committed template.
 config/nan.yaml
+# Same for the read service: its own endpoint and key live in the copy.
+workspace/services/read/config.yaml
 
 # Runtime directories (gitignored)
 # The agent's home: caches, configs and dotfiles, all regenerable
 workspace/home/
-logs/
-turns/
+logs/turns/
 cache/
 # segv's cache/ is source code, not runtime state
 !workspace/services/segv/segv/cache/

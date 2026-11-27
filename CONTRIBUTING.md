@@ -87,6 +87,7 @@ Services and the shared kit are separate uv projects:
 ```bash
 uv run --directory workspace/services/mcp --frozen pytest -q
 uv run --directory workspace/services/segv --frozen pytest -q
+uv run --directory workspace/services/read --frozen pytest -q
 uv run --directory lib/nan-service-kit --frozen pytest -q
 ```
 
