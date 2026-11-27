@@ -82,6 +82,20 @@ repos:
         pass_filenames: false
         files: ^workspace/services/segv/
 
+      - id: pytest-plan
+        name: pytest (plan service)
+        entry: uv run --directory workspace/services/plan --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/plan/
+
+      - id: pytest-read
+        name: pytest (read service)
+        entry: uv run --directory workspace/services/read --frozen pytest -q
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/read/
+
       - id: pytest-service-kit
         name: pytest (service kit)
         entry: uv run --directory lib/nan-service-kit --frozen pytest -q
