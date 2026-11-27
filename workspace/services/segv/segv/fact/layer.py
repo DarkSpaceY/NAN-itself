@@ -11,7 +11,6 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +35,9 @@ ROUTES: dict[str, tuple[str, ...]] = {
     "event": ("event_dense", "event_bm25"),
     "bm25": ("raw_bm25", "event_bm25"),
     "dense": ("raw_dense", "event_dense"),
+    # The CLI's names for the same two route pairs.
+    "lexical": ("raw_bm25", "event_bm25"),
+    "vector": ("raw_dense", "event_dense"),
 }
 
 
@@ -67,9 +69,6 @@ class FactLayer:
         self.slm: Any = slm
         self.embedder: Any = embedder
         self.cue: CueExtractor | None = None
-
-        # Set by the cache layer: called after a turn's chunks commit.
-        self.on_ingested: Callable[[str, int, list[ChunkRow]], None] | None = None
 
         self._reranker = reranker
         self._reranker_failed = False
@@ -296,13 +295,6 @@ class FactLayer:
 
         self.store.add_turn(agent_id, seq, rows)
 
-        if self.on_ingested is not None:
-            try:
-                self.on_ingested(agent_id, seq, rows)
-
-            except Exception:
-                logger.exception("segv-fact observer failed for {}/{}", agent_id, seq)
-
         return len(rows)
 
     def _fill_cues(self, ts: str, chunks: list[ChunkDraft]) -> None:
@@ -452,6 +444,13 @@ class FactLayer:
             )
 
         return hits
+
+    def max_seq(self, agent_id: str) -> int:
+        """The newest turn seq present in the index; -1 when it holds none."""
+        if self.store is None:
+            return -1
+
+        return max(self.store.seq_map(agent_id).values(), default=-1)
 
     def _rerank(self, query: str, candidates: list[tuple[str, float]]) -> list[str]:
         """Order the RRF head with the cross-encoder, as a fifth route."""

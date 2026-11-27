@@ -70,25 +70,8 @@ fact:                       # segv-fact: chunks + two int8 vectors + BM25/HNSW
     workers: 2
     fallback_on_error: true
 
-cache:                      # segv-cache: rolling snapshot over fact cues
+cache:                      # segv-cache: the small block an epoch opens with
   enabled: true
-  data_dir: "cache"         # <L0 data dir>/cache; separate RocksDB
-  trigger: 5                # pending chunks that force a rewrite
-  batch_cues: 10            # pending chunks per rewrite; raw input stays bounded
-  raw_chars: 4000           # verbatim source text per rewrite
-  tail_cues: 20             # epoch-boundary tail caps
-  tail_chars: 2000
-  recall_k: 3               # fact cues injected each step
-  recall_pool: 200          # fixed pool; never expanded
-  max_items: 50             # cap per snapshot list
-  min_retention: 0.5        # a rewrite keeping less is a bad parse
-
-  slm:                      # rewrite calls; independent of the cue model
-    model: "qwen3.5:4b-mlx"
-    base_url: "http://127.0.0.1:11434/v1"
-    temperature: 0.0
-    seed: 42
-    max_tokens: 2048
-    timeout: 600.0
-    attempts: 4
-    reasoning_effort: "none"
+  data_dir: "cache"         # <L0 data dir>/cache; holds the per-agent epoch marker
+  recent_turns: 3           # raw turns shown when an epoch opens
+  recent_chars: 300         # cap per turn, includes seq/time/origin

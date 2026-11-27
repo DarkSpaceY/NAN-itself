@@ -32,11 +32,9 @@ def install(app: FastAPI, service: SegvService) -> None:
         # The hub treats a failure as "service unavailable" and moves on.
         # A degraded block is more useful than a 500, so this never raises.
         try:
-            agent_id, epoch, query = inject_request(body)
+            agent_id, epoch = inject_request(body)
 
-            text = await asyncio.to_thread(
-                service.cache.inject, agent_id, epoch, query
-            )
+            text = await asyncio.to_thread(service.cache.inject, agent_id, epoch)
 
         except Exception:
             logger.exception("segv-nan inject failed")

@@ -4,14 +4,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 from segv.app import SegvService, build_app
-from segv.cache.config import CacheConfig
-from segv.cache.layer import CacheLayer
-from segv.fact.config import SlmConfig
-from segv.fact.layer import FactLayer
 from segv_nan.app import install
 from segv_nan.protocol import inject_request, strip_injections, turn_record
-from test_cache import FakeCompressor, _ingest, _reply
-from test_fact import FakeEmbedder, FakeReranker, FakeSlm, _fact_config
 
 
 def _turn(ts: float = 1000.0, reply: str = "done") -> dict[str, Any]:
@@ -82,27 +76,9 @@ def test_nan_turn_without_identity_is_dropped() -> None:
     assert turn_record({"agent_id": "root", "started_at": "later"}) is None
 
 
-def test_inject_request_uses_the_inbox_text() -> None:
-    agent_id, epoch, query = inject_request(
-        {
-            "agent_id": " root ",
-            "epoch": "2",
-            "inbox": [{"text": "  alpha  "}, {"text": "beta"}, {"text": ""}],
-        }
-    )
-
-    assert (agent_id, epoch, query) == ("root", 2, "alpha\nbeta")
-
-
-def test_inject_request_keeps_head_and_tail_of_a_long_inbox() -> None:
-    long = "HEAD" + "x" * 3000 + "TAIL"
-
-    _, _, query = inject_request({"inbox": [{"text": long}]})
-
-    assert query.startswith("HEAD")
-    assert query.endswith("TAIL")
-    assert "[...]" in query
-    assert len(query) <= 2000
+def test_inject_request_returns_the_agent_and_epoch() -> None:
+    assert inject_request({"agent_id": " root ", "epoch": "2"}) == ("root", 2)
+    assert inject_request({"inbox": [{"text": "alpha"}]}) == ("", 0)
 
 
 def test_strip_injections_removes_every_service() -> None:
@@ -142,64 +118,36 @@ def test_turn_endpoint_archives_clean_messages_and_the_raw_payload(config) -> No
         assert turn["messages"][1]["content"] == "hello"
 
 
-def test_inject_endpoint_returns_the_epoch_start_block(config) -> None:
+def test_inject_endpoint_returns_the_epoch_opening(config) -> None:
     service = SegvService(config, links=[])
-
-    fact = FactLayer(
-        service.store,
-        _fact_config(),
-        slm=FakeSlm(),
-        embedder=FakeEmbedder(),
-        reranker=FakeReranker(),
-    )
-    cache_config = CacheConfig(
-        enabled=True,
-        trigger=5,
-        tail_cues=5,
-        recall_k=1,
-        max_items=20,
-        min_retention=0.0,
-        slm=SlmConfig(max_tokens=1200),
-    )
-    cache = CacheLayer(
-        service.store,
-        fact,
-        cache_config,
-        slm=FakeCompressor([_reply("endpoint goal")]),
-    )
-    fact.on_ingested = cache.on_ingested
-
-    service.fact = fact
-    service.cache = cache
-
-    _ingest(service.store, fact, 1000.0, "one")
-
-    assert cache.compress("root", force=True) is True
 
     body = {"agent_id": "root", "epoch": 0, "inbox": [{"text": "alpha"}]}
 
     with TestClient(_app(service)) as client:
-        response = client.post("/inject", json=body)
+        first = client.post("/inject", json=body)
 
-        assert response.status_code == 200
+        assert first.status_code == 200
 
-        text = response.json()["text"]
+        text = first.json()["text"]
 
         assert "<segv-guide>" in text
-        assert "segv help" in text
-        assert '<memory version="1"' in text
-        assert "endpoint goal" in text
+        assert "segv search" in text
+        # Nothing archived yet, so there is nothing to index: the index counts as ok.
+        assert '<segv-status index="ok" lag_turns="0" latest_seq="-1"/>' in text
+        # No archived turn yet: nothing to point at.
+        assert "latest archived turn is seq" not in text
+        assert "<segv-recent>\n" not in text
+
+        # The same epoch opens once.
+        assert client.post("/inject", json=body).json()["text"] == ""
 
         state = client.get(
             "/api/cache/state", params={"agent_id": "root"}
         ).json()
 
         assert state["last_epoch"] == 0
-        assert state["pointer"] == {"seq": 0, "ordinal": 0}
-
-        second = client.post("/inject", json=body).json()["text"]
-
-        assert "<memory>" not in second
+        assert state["latest_seq"] == -1
+        assert state["lag_turns"] == 0
 
 
 def test_inject_endpoint_never_raises(config) -> None:

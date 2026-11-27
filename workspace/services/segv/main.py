@@ -3,7 +3,7 @@ SEGV memory service: the core plus NAN's protocol adapter.
 
 One process, two hub registrations: `segv-archive` receives every
 committed turn at `POST /turn` and writes it durably to L0; `segv`
-answers `POST /inject` with the cache's snapshot, tail and recall.
+answers `POST /inject` with the small block an epoch opens with.
 
 Run:  uv run main.py   (from this directory, after `uv sync`)
 """

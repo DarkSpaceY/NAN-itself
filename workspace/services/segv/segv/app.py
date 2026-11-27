@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncIterator, Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,206 @@ from .fact.layer import ROUTES, FactLayer
 from .store import Store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+SEARCH_MODES = (*ROUTES, "grep")
+
+FIELD_KEYS = ("origin", "role", "epoch")
+
+
+def _at(value: Any) -> float | None:
+    """Accept epoch seconds or an ISO timestamp; empty means unset."""
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip()
+
+    try:
+        return float(text)
+
+    except ValueError:
+        pass
+
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+
+def _int_or_none(value: Any) -> int | None:
+    return None if value is None or value == "" else int(value)
+
+
+def _lag(service: Any, agent_id: str) -> tuple[int, int, int]:
+    """(newest archived seq, newest indexed seq, turns the index is behind)."""
+    meta = service.store.meta(agent_id) or {}
+
+    latest = int(meta.get("next_seq") or 0) - 1
+
+    try:
+        indexed = int(service.fact.max_seq(agent_id))
+
+    except Exception:
+        indexed = -1
+
+    lag = max(0, latest - indexed) if indexed >= 0 else max(0, latest + 1)
+
+    return latest, indexed, lag
+
+
+def _in_range(
+    hit: dict[str, Any],
+    seq_from: int | None,
+    seq_to: int | None,
+    since: float | None,
+    until: float | None,
+) -> bool:
+    seq = hit.get("seq")
+
+    if seq_from is not None and (seq is None or int(seq) < seq_from):
+        return False
+
+    if seq_to is not None and (seq is None or int(seq) > seq_to):
+        return False
+
+    started = hit.get("started_at")
+
+    if since is not None or until is not None:
+        try:
+            stamp = float(started)
+
+        except (TypeError, ValueError):
+            return False
+
+        if since is not None and stamp < since:
+            return False
+
+        if until is not None and stamp > until:
+            return False
+
+    return True
+
+
+def search_payload(service: Any, body: dict[str, Any]) -> JSONResponse:
+    """One entry point for every retrieval mode: grep, lexical, vector, hybrid."""
+    agent_id = str(body.get("agent_id") or "").strip()
+
+    query = str(body.get("query") or "").strip()
+
+    if not agent_id or not query:
+        return JSONResponse(
+            {"error": "agent_id and query are required"}, status_code=400
+        )
+
+    mode = str(body.get("mode") or "hybrid").strip().lower()
+
+    if mode not in SEARCH_MODES:
+        return JSONResponse(
+            {"error": f"unknown search mode: {mode}"}, status_code=400
+        )
+
+    rerank = body.get("rerank")
+
+    if rerank is not None and not isinstance(rerank, bool):
+        return JSONResponse({"error": "rerank must be a boolean"}, status_code=400)
+
+    try:
+        limit = int(body.get("top_k") or body.get("limit") or 10)
+        pool = _int_or_none(body.get("pool"))
+        before = _int_or_none(body.get("before"))
+        seq_from = _int_or_none(body.get("seq_from"))
+        seq_to = _int_or_none(body.get("seq_to"))
+        epoch = _int_or_none(body.get("epoch"))
+        context = int(body.get("context") or 48)
+        scan_timeout = float(body.get("scan_timeout") or 3.0)
+        since = _at(body.get("since"))
+        until = _at(body.get("until"))
+
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "numeric filters are invalid"}, status_code=400)
+
+    limit = max(1, min(limit, 100))
+    context = min(max(context, 16), 400)
+    scan_timeout = min(max(scan_timeout, 0.1), 60.0)
+
+    origin = str(body.get("origin") or "").strip() or None
+    role = str(body.get("role") or "").strip().lower() or None
+
+    latest, indexed, lag = _lag(service, agent_id)
+
+    def raw(note: str | None) -> JSONResponse:
+        result = service.store.grep(
+            agent_id,
+            query,
+            limit=limit,
+            before=before,
+            timeout=scan_timeout,
+            context=context,
+            seq_from=seq_from,
+            seq_to=seq_to,
+            since=since,
+            until=until,
+            origin=origin,
+            epoch=epoch,
+            role=role,
+        )
+
+        payload = {
+            **result,
+            "mode": "grep",
+            "count": len(result.get("hits") or []),
+            "lag_turns": lag,
+            "latest_seq": latest,
+            "indexed_seq": indexed,
+        }
+
+        if note:
+            payload["note"] = note
+
+        return JSONResponse(payload)
+
+    fields = [
+        key for key, value in (("origin", origin), ("role", role), ("epoch", epoch)) if value is not None
+    ]
+
+    if mode == "grep":
+        return raw(None)
+
+    if fields and mode != "grep":
+        return raw(
+            f"field filters ({', '.join(fields)}) need the raw scan; ran grep instead"
+        )
+
+    try:
+        hits = service.fact.search(
+            agent_id,
+            query,
+            top_k=limit,
+            pool=pool,
+            mode=mode,
+            rerank=bool(rerank),
+        )
+
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    hits = [hit for hit in hits if _in_range(hit, seq_from, seq_to, since, until)]
+
+    if not hits and lag > 0:
+        return raw(f"index warming (lag={lag}); searched raw instead")
+
+    payload = {
+        "mode": mode,
+        "hits": hits,
+        "count": len(hits),
+        "lag_turns": lag,
+        "latest_seq": latest,
+        "indexed_seq": indexed,
+    }
+
+    if lag > 0:
+        payload["note"] = f"index warming (lag={lag}); results may miss recent turns"
+
+    return JSONResponse(payload)
 
 
 class SegvService:
@@ -48,11 +249,6 @@ class SegvService:
         self.fact = fact or FactLayer(self.store, config.fact)
 
         self.cache = cache or CacheLayer(self.store, self.fact, config.cache)
-
-        observer = getattr(self.cache, "on_ingested", None)
-
-        if callable(observer) and getattr(self.fact, "on_ingested", None) is None:
-            self.fact.on_ingested = observer
 
         self._queues: set[asyncio.Queue[None]] = set()
 
@@ -155,17 +351,6 @@ def build_app(
             await asyncio.to_thread(service.cache.state, agent_id.strip())
         )
 
-    @app.get("/api/cache/tail")
-    async def cache_tail(agent_id: str = "", limit: int = 20) -> JSONResponse:
-        if not agent_id.strip():
-            return JSONResponse({"error": "agent_id is required"}, status_code=400)
-
-        cues = await asyncio.to_thread(
-            service.cache.tail, agent_id.strip(), max(1, min(limit, 200))
-        )
-
-        return JSONResponse({"cues": cues, "count": len(cues)})
-
     @app.get("/api/cache/stats")
     async def cache_stats() -> dict[str, Any]:
         return await asyncio.to_thread(service.cache.stats)
@@ -186,52 +371,14 @@ def build_app(
     async def fact_stats() -> dict[str, Any]:
         return await asyncio.to_thread(service.fact.stats)
 
+    @app.post("/api/search")
+    async def search(body: dict[str, Any]) -> JSONResponse:
+        return await asyncio.to_thread(search_payload, service, body)
+
+    # Kept for scripts written against the recall-only endpoint.
     @app.post("/api/recall")
     async def recall(body: dict[str, Any]) -> JSONResponse:
-        agent_id = str(body.get("agent_id") or "").strip()
-
-        query = str(body.get("query") or "").strip()
-
-        if not agent_id or not query:
-            return JSONResponse(
-                {"error": "agent_id and query are required"}, status_code=400
-            )
-
-        try:
-            top_k = int(body.get("top_k") or 20)
-            pool = int(body["pool"]) if body.get("pool") is not None else None
-
-        except (TypeError, ValueError):
-            return JSONResponse(
-                {"error": "top_k and pool must be integers"}, status_code=400
-            )
-
-        mode = str(body.get("mode") or "hybrid").strip().lower()
-        rerank = body.get("rerank")
-
-        if mode not in ROUTES:
-            return JSONResponse(
-                {"error": f"unknown search mode: {mode}"}, status_code=400
-            )
-
-        if rerank is not None and not isinstance(rerank, bool):
-            return JSONResponse({"error": "rerank must be a boolean"}, status_code=400)
-
-        try:
-            hits = await asyncio.to_thread(
-                service.fact.search,
-                agent_id,
-                query,
-                top_k=top_k,
-                pool=pool,
-                mode=mode,
-                rerank=rerank,
-            )
-
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-
-        return JSONResponse({"hits": hits, "count": len(hits)})
+        return await asyncio.to_thread(search_payload, service, body)
 
     @app.get("/api/activity")
     async def activity(
@@ -279,31 +426,6 @@ def build_app(
         return await asyncio.to_thread(
             service.store.turns, agent_id, limit=min(limit, 500), before=before
         )
-
-    @app.get("/api/agents/{agent_id}/grep")
-    async def agent_grep(
-        agent_id: str,
-        pattern: str,
-        limit: int = 5,
-        before: int | None = None,
-        timeout: float = 3.0,
-        context: int = 48,
-    ) -> JSONResponse:
-        pattern = pattern.strip()
-
-        if not pattern:
-            return JSONResponse({"error": "pattern is required"}, status_code=400)
-
-        result = await asyncio.to_thread(
-            service.store.grep,
-            agent_id,
-            pattern,
-            limit=min(max(limit, 1), 50),
-            timeout=min(max(timeout, 0.1), 60.0),
-            context=min(max(context, 16), 400),
-        )
-
-        return JSONResponse(result)
 
     @app.get("/api/stream")
     async def stream(request: Request) -> StreamingResponse:

@@ -591,6 +591,13 @@ class Store:
         before: int | None = None,
         timeout: float = 3.0,
         context: int = 48,
+        seq_from: int | None = None,
+        seq_to: int | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        origin: str | None = None,
+        epoch: int | None = None,
+        role: str | None = None,
     ) -> dict[str, Any]:
         """
         Substring scan over one agent's archived turns, newest first; the
@@ -601,6 +608,10 @@ class Store:
         least one turn); `context` is the snippet window either side of
         the match. `truncated` marks a budget stop, `next_before` is the
         `before` value that resumes the scan where it stopped.
+
+        The optional filters narrow the scan: `seq_from`/`seq_to` bound the
+        turn range, `since`/`until` the wall clock, and `origin`/`epoch`/
+        `role` keep only turns with that provenance or message role.
         """
         meta = self.meta(agent_id)
 
@@ -622,6 +633,9 @@ class Store:
         latest = int(meta.get("next_seq") or 0) - 1
         seq = latest if before is None else min(before - 1, latest)
 
+        if seq_to is not None:
+            seq = min(seq, seq_to)
+
         deadline = time.monotonic() + max(0.0, timeout)
 
         hits: list[dict[str, Any]] = []
@@ -629,6 +643,9 @@ class Store:
         truncated = False
 
         while seq >= 0 and len(hits) < limit:
+            if seq_from is not None and seq < seq_from:
+                break
+
             if scanned and time.monotonic() >= deadline:
                 truncated = True
 
@@ -641,9 +658,12 @@ class Store:
             if record is None:  # evicted by retention
                 continue
 
+            if not _grep_match(record, since, until, origin, epoch, role):
+                continue
+
             scanned += 1
 
-            text = _grep_text(record)
+            text = _grep_text(record, role)
 
             index = text.lower().find(needle)
 
@@ -892,16 +912,69 @@ def _water_start(start: float) -> bytes:
     return TIME_PREFIX + struct.pack(">d", max(0.0, start)) + SEP
 
 
-def _grep_text(record: dict[str, Any]) -> str:
-    """The searchable surface of one stored turn: summary + message text."""
-    parts = [str(record.get("summary") or "")]
+def _grep_match(
+    record: dict[str, Any],
+    since: float | None,
+    until: float | None,
+    origin: str | None,
+    epoch: int | None,
+    role: str | None,
+) -> bool:
+    """The field filters one scanned turn must satisfy."""
+    started = record.get("started_at")
+
+    if since is not None:
+        try:
+            if float(started) < since:
+                return False
+
+        except (TypeError, ValueError):
+            return False
+
+    if until is not None:
+        try:
+            if float(started) > until:
+                return False
+
+        except (TypeError, ValueError):
+            return False
+
+    meta = record.get("meta") or {}
+
+    if origin and str(meta.get("origin") or "normal") != origin:
+        return False
+
+    if epoch is not None and int(meta.get("epoch") or 0) != epoch:
+        return False
+
+    if role and not any(
+        isinstance(message, dict) and message.get("role") == role
+        for message in record.get("messages") or []
+    ):
+        return False
+
+    return True
+
+
+def _grep_text(record: dict[str, Any], role: str | None = None) -> str:
+    """The searchable surface of one stored turn: summary + message text.
+
+    With `role` set, only that role's messages are searched and the summary
+    is dropped, so `--role user` does not match an assistant recap.
+    """
+    parts = [] if role else [str(record.get("summary") or "")]
 
     for message in record.get("messages") or []:
-        if isinstance(message, dict):
-            content = message.get("content")
+        if not isinstance(message, dict):
+            continue
 
-            if isinstance(content, str):
-                parts.append(content)
+        if role and message.get("role") != role:
+            continue
+
+        content = message.get("content")
+
+        if isinstance(content, str):
+            parts.append(content)
 
     return "\n".join(parts)
 

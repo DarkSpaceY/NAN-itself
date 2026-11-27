@@ -1,8 +1,9 @@
-"""NAN payloads -> the core's turn record and inject query.
+"""NAN payloads -> the core's turn record and epoch marker.
 
 Everything protocol-specific lives here: the rendered run, the injection
-blocks embedded in user observations, the inbox that seeds recall, and
-the llm counters the ledger shows.
+blocks embedded in user observations, and the llm counters the ledger
+shows. The inbox no longer seeds a pushed recall: retrieval is pulled with
+`segv search`, so only the agent and epoch cross into the core.
 """
 
 from __future__ import annotations
@@ -13,12 +14,6 @@ from typing import Any
 from segv.record import TurnRecord
 
 _INJECTION_RE = re.compile(r"<injection(?:\s[^>]*)?>.*?</injection>", re.DOTALL)
-
-# The inbox seeds recall as one query. Over budget, keep both ends: the
-# head carries the oldest open request, the tail the newest user turn.
-QUERY_CHARS = 2000
-QUERY_MARK = "\n[...]\n"
-QUERY_HEAD = QUERY_CHARS // 2
 
 
 def strip_injections(text: str) -> str:
@@ -63,19 +58,6 @@ def _float(value: Any) -> float | None:
 
     except (TypeError, ValueError):
         return None
-
-
-def _clip(text: str, limit: int = QUERY_CHARS) -> str:
-    """Cut an over-budget query to keep both its head and its tail."""
-    if len(text) <= limit:
-        return text
-
-    if limit <= QUERY_HEAD + len(QUERY_MARK):
-        return text[:limit]
-
-    keep = limit - QUERY_HEAD - len(QUERY_MARK)
-
-    return text[:QUERY_HEAD] + QUERY_MARK + text[-keep:]
 
 
 def _headline(body: dict[str, Any]) -> str:
@@ -150,18 +132,6 @@ def turn_record(body: dict[str, Any]) -> TurnRecord | None:
     )
 
 
-def inject_request(body: dict[str, Any]) -> tuple[str, int, str]:
-    """The cache's inputs: agent, epoch, and the inbox text as the query."""
-    agent_id = str(body.get("agent_id") or "").strip()
-
-    epoch = _int(body.get("epoch"))
-
-    parts = [
-        str(message.get("text") or "").strip()
-        for message in body.get("inbox") or []
-        if isinstance(message, dict)
-    ]
-
-    query = _clip("\n".join(part for part in parts if part)).strip()
-
-    return agent_id, epoch, query
+def inject_request(body: dict[str, Any]) -> tuple[str, int]:
+    """The cache's inputs: which agent, and which epoch opened."""
+    return str(body.get("agent_id") or "").strip(), _int(body.get("epoch"))

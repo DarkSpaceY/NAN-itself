@@ -30,8 +30,11 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = HERE / "config.yaml"
 
 # Shown once per epoch, above the tree: the tree itself is state, this
-# line is the only instruction about how to keep it.
-HINT = "- goal tree, edited with `plan add|done|drop`; each goal states an outcome, not a step"
+# line is the only instruction about how to keep it and when to open one.
+HINT = (
+    "- goal tree, edited with `plan add|done|drop`; each goal states an outcome, not a step."
+    " Open one before multi-step or long-running work, and keep it current as results land."
+)
 
 
 @dataclass

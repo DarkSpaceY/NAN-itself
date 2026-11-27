@@ -1,150 +1,109 @@
-"""The cache layer: pending cues, background rewrites, and injection.
+"""What an epoch opens with, and nothing else.
 
-A rewrite runs off the inject path. The inject path only reads the last
-committed snapshot, the tail after its pointer, and one fact recall; the
-per-(agent, epoch) seen set makes sure a recall never repeats.
+The first turn of an epoch gets the last few raw turns, a pointer and a
+health line. Every later turn of the same epoch gets an empty string:
+continuous memory is pulled with `segv search`, not pushed. The plugin is
+deliberately stateless apart from the per-agent epoch marker, so it can
+never serve a stale summary.
 """
 
 from __future__ import annotations
 
-import bisect
-import queue
-import re
 import threading
-from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from ..fact.layer import FactLayer
-from ..fact.slm import Slm
 from ..store import Store
 from .config import CacheConfig
-from .prompts import GUIDE, rewrite_prompt, status_block
-from .snapshot import Snapshot, SnapshotError, parse_snapshot
-from .store import CacheState, CacheStore
+from .prompts import GUIDE, status_block
+from .store import CacheStore
 
-STOP = object()
-
-# The chunk text keeps the prompt envelope; it is structure, not a fact.
-ENVELOPE = re.compile(r"</?(?:inbox|user)(?:\s[^>]*)?>", re.IGNORECASE)
+EMPTY_TOOL = "exit code: 0"
 
 
-@dataclass(frozen=True)
-class CueRef:
-    seq: int
-    ordinal: int
-    chunk_id: str
-    ts: str
-    text: str
-
-    @property
-    def key(self) -> tuple[int, int]:
-        return (self.seq, self.ordinal)
-
-
-def render_refs(tag: str, refs: list[CueRef]) -> str:
-    if not refs:
-        return ""
-
-    lines = []
-
-    for ref in refs:
-        # Cue text already starts with its timestamp; do not repeat it.
-        stamp = f"{ref.ts} " if ref.ts and not ref.text.startswith(ref.ts) else ""
-        lines.append(f"- [{ref.seq}:{ref.ordinal}] {stamp}{ref.text}")
-
-    return f"<{tag}>\n" + "\n".join(lines) + f"\n</{tag}>"
-
-
-def _tail(
-    pending: list[CueRef],
-    pointer: tuple[int, int] | None,
-    max_cues: int,
-    max_chars: int,
-) -> list[CueRef]:
-    """Cues after the pointer, keeping the newest ones inside both caps."""
-    refs = [
-        ref
-        for ref in pending
-        if pointer is None or (ref.seq, ref.ordinal) > pointer
-    ]
-    refs = refs[-max(0, max_cues) :] if max_cues else []
-    out: list[CueRef] = []
-    size = 0
-
-    for ref in reversed(refs):
-        if out and size + len(ref.text) > max_chars:
-            break
-
-        out.append(ref)
-        size += len(ref.text)
-
-    out.reverse()
-
-    return out
-
-
-def _freshness(
-    l0: Store,
-    agent_id: str,
-    has_memory: bool,
-    pending_after: list[CueRef],
-) -> str:
-    """new: no history; warming: history but no snapshot; stale: newer cues."""
-    if not has_memory:
-        try:
-            known = l0.meta(agent_id) is not None
-
-        except Exception:
-            # If L0 cannot be read, history may exist: warming is the safer claim.
-            known = True
-
-        return "warming" if known else "new"
-
-    return "stale" if pending_after else "fresh"
-
-
-def _pointer_block(l0: Store, agent_id: str) -> str:
-    """Tell the model where the raw timeline ends so it can browse it."""
+def _clock(value: Any) -> str:
     try:
-        meta = l0.meta(agent_id)
+        seconds = float(value or 0.0)
 
-    except Exception:
-        return ""
+    except (TypeError, ValueError):
+        return "-"
 
-    latest = int((meta or {}).get("next_seq") or 0) - 1
+    if seconds <= 0:
+        return "-"
 
-    if latest < 0:
-        return ""
+    return datetime.fromtimestamp(seconds, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    return (
-        f"<segv-pointer>latest archived turn is seq {latest}; read any turn "
-        "with segv turn <seq>, or scan raw history newest-first with "
-        'segv grep "text".</segv-pointer>'
+
+def _one_line(text: Any) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _turn_line(record: dict[str, Any], budget: int) -> str:
+    """One archived turn as a single bounded line: seq, time, intent, result."""
+    meta = record.get("meta") or {}
+
+    head = (
+        f"[{record.get('seq')}] {_clock(record.get('started_at'))} "
+        f"{meta.get('origin') or 'normal'}"
     )
+
+    think = ""
+    tool = ""
+
+    for message in record.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+
+        role = message.get("role")
+
+        if role == "assistant":
+            text = " ".join(
+                str(block.get("text") or "")
+                for block in message.get("thinking") or []
+                if isinstance(block, dict)
+            ).strip()
+
+            intent = _one_line(text or message.get("content"))
+
+            if intent:
+                think = intent
+
+        elif role == "tool":
+            text = _one_line(message.get("content"))
+
+            if text and text != EMPTY_TOOL:
+                tool = text
+
+    parts = [part for part in (f"think: {think}" if think else "", f"tool: {tool}" if tool else "") if part]
+
+    line = f"{head} | {' | '.join(parts)}" if parts else head
+
+    if budget > 0 and len(line) > budget:
+        line = line[: max(0, budget - 1)] + "…"
+
+    return line
 
 
 class CacheLayer:
+    """The epoch gate plus the opening block."""
+
     def __init__(
         self,
         l0: Store,
         fact: FactLayer,
         config: CacheConfig,
         *,
-        slm: Any = None,
         store: CacheStore | None = None,
     ) -> None:
         self.l0 = l0
         self.fact = fact
         self.config = config
 
-        self.enabled = bool(
-            config.enabled
-            and getattr(fact, "enabled", False)
-            and getattr(fact, "store", None) is not None
-        )
+        self.enabled = bool(config.enabled)
 
         self.store = (
             store or CacheStore(Path(l0.path) / config.data_dir)
@@ -152,359 +111,25 @@ class CacheLayer:
             else None
         )
         self._owns_store = store is None
-
-        self.slm = slm or (Slm(config.slm) if self.enabled else None)
-        self._owns_slm = slm is None
-
         self._lock = threading.RLock()
-        self._locks_guard = threading.Lock()
-        self._locks: dict[str, threading.Lock] = {}
-
-        self._pending: dict[str, list[CueRef]] = {}
-        self._have: dict[str, set[tuple[int, int]]] = {}
-        self._queued: set[str] = set()
-
-        self._queue: queue.Queue[Any] = queue.Queue()
-        self._thread: threading.Thread | None = None
-        self._stop = threading.Event()
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        if not self.enabled or self._thread is not None:
-            return
-
-        self._thread = threading.Thread(
-            target=self._run, name="segv-cache", daemon=True
-        )
-        self._thread.start()
-
-        self._rebuild()
-        self._trigger_all()
+        """Nothing warms here: no model, no queue, no rewrite."""
 
     def close(self) -> None:
-        self._stop.set()
-
-        if self._thread is not None:
-            self._queue.put(STOP)
-            self._thread.join(timeout=10.0)
-            self._thread = None
-
-        if self._owns_slm:
-            close = getattr(self.slm, "close", None)
-
-            if callable(close):
-                close()
-
-        if self._owns_store and self.store is not None:
+        if self.store is not None and self._owns_store:
             self.store.close()
-
-    def _rebuild(self) -> None:
-        store = getattr(self.fact, "store", None)
-
-        if self.store is None or store is None:
-            return
-
-        try:
-            agents = list(store.iter_agents())
-
-        except Exception:
-            logger.exception("segv-cache could not list agents")
-
-            return
-
-        for agent_id in agents:
-            try:
-                state = self.store.load(agent_id)
-                pointer = state.pointer if state is not None else None
-                refs: list[CueRef] = []
-
-                for row in store.iter_chunks(agent_id, after=pointer):
-                    text = str(row.get("event") or "").strip()
-
-                    if not text:
-                        text = str(row.get("text") or "").strip()[:240]
-
-                    if text:
-                        refs.append(
-                            CueRef(
-                                seq=int(row["seq"]),
-                                ordinal=int(row["ordinal"]),
-                                chunk_id=str(row["chunk_id"]),
-                                ts=str(row.get("ts") or ""),
-                                text=text,
-                            )
-                        )
-
-                self._append(agent_id, refs)
-
-            except Exception:
-                logger.exception("segv-cache rebuild failed for {}", agent_id)
-
-    def _trigger_all(self) -> None:
-        with self._lock:
-            agents = [
-                agent_id
-                for agent_id, pending in self._pending.items()
-                if len(pending) >= self.config.trigger
-            ]
-
-        for agent_id in agents:
-            self._enqueue(agent_id, False)
-
-    # ------------------------------------------------------------------
-    # Pending cues
-    # ------------------------------------------------------------------
-
-    def on_ingested(self, agent_id: str, seq: int, rows: list[Any]) -> None:
-        """Fact callback: queue one ingested turn's cues."""
-        if not self.enabled:
-            return
-
-        refs: list[CueRef] = []
-
-        for row in rows:
-            text = str(getattr(row, "event", "") or "").strip()
-
-            if not text:
-                text = str(getattr(row, "text", "") or "").strip()[:240]
-
-            if text:
-                refs.append(
-                    CueRef(
-                        seq=int(seq),
-                        ordinal=int(row.ordinal),
-                        chunk_id=str(row.chunk_id),
-                        ts=str(getattr(row, "ts", "") or ""),
-                        text=text,
-                    )
-                )
-
-        if not refs:
-            return
-
-        count = self._append(agent_id, refs)
-
-        if count >= self.config.trigger:
-            self._enqueue(agent_id, False)
-
-    def _append(self, agent_id: str, refs: list[CueRef]) -> int:
-        with self._lock:
-            pending = self._pending.setdefault(agent_id, [])
-            have = self._have.setdefault(agent_id, set())
-
-            for ref in refs:
-                if ref.key in have:
-                    continue
-
-                have.add(ref.key)
-                bisect.insort(pending, ref, key=lambda item: item.key)
-
-            return len(pending)
-
-    # ------------------------------------------------------------------
-    # Worker
-    # ------------------------------------------------------------------
-
-    def _enqueue(self, agent_id: str, force: bool) -> None:
-        with self._lock:
-            if agent_id in self._queued and not force:
-                return
-
-            self._queued.add(agent_id)
-
-        self._queue.put((agent_id, force))
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                item = self._queue.get(timeout=0.5)
-
-            except queue.Empty:
-                continue
-
-            if item is STOP or item is None:
-                break
-
-            agent_id, force = item
-
-            with self._lock:
-                self._queued.discard(agent_id)
-
-            try:
-                self.compress(agent_id, force=force)
-
-            except Exception:
-                logger.exception("segv-cache rewrite failed for {}", agent_id)
-
-    def compress(self, agent_id: str, *, force: bool = False) -> bool:
-        """Rewrite one bounded batch of pending cues; keep state on failure."""
-        if not self.enabled or self.store is None or self.slm is None:
-            return False
-
-        state = self.store.load(agent_id)
-        previous = state.snapshot if state is not None else Snapshot()
-        version = state.version if state is not None else 0
-
-        with self._lock:
-            pending = list(self._pending.get(agent_id, ()))
-
-        if not pending or (not force and len(pending) < self.config.trigger):
-            return False
-
-        batch = pending[: max(1, self.config.batch_cues)]
-        batch, evidence = self._evidence(batch)
-
-        if not batch:
-            return False
-
-        snapshot = self._rewrite(previous, evidence)
-
-        if snapshot is None:
-            return False
-
-        last = batch[-1]
-        pointer = last.key
-
-        if state is not None and state.pointer is not None:
-            # A chunk that arrived late can sit before the committed pointer.
-            # Fold it into the snapshot, but never move the pointer backwards.
-            pointer = max(state.pointer, pointer)
-
-        done = {ref.key for ref in batch}
-
-        # Commit and prune together: an epoch-start inject holds _lock while
-        # it reads the pointer and the pending cues, so it sees one side of
-        # this rewrite or the other, never a torn state.
-        with self._lock:
-            self.store.save_snapshot(
-                agent_id,
-                snapshot=snapshot,
-                pointer=pointer,
-                version=version + 1,
-            )
-
-            remaining = [
-                ref
-                for ref in self._pending.get(agent_id, ())
-                if ref.key not in done
-            ]
-            self._pending[agent_id] = remaining
-            have = self._have.get(agent_id)
-
-            if have is not None:
-                have.intersection_update({ref.key for ref in remaining})
-
-        logger.info(
-            "segv-cache {}/{}: {} chunks -> v{} ({} items, {} left)",
-            agent_id,
-            f"{pointer[0]}:{pointer[1]}",
-            len(batch),
-            version + 1,
-            len(snapshot.unresolved_items)
-            + len(snapshot.locked_decisions)
-            + len(snapshot.forbidden_behaviors)
-            + len(snapshot.entity_map),
-            len(remaining),
-        )
-
-        if remaining and (force or len(remaining) >= self.config.trigger):
-            self._enqueue(agent_id, force)
-
-        return True
-
-    def _evidence(
-        self, refs: list[CueRef]
-    ) -> tuple[list[CueRef], list[tuple[int, int, str, str]]]:
-        """Raw chunk text for the batch, bounded by raw_chars.
-
-        The cue is a fallback only: it is lossy by design, so compression reads
-        the source whenever the fact store still has it.
-        """
-        store = getattr(self.fact, "store", None)
-        rows: dict[str, Any] = {}
-
-        if store is not None:
-            try:
-                rows = store.get_chunks([ref.chunk_id for ref in refs])
-
-            except Exception:
-                logger.exception("segv-cache could not read raw chunks")
-
-        included: list[CueRef] = []
-        evidence: list[tuple[int, int, str, str]] = []
-        budget = max(1, int(self.config.raw_chars))
-        used = 0
-
-        for ref in refs:
-            row = rows.get(ref.chunk_id) or {}
-            text = str(row.get("text") or "").strip() or ref.text.strip()
-            text = ENVELOPE.sub("", text).strip()
-
-            if not text:
-                continue
-
-            if included and used + len(text) > budget:
-                break
-
-            if not included and len(text) > budget:
-                text = text[:budget]
-
-            included.append(ref)
-            evidence.append((ref.seq, ref.ordinal, ref.ts, text))
-            used += len(text)
-
-        return included, evidence
-
-    def _rewrite(
-        self, previous: Snapshot, evidence: list[tuple[int, int, str, str]]
-    ) -> Snapshot | None:
-        system, user = rewrite_prompt(
-            previous,
-            evidence,
-            max_items=self.config.max_items,
-        )
-        problem = ""
-
-        for _ in range(2):
-            prompt = user
-
-            if problem:
-                prompt += (
-                    "\n\nYour previous reply was invalid: "
-                    f"{problem}. Return only the JSON object."
-                )
-
-            try:
-                raw = self.slm.chat(system, prompt)
-
-                return parse_snapshot(
-                    raw,
-                    previous,
-                    max_items=self.config.max_items,
-                    min_retention=self.config.min_retention,
-                )
-
-            except SnapshotError as exc:
-                problem = str(exc)
-
-                logger.warning("segv-cache rewrite rejected: {}", exc)
-
-            except Exception:
-                logger.exception("segv-cache rewrite call failed")
-
-                return None
-
-        return None
 
     # ------------------------------------------------------------------
     # Inject
     # ------------------------------------------------------------------
 
-    def inject(self, agent_id: str, epoch: int, query: str) -> str:
-        """Return this turn's prompt text; never raise across the boundary."""
+    def inject(self, agent_id: str, epoch: int) -> str:
+        """The epoch's opening block, or "" when this epoch is already open."""
         if not self.enabled or self.store is None:
             return ""
 
@@ -513,172 +138,75 @@ class CacheLayer:
         if not agent_id:
             return ""
 
-        with self._agent_lock(agent_id):
+        with self._lock:
             try:
-                fallback, epoch_state, _changed, _stale = self.store.begin_epoch(
-                    agent_id, epoch
-                )
+                last = self.store.last_epoch(agent_id)
 
             except Exception:
-                logger.exception("segv-cache epoch begin failed for {}", agent_id)
+                logger.exception("segv-cache marker read failed for {}", agent_id)
 
                 return ""
 
-            # Read the snapshot and pending under the same lock a rewrite
-            # commits under, so the pair cannot come from two versions.
-            with self._lock:
-                pending = list(self._pending.get(agent_id, ()))
+            if last is not None and epoch <= last:
+                return ""
 
-                state = self.store.load(agent_id) or fallback
+            try:
+                self.store.set_last_epoch(agent_id, epoch)
 
-            pointer = state.pointer
+            except Exception:
+                logger.exception("segv-cache marker write failed for {}", agent_id)
 
-            pending_after = [
-                ref for ref in pending if pointer is None or ref.key > pointer
-            ]
-
-            has_memory = not state.snapshot.is_empty
-
-            freshness = _freshness(self.l0, agent_id, has_memory, pending_after)
-
-            memory_text = (
-                state.snapshot.render(version=state.version, freshness=freshness)
-                if has_memory
-                else ""
-            )
-
-            tail = _tail(
-                pending, pointer, self.config.tail_cues, self.config.tail_chars
-            )
-
-            fresh_tail = [ref for ref in tail if ref.key not in epoch_state.refs]
-
-            # Memory goes out once per epoch, when it first exists. A cues-only
-            # opening does not consume this: memory still arrives later.
-            deliver_memory = bool(memory_text) and epoch_state.delivered_version is None
-
-            full = not epoch_state.opened or deliver_memory
-
-            blocks: list[str] = []
-            sent: list[CueRef] = []
-
-            if full:
-                blocks.append(GUIDE)
-
-                if memory_text:
-                    blocks.append(memory_text)
-
-                if fresh_tail:
-                    blocks.append(render_refs("recent_cues", fresh_tail))
-
-                    sent = fresh_tail
-
-                pointer_text = _pointer_block(self.l0, agent_id)
-
-                if pointer_text:
-                    blocks.append(pointer_text)
-
-            seen = set(epoch_state.refs) | {ref.key for ref in sent}
-
-            recall, recall_ok = self._recall(agent_id, query, seen)
-
-            if recall:
-                blocks.append(render_refs("recall", recall))
-
-            status_key = f"{freshness}|{recall_ok}"
-
-            if full or status_key != epoch_state.status_key:
-                shown = (
-                    state.version
-                    if deliver_memory
-                    else (epoch_state.delivered_version or 0)
-                )
-
-                status = status_block(
-                    freshness, shown, len(pending_after), recall_ok
-                )
-
-                blocks.insert(1 if full else 0, status)
-
-                epoch_state.status_key = status_key
-
-            dirty = False
-
-            if sent or recall or full:
-                epoch_state.refs |= {ref.key for ref in sent}
-                epoch_state.refs |= {ref.key for ref in recall}
-
-                dirty = True
-
-            if deliver_memory:
-                epoch_state.delivered_version = state.version
-
-                dirty = True
-
-            if sent or deliver_memory:
-                epoch_state.opened = True
-
-                dirty = True
-
-            if dirty:
-                try:
-                    self.store.save_epoch(agent_id, epoch_state)
-
-                except Exception:
-                    logger.exception(
-                        "segv-cache epoch persist failed for {}/{}",
-                        agent_id,
-                        epoch_state.epoch,
-                    )
-
-            return "\n\n".join(blocks)
-
-    def _recall(
-        self, agent_id: str, query: str, seen: set[tuple[int, int]]
-    ) -> tuple[list[CueRef], bool]:
-        if not query:
-            return [], True
+                return ""
 
         try:
-            hits = self.fact.search(
-                agent_id,
-                query,
-                top_k=self.config.recall_k,
-                pool=self.config.recall_pool,
-                rerank=False,
-                exclude=seen,
-            )
+            return self._opening(agent_id)
 
         except Exception:
-            logger.exception("segv-cache recall failed for {}", agent_id)
+            logger.exception("segv-cache opening failed for {}", agent_id)
 
-            return [], False
+            return ""
 
-        out: list[CueRef] = []
+    def _opening(self, agent_id: str) -> str:
+        meta = self.l0.meta(agent_id) or {}
 
-        for hit in hits:
-            text = str(hit.get("event") or "").strip()
+        latest = int(meta.get("next_seq") or 0) - 1
 
-            if not text:
-                text = str(hit.get("text") or "").strip()[:240]
+        blocks: list[str] = [GUIDE]
 
-            if not text:
-                continue
+        page = self.l0.turns(agent_id, limit=self.config.recent_turns)
+        recent = page.get("turns") or []
 
-            out.append(
-                CueRef(
-                    seq=int(hit.get("seq") or 0),
-                    ordinal=int(hit.get("ordinal") or 0),
-                    chunk_id=str(hit.get("chunk_id") or ""),
-                    ts=str(hit.get("ts") or ""),
-                    text=text,
-                )
+        if recent:
+            lines = [
+                _turn_line(record, self.config.recent_chars)
+                for record in reversed(recent)
+            ]
+
+            blocks.append("<segv-recent>\n" + "\n".join(lines) + "\n</segv-recent>")
+
+        if latest >= 0:
+            blocks.append(
+                f"<segv-pointer>latest archived turn is seq {latest}; "
+                'search older history with segv search "text", or read one '
+                "turn with segv turn <seq>.</segv-pointer>"
             )
 
-            if len(out) >= self.config.recall_k:
-                break
+        indexed = self._indexed_seq(agent_id)
 
-        return out, True
+        lag = max(0, latest - indexed) if indexed >= 0 else max(0, latest + 1)
+
+        blocks.append(status_block(lag <= 0, lag, latest))
+
+        return "\n\n".join(blocks)
+
+    def _indexed_seq(self, agent_id: str) -> int:
+        try:
+            return int(self.fact.max_seq(agent_id))
+
+        except Exception:
+            logger.exception("segv-cache index probe failed for {}", agent_id)
+
+            return -1
 
     # ------------------------------------------------------------------
     # Read
@@ -688,106 +216,33 @@ class CacheLayer:
         if not self.enabled or self.store is None:
             return {"enabled": False, "agent_id": agent_id}
 
-        state: CacheState | None = self.store.load(agent_id)
+        meta = self.l0.meta(agent_id) or {}
 
-        with self._lock:
-            pending = list(self._pending.get(agent_id, ()))
+        latest = int(meta.get("next_seq") or 0) - 1
 
-        epoch = state.last_epoch if state is not None else None
+        indexed = self._indexed_seq(agent_id)
 
-        epoch_state = (
-            self.store.load_epoch(agent_id, epoch) if epoch is not None else None
-        )
+        lag = max(0, latest - indexed) if indexed >= 0 else max(0, latest + 1)
 
-        pointer = state.pointer if state is not None else None
-
-        pending_after = [
-            ref for ref in pending if pointer is None or ref.key > pointer
-        ]
+        page = self.l0.turns(agent_id, limit=self.config.recent_turns)
+        recent = page.get("turns") or []
 
         return {
             "enabled": True,
             "agent_id": agent_id,
-            "pointer": (
-                {"seq": pointer[0], "ordinal": pointer[1]}
-                if pointer is not None
-                else None
-            ),
-            "last_epoch": epoch,
-            "version": state.version if state is not None else 0,
-            "updated_at": state.updated_at if state is not None else 0.0,
-            "pending": len(pending_after),
-            "delivered_version": (
-                epoch_state.delivered_version if epoch_state is not None else None
-            ),
-            "opened": bool(epoch_state.opened) if epoch_state is not None else False,
-            "freshness": _freshness(
-                self.l0,
-                agent_id,
-                state is not None and not state.snapshot.is_empty,
-                pending_after,
-            ),
-            "seen": (
-                self.store.seen_size(agent_id, epoch)
-                if epoch is not None
-                else 0
-            ),
-            "snapshot": (
-                state.snapshot.to_json() if state is not None else Snapshot().to_json()
-            ),
+            "last_epoch": self.store.last_epoch(agent_id),
+            "latest_seq": latest,
+            "indexed_seq": indexed,
+            "lag_turns": lag,
+            "recent": [
+                _turn_line(record, self.config.recent_chars)
+                for record in reversed(recent)
+            ],
+            "path": str(self.store.path),
         }
-
-    def tail(self, agent_id: str, limit: int | None = None) -> list[dict[str, Any]]:
-        if not self.enabled or self.store is None:
-            return []
-
-        state = self.store.load(agent_id)
-        pointer = state.pointer if state is not None else None
-
-        with self._lock:
-            pending = list(self._pending.get(agent_id, ()))
-
-        refs = _tail(
-            pending,
-            pointer,
-            min(limit or self.config.tail_cues, self.config.tail_cues),
-            self.config.tail_chars,
-        )
-
-        return [
-            {
-                "seq": ref.seq,
-                "ordinal": ref.ordinal,
-                "chunk_id": ref.chunk_id,
-                "ts": ref.ts,
-                "text": ref.text,
-            }
-            for ref in refs
-        ]
 
     def stats(self) -> dict[str, Any]:
         if not self.enabled or self.store is None:
             return {"enabled": False}
 
-        with self._lock:
-            pending = sum(len(items) for items in self._pending.values())
-            agents = len(self._pending)
-
-        return {
-            "enabled": True,
-            **self.store.stats(),
-            "pending": pending,
-            "pending_agents": agents,
-        }
-
-    # ------------------------------------------------------------------
-
-    def _agent_lock(self, agent_id: str) -> threading.Lock:
-        with self._locks_guard:
-            lock = self._locks.get(agent_id)
-
-            if lock is None:
-                lock = threading.Lock()
-                self._locks[agent_id] = lock
-
-            return lock
+        return {"enabled": True, **self.store.stats()}

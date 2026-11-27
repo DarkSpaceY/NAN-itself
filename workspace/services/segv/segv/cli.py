@@ -1,8 +1,10 @@
 """segv: inspect the memory service over its own HTTP API.
 
-The CLI is a pure client: it never touches the seen set (search is
-exempt from deduplication by design). The default agent comes from
-NAN_AGENT_ID, which the shell exports for the current agent.
+The CLI is a pure client: it never touches the archive directly. The
+default agent comes from NAN_AGENT_ID, which the shell exports for the
+current agent. `search` is the single retrieval entry point: it picks a
+backend (grep over raw turns, BM25, vectors, or the hybrid fusion) and
+accepts the same field and time filters on every mode.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Any
 
 DEFAULT_URL = "http://127.0.0.1:9004"
 AGENT_ENV = "NAN_AGENT_ID"
-MODES = ("hybrid", "raw", "event", "bm25", "dense")
+MODES = ("hybrid", "lexical", "vector", "grep", "raw", "event", "bm25", "dense")
 
 
 def _base(args: argparse.Namespace) -> str:
@@ -129,82 +131,75 @@ def cmd_search(args: argparse.Namespace) -> int:
     payload = _call(
         args,
         "POST",
-        "/api/recall",
+        "/api/search",
         body={
             "agent_id": agent,
             "query": query,
+            "mode": args.mode,
             "top_k": args.top_k,
             "pool": args.pool,
-            "mode": args.mode,
-            "rerank": not args.no_ce,
+            "rerank": args.rerank,
+            "seq_from": args.seq_from,
+            "seq_to": args.seq_to,
+            "since": args.since,
+            "until": args.until,
+            "origin": args.origin,
+            "epoch": args.epoch,
+            "role": args.role,
+            "before": args.before,
+            "scan_timeout": args.scan_timeout,
+            "context": args.context,
         },
     )
     hits = payload.get("hits") or []
 
     def render() -> str:
+        lines: list[str] = []
+
         if not hits:
-            return "no hits"
+            lines.append("no hits")
 
-        rows = []
+        else:
+            rows = []
 
-        for hit in hits:
-            text = hit.get("text") if args.full else hit.get("event")
+            for hit in hits:
+                ordinal = hit.get("ordinal")
 
-            rows.append(
-                [
-                    f"{float(hit.get('score') or 0.0):.4f}",
-                    f"{hit.get('seq')}:{hit.get('ordinal')}",
-                    _clock(hit.get("started_at")),
-                    _clip(text),
-                ]
-            )
+                if "snippet" in hit:
+                    score = "-"
+                    location = str(hit.get("seq"))
+                    text = hit.get("snippet")
+                else:
+                    score = f"{float(hit.get('score') or 0.0):.4f}"
+                    location = (
+                        f"{hit.get('seq')}:{ordinal}"
+                        if ordinal is not None
+                        else str(hit.get("seq"))
+                    )
+                    text = (
+                        hit.get("text")
+                        if args.full
+                        else hit.get("event") or hit.get("text")
+                    )
 
-        if getattr(args, "plain", False):
-            return "\n".join("\t".join(row) for row in rows)
-
-        return _table(["SCORE", "LOC", "TIME", "CUE"], rows)
-
-    _emit(args, payload, render)
-
-    return 0
-
-
-def cmd_grep(args: argparse.Namespace) -> int:
-    agent = _agent(args)
-    pattern = " ".join(args.pattern).strip()
-
-    if not pattern:
-        raise SystemExit("segv: empty pattern")
-
-    payload = _get(
-        args,
-        f"/api/agents/{urllib.parse.quote(agent, safe='')}/grep",
-        pattern=pattern,
-        limit=args.limit,
-        before=args.before,
-        timeout=args.scan_timeout,
-        context=args.context,
-    )
-    hits = payload.get("hits") or []
-
-    def render() -> str:
-        if not hits:
-            if payload.get("truncated"):
-                return (
-                    "no matches in the scanned window (budget reached; "
-                    f"continue with --before {payload['next_before']})"
+                rows.append(
+                    [score, location, _clock(hit.get("started_at")), _clip(text)]
                 )
 
-            return "no matches"
+            if getattr(args, "plain", False):
+                lines.extend("\t".join(row) for row in rows)
+            else:
+                lines.append(_table(["SCORE", "LOC", "TIME", "TEXT"], rows))
 
-        lines = [
-            f"[{hit['seq']}] {_clock(hit.get('started_at'))}  {hit['snippet']}"
-            for hit in hits
-        ]
+        note = payload.get("note")
+
+        if note:
+            lines.append(f"({note})")
 
         if payload.get("truncated"):
             lines.append(
-                f"(scan budget reached; continue with --before {payload['next_before']})"
+                "scan budget reached; continue with "
+                f"--before {payload.get('next_before')}"
             )
 
         return "\n".join(lines)
@@ -222,74 +217,25 @@ def cmd_state(args: argparse.Namespace) -> int:
         if not payload.get("enabled", True):
             return "cache disabled"
 
-        pointer = payload.get("pointer")
-        location = f"{pointer['seq']}:{pointer['ordinal']}" if pointer else "-"
         lines = [
             f"agent: {payload.get('agent_id')}",
-            "  epoch: {}  pointer: {}  version: {}  pending: {}  seen: {}".format(
+            "  epoch: {}  latest: {}  indexed: {}  lag: {}".format(
                 payload.get("last_epoch"),
-                location,
-                payload.get("version"),
-                payload.get("pending"),
-                payload.get("seen"),
+                payload.get("latest_seq"),
+                payload.get("indexed_seq"),
+                payload.get("lag_turns"),
             ),
+            "  recent:",
         ]
-        snapshot = payload.get("snapshot") or {}
-        lines.append(f"goal: {snapshot.get('goal') or '-'}")
 
-        sections = (
-            ("unresolved_items", "text"),
-            ("locked_decisions", "text"),
-            ("forbidden_behaviors", "text"),
-            ("entity_map", "name"),
-        )
+        recent = payload.get("recent") or []
 
-        for key, label in sections:
-            entries = snapshot.get(key) or []
-            lines.append(f"{key}:")
+        lines.extend(f"    {line}" for line in recent)
 
-            if not entries:
-                lines.append("  -")
-                continue
-
-            for entry in entries:
-                value = entry.get(label) or ""
-                extra = entry.get("meaning") if label == "name" else None
-
-                if extra:
-                    value = f"{value} — {extra}"
-
-                lines.append(f"  [{entry.get('id')}] {value}")
+        if not recent:
+            lines.append("    -")
 
         return "\n".join(lines)
-
-    _emit(args, payload, render)
-
-    return 0
-
-
-def cmd_tail(args: argparse.Namespace) -> int:
-    agent = _agent(args)
-    payload = _get(args, "/api/cache/tail", agent_id=agent, limit=args.limit)
-    cues = payload.get("cues") or []
-
-    def render() -> str:
-        if not cues:
-            return "tail is empty"
-
-        rows = [
-            [
-                f"{cue.get('seq')}:{cue.get('ordinal')}",
-                _clock(cue.get("ts")),
-                _clip(cue.get("text")),
-            ]
-            for cue in cues
-        ]
-
-        if getattr(args, "plain", False):
-            return "\n".join("\t".join(row) for row in rows)
-
-        return _table(["LOC", "TIME", "CUE"], rows)
 
     _emit(args, payload, render)
 
@@ -384,50 +330,48 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="segv",
         add_help=False,
-        description="Inspect SEGV memory: search facts, snapshot, tail, turns.",
+        description="Inspect SEGV memory: search turns, epoch state, turns.",
     )
     parser.add_argument("-h", "--help", "-help", action="help", help="show this help")
 
     sub = parser.add_subparsers(dest="command")
 
     search = sub.add_parser(
-        "search", parents=[common], add_help=False, help="rank fact cues"
+        "search", parents=[common], add_help=False, help="search across the archive"
     )
     search.add_argument("query", nargs="+", help="query text")
     search.add_argument("--mode", choices=MODES, default="hybrid")
-    search.add_argument("--top-k", type=int, default=10)
+    search.add_argument("--top-k", type=int, default=10, help="hits to return")
     search.add_argument("--pool", type=int, default=200)
-    search.add_argument("--no-ce", action="store_true", help="skip the reranker")
+    search.add_argument("--rerank", action="store_true", help="run the cross-encoder")
     search.add_argument("--full", action="store_true", help="show the chunk text")
-    search.set_defaults(handler=cmd_search)
-
-    grep = sub.add_parser(
-        "grep", parents=[common], add_help=False, help="scan raw turns, newest first"
+    search.add_argument("--seq-from", type=int, default=None)
+    search.add_argument("--seq-to", type=int, default=None)
+    search.add_argument("--since", default=None, help="epoch seconds or ISO time")
+    search.add_argument("--until", default=None, help="epoch seconds or ISO time")
+    search.add_argument(
+        "--origin", default=None, help="normal | first | context_cleared"
     )
-    grep.add_argument("pattern", nargs="+", help="substring to find (case-insensitive)")
-    grep.add_argument("--limit", type=int, default=5)
-    grep.add_argument("--before", type=int, default=None, help="scan turns older than SEQ")
-    grep.add_argument(
+    search.add_argument("--epoch", type=int, default=None)
+    search.add_argument("--role", choices=("user", "assistant", "tool"), default=None)
+    search.add_argument(
+        "--before", type=int, default=None, help="grep: scan turns older than SEQ"
+    )
+    search.add_argument(
         "--scan-timeout",
         type=float,
         default=3.0,
-        help="wall-clock budget for the raw scan in seconds",
+        help="grep: wall-clock budget for the raw scan",
     )
-    grep.add_argument(
-        "--context", type=int, default=48, help="snippet chars either side of a match"
+    search.add_argument(
+        "--context", type=int, default=48, help="grep: snippet chars around a match"
     )
-    grep.set_defaults(handler=cmd_grep)
+    search.set_defaults(handler=cmd_search)
 
     state = sub.add_parser(
-        "state", parents=[common], add_help=False, help="show the snapshot"
+        "state", parents=[common], add_help=False, help="show the epoch marker"
     )
     state.set_defaults(handler=cmd_state)
-
-    tail = sub.add_parser(
-        "tail", parents=[common], add_help=False, help="show uncompressed cues"
-    )
-    tail.add_argument("--limit", type=int, default=20)
-    tail.set_defaults(handler=cmd_tail)
 
     stats = sub.add_parser(
         "stats", parents=[common], add_help=False, help="show service counters"

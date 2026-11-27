@@ -1,1 +1,1 @@
-"""SEGV-Cache: the rolling snapshot over the fact layer's cue stream."""
+"""SEGV-Cache: the epoch marker and the block an epoch opens with."""
