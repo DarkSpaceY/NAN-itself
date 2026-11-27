@@ -173,3 +173,33 @@ def test_logging_lands_under_logs(tmp_path):
     logger.info("hello")
 
     assert "hello" in (config.logs_dir / "weather.log").read_text(encoding="utf-8")
+
+
+class _RouteRecorder:
+    """Just enough of a FastAPI app for `health_route`, with no FastAPI."""
+
+    def __init__(self) -> None:
+        self.routes: dict[str, object] = {}
+
+    def get(self, path: str):
+        def register(handler):
+            self.routes[path] = handler
+
+            return handler
+
+        return register
+
+
+def test_health_route_answers_one_shape_for_every_service(tmp_path):
+    """A probe compares processes, so identity and status must not vary."""
+    from nan_service_kit import health_route
+
+    config = read_config(ServiceConfig, _write(tmp_path, "weather", "port: 9001\n"))
+
+    app = _RouteRecorder()
+
+    health_route(app, config)
+
+    handler = app.routes["/health"]
+
+    assert asyncio.run(handler()) == {"status": "ok", "service_id": "weather"}

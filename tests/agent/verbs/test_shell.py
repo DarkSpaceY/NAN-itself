@@ -48,13 +48,18 @@ async def test_cwd_may_be_relative_inside_the_workspace(tmp_path: Path, no_sink:
     assert str(sub) in result.text
 
 
-async def test_cwd_outside_the_workspace_is_refused(tmp_path: Path, no_sink: Any) -> None:
+async def test_cwd_outside_the_workspace_is_allowed(tmp_path: Path, no_sink: Any) -> None:
+    """Reads are open: the same reach a `cd` inside the command already has.
+
+    The write boundary is the sandbox's job, not this helper's — so what
+    is asserted here is only that the directory is honoured.
+    """
     root = make_agent(tmp_path=tmp_path)
 
-    result = await _shell(root, "touch escaped", cwd=str(tmp_path))
+    result = await _shell(root, "pwd", cwd=str(tmp_path))
 
-    assert result.text.startswith("'cwd' must stay inside the workspace")
-    assert not (tmp_path / "escaped").exists()
+    assert result.text.startswith("exit code: 0\n")
+    assert str(tmp_path) in result.text
 
 
 async def test_cwd_must_be_a_directory(tmp_path: Path, no_sink: Any) -> None:

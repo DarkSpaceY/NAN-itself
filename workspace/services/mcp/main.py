@@ -28,7 +28,7 @@ from fastapi import FastAPI
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 from loguru import logger
-from nan_service_kit import HubLink, ServiceConfig, read_config, setup_logging
+from nan_service_kit import HubLink, ServiceConfig, health_route, read_config, setup_logging
 
 HERE = Path(__file__).resolve().parent
 
@@ -400,6 +400,8 @@ def build_app(service: MCPService) -> FastAPI:
                     await server.stop()
 
     app = FastAPI(lifespan=lifespan)
+
+    health_route(app, service.config)
 
     # ---------- inject endpoint ----------
 

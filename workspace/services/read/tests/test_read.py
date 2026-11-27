@@ -148,7 +148,7 @@ def test_read_endpoint_returns_the_answer(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert response.json()["text"] == "answer"
 
-        assert client.get("/health").json() == {"status": "ok"}
+        assert client.get("/health").json() == {"status": "ok", "service_id": "read"}
 
 
 def test_read_endpoint_maps_refusals_to_codes(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from loguru import logger
-from nan_service_kit import ServiceConfig, read_config, setup_logging
+from nan_service_kit import ServiceConfig, health_route, read_config, setup_logging
 from pydantic import BaseModel, ConfigDict
 from reader import ReadError, Reader, TooLarge
 
@@ -85,9 +85,7 @@ def build_app(service: ReadService) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan)
 
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    health_route(app, service.config)
 
     @app.post("/read")
     async def read(body: dict[str, Any]) -> JSONResponse:

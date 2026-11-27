@@ -49,8 +49,9 @@ class ShellVerb(Verb):
             description=(
                 "Run a bash command in your workspace. Its cwd is the "
                 "workspace root unless you pass 'cwd' (relative to the "
-                "root and it must stay inside it; prefer 'cwd' over a "
-                "leading 'cd').\n"
+                "root, or absolute; reads are open, so it may sit outside "
+                "the workspace — writes still cannot, the sandbox stops "
+                "them; prefer 'cwd' over a leading 'cd').\n"
                 f"Commands are non-interactive on the terminal, but their "
                 f"stdin stays open: a command that reads stdin waits until "
                 f"you write to it or send EOF with the 'jobs' verb. A command "
@@ -74,8 +75,10 @@ class ShellVerb(Verb):
                     "cwd": {
                         "type": "string",
                         "description": (
-                            "Directory to run in, relative to the workspace "
-                            "root; it must stay inside the workspace."
+                            "Directory to run in: relative to the workspace "
+                            "root, or absolute. Reads are open, so it may "
+                            "point outside the workspace; writes there are "
+                            "still sandboxed."
                         ),
                     },
                     "env": {
@@ -318,8 +321,10 @@ def _job_outcome(
 
 def _cwd(agent: Agent, value: Any) -> tuple[Path, str | None]:
     """
-    The command's cwd: the workspace root by default, and a
-    directory inside it when asked for.
+    The command's cwd: the workspace root by default, anywhere else when
+    asked for. Reads are open, so a directory outside the workspace is
+    allowed -- `cd ../builtin && cat SKILL.md` already reaches it from
+    inside a command. Writes stay bounded by the sandbox, not by this.
     """
     workspace = agent.settings.paths.workspace.resolve()
 
@@ -329,12 +334,9 @@ def _cwd(agent: Agent, value: Any) -> tuple[Path, str | None]:
     if not isinstance(value, str) or not value.strip():
         return workspace, "'cwd' must be a non-empty string."
 
-    target = Path(value)
+    target = Path(value).expanduser()
 
     resolved = (target if target.is_absolute() else workspace / target).resolve()
-
-    if not resolved.is_relative_to(workspace):
-        return workspace, f"'cwd' must stay inside the workspace: {resolved}"
 
     if not resolved.is_dir():
         return workspace, f"'cwd' is not a directory: {resolved}"

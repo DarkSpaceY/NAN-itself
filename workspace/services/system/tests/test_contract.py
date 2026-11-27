@@ -30,4 +30,9 @@ def test_inject_contract():
 
         assert_registered(stub, config)
 
+        assert client.get("/health").json() == {
+            "status": "ok",
+            "service_id": config.service_id,
+        }
+
     assert stub.bodies("/unregister") == [{"service_id": config.service_id}]

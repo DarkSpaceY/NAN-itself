@@ -23,7 +23,7 @@ import plan as tree
 import uvicorn
 from fastapi import FastAPI
 from loguru import logger
-from nan_service_kit import HubLink, ServiceConfig, read_config, setup_logging
+from nan_service_kit import HubLink, ServiceConfig, health_route, read_config, setup_logging
 
 HERE = Path(__file__).resolve().parent
 
@@ -117,6 +117,8 @@ def build_app(service: PlanService) -> FastAPI:
             yield
 
     app = FastAPI(lifespan=lifespan)
+
+    health_route(app, service.config)
 
     @app.post("/turn")
     async def turn(body: dict[str, Any]) -> dict[str, str]:

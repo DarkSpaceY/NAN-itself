@@ -13,21 +13,24 @@ description: >-
 
 Your shell may run arbitrary commands, but a small deny list refuses
 destructive or system-level ones, and the sandbox limits where you can
-write: **workspace and temp only** (reads and network are open).
-Everything you install must respect that, or go through the user.
+write: **the workspace and temp only** (reads and network are open).
+`HOME` and the XDG directories already point into `<workspace>/home`,
+so an installer's default caches land in a writable place; only paths
+outside the workspace — `/opt/homebrew`, `/usr/local`, the real user
+home — are denied. Everything you install must respect that, or go
+through the user.
 
 ## 1. Search before building
 
 Before writing anything yourself, assume it exists:
 
 - GitHub search / web search: `<thing> cli`, `<thing> tui`, `awesome-<domain>`
-- Homebrew: `brew search <thing>` — it may still write its cache;
-  point `HOMEBREW_CACHE` at `$NAN_WORKSPACE` or temp, or go through
-  the user.
-- PyPI/npm: `uv tool` / `npm` registries list similar names — the
-  sandbox only allows writes under `$NAN_WORKSPACE` and temp, so
-  point `UV_CACHE_DIR`/`UV_TOOL_DIR` and `npm_config_cache` there
-  too; their defaults live in your home and are denied.
+- Homebrew: `brew search <thing>` — the cache already lands in
+  `<workspace>/home`; only `brew install` itself writes
+  `/opt/homebrew`, which is Path B.
+- PyPI/npm: `uv tool` / `npm` registries list similar names — their
+  caches default into `$HOME`, and `HOME` is already `<workspace>/home`
+  inside the sandbox, so they work as-is.
 
 Prefer a maintained CLI over a library you'd have to wrap, prefer a
 library over a script you'd have to write.

@@ -58,4 +58,4 @@ none yet
 
 ## Notes
 
-- `notes/capabilities.md` — what I can do, verified 2026-11-27; includes the gaps I have not fixed.
+none yet

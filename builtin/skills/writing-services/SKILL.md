@@ -1,24 +1,33 @@
 ---
 name: writing-services
 description: >-
-  How to write an injection service for NAN-itself: an independent
-  local process that registers with the core and contributes prompt
-  text at every turn boundary. Covers the HTTP contract, the project
-  layout, the facts-only discipline, graceful degradation, tests, and
-  wiring into autostart. Use when creating, fixing, or extending a
-  service under workspace/services/.
+  How to write a service for NAN-itself: an independent local process
+  under workspace/services/. Covers both shapes (hub-registered
+  injection/archive services, and pull-only tools the agent calls), the
+  HTTP contract, project layout, config with secrets, facts-only
+  discipline, tests, and wiring into autostart. Use when creating,
+  fixing, or extending a service under workspace/services/.
 ---
 
-# Writing an Injection Service
+# Writing a Service
 
 A service is **one uv project** in `workspace/services/<name>/`. It is
 an ordinary local process — NOT imported by the core, NOT in-process.
 The core never links service code; the only contract is HTTP.
 
+Two shapes exist, and they reach the agent differently:
+
+| Shape | How the agent gets it | Shipped |
+|---|---|---|
+| hub (`inject` / `archive`) | registers with the core; the hub pulls it at turn boundaries | `system`, `network`, `mcp`, `segv`, `plan` |
+| pull-only | a CLI the agent runs by hand; nothing is injected | `read` |
+
 ```
 <name>/
 ├── main.py          # entry: probe + FastAPI app (required)
+├── <name>_cli.py    # pull-only: the CLI the agent runs (optional)
 ├── config.yaml      # tunables, loaded once at startup (optional)
+├── config.yaml.example  # committed template when the config holds a secret
 ├── pyproject.toml   # its own dependencies + [dependency-groups] dev = ["pytest"]
 ├── uv.lock          # committed; CI runs with --frozen
 ├── logs/            # created at boot: your logs (gitignored)
@@ -48,6 +57,11 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 - `setup_logging(config)` — `logs/<service_id>.log`, rotated.
   Everything before it goes to `logs/<name>.boot.log` (the launcher's
   capture), never to the same file.
+- Config that holds a secret (an API key, a token) must not be
+  committed: commit `config.yaml.example`, gitignore `config.yaml`, and
+  copy the example when the real file is missing so a fresh clone still
+  boots — `services/read/main.py` does exactly that, and CI starts from
+  `config/nan.yaml.example` the same way.
 
 ## The protocol (nan/injection/hub.py is the source of truth)
 
@@ -85,7 +99,33 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
    register → run → unregister so the sequence always holds —
    `async with HubLink(config)` is exactly that.
 
-## Discipline
+## Pull-only services
+
+Work that is a request rather than a turn contribution (reading a long
+file, running a converter) does not register at all:
+
+- No `HubLink`, no `/turn`, no heartbeat. Start the app and stop there.
+- `ServiceConfig.hub_url` defaults to a factory that raises when
+  `NAN_INJECTION_PORT` is unset (the kit assumes a launch by the core),
+  so a pull-only config must override it — `hub_url: str = ""`. Without
+  that, the service refuses to start when you run it by hand.
+- Ship a **stdlib-only** CLI inside the service and a two-line shim in
+  `workspace/bin/`, which is already on PATH:
+
+  ```bash
+  #!/bin/sh
+  exec python3 "$(dirname "$0")/../services/<name>/<name>_cli.py" "$@"
+  ```
+
+  Pick a name that is not a shell builtin — `read` is one, which is why
+  the reader's command is `reader`.
+- Report refusals as data (`{"code": "too_large", "chars": …, "limit": …}`
+  with a non-2xx status), never as a traceback; the CLI turns them into
+  exit codes the agent can branch on.
+- Keep the service's own limits explicit and visible in `--help`: what
+  it refuses, and what it refuses instead of silently truncating.
+
+## Discipline (hub services)
 
 - **Facts only.** Every line you emit must be a directly verifiable
   measurement or a deterministic event. No heuristics, no
@@ -110,7 +150,11 @@ never touch real hardware or the real network. Cover the differential
 logic (each event fires exactly on transition) and the `/turn`
 contract. For the contract itself, point the service's `HubLink` at
 `nan_service_kit.testing.StubHub` and assert `assert_registered` /
-`assert_turn_text` — see each shipped service's `tests/test_contract.py`.
+`assert_turn_text` — `system`, `network` and `mcp` ship a
+`tests/test_contract.py` this way; `segv`, `plan` and `read` test their
+own surface directly instead. For a pull-only service, fake the
+outbound client (`httpx.MockTransport`) so refusals (too large, outside
+the root, binary) are asserted without a model call.
 Run from the service directory:
 
 ```bash
@@ -138,6 +182,8 @@ The core exports `NAN_WORKSPACE`, `NAN_CORE_HOME`,
 - [ ] `uv sync` passes; `uv.lock` committed; `uv run --frozen pytest` green
 - [ ] Kill it mid-run: next turn proceeds without you, no retries, no noise
 - [ ] Every config key has a default; `config.yaml` documents each one
+- [ ] A config with a secret: `config.yaml` gitignored, `.example` committed
+- [ ] Pull-only: `hub_url` overridden, CLI + `bin/` shim, refusals carry a code
 - [ ] Re-read `nan/injection/hub.py` — if your assumptions differ from the
       code, the code wins
 

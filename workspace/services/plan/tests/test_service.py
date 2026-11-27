@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import plan as tree
-from main import HINT, PlanService
+from fastapi.testclient import TestClient
+from main import HINT, PlanService, build_app
 from nan_service_kit import ServiceConfig
 
 
@@ -13,6 +14,15 @@ def _service(tmp_path) -> PlanService:
     service.path = tmp_path / "plan.json"
 
     return service
+
+
+def test_the_app_answers_health_like_every_service(tmp_path):
+    service = _service(tmp_path)
+
+    assert TestClient(build_app(service)).get("/health").json() == {
+        "status": "ok",
+        "service_id": "plan",
+    }
 
 
 def _turn(**overrides) -> dict[str, object]:
