@@ -345,6 +345,10 @@ class FactLayer:
         `exclude` is keyed by (seq, ordinal): the cache layer's seen set.
         The pool is fixed, so an exhausted pool returns fewer hits rather
         than shifting the search window outward.
+
+        The cross-encoder runs only when `rerank` is true and the
+        `config.rerank.enabled` master switch allows it; omitting the
+        argument never reranks.
         """
         if self.store is None or not query.strip():
             return []
