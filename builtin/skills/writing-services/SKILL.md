@@ -20,7 +20,7 @@ Two shapes exist, and they reach the agent differently:
 | Shape | How the agent gets it | Shipped |
 |---|---|---|
 | hub (`inject` / `archive`) | registers with the core; the hub pulls it at turn boundaries | `system`, `network`, `mcp`, `segv`, `plan` |
-| pull-only | a CLI the agent runs by hand; nothing is injected | `read` |
+| pull-only | a CLI the agent runs by hand; nothing is injected | `attach` |
 
 ```
 <name>/
@@ -60,7 +60,7 @@ nan-service-kit = { path = "../../../lib/nan-service-kit", editable = true }
 - Config that holds a secret (an API key, a token) must not be
   committed: commit `config.yaml.example`, gitignore `config.yaml`, and
   copy the example when the real file is missing so a fresh clone still
-  boots — `services/read/main.py` does exactly that, and CI starts from
+  boots — `services/attach/main.py` does exactly that, and CI starts from
   `config/nan.yaml.example` the same way.
 
 ## The protocol (nan/injection/hub.py is the source of truth)
@@ -118,7 +118,7 @@ file, running a converter) does not register at all:
   ```
 
   Pick a name that is not a shell builtin — `read` is one, which is why
-  the reader's command is `reader`.
+  the reader service's command is `attach`, not `read`.
 - Report refusals as data (`{"code": "too_large", "chars": …, "limit": …}`
   with a non-2xx status), never as a traceback; the CLI turns them into
   exit codes the agent can branch on.
@@ -151,7 +151,7 @@ logic (each event fires exactly on transition) and the `/turn`
 contract. For the contract itself, point the service's `HubLink` at
 `nan_service_kit.testing.StubHub` and assert `assert_registered` /
 `assert_turn_text` — `system`, `network` and `mcp` ship a
-`tests/test_contract.py` this way; `segv`, `plan` and `read` test their
+`tests/test_contract.py` this way; `segv`, `plan` and `attach` test their
 own surface directly instead. For a pull-only service, fake the
 outbound client (`httpx.MockTransport`) so refusals (too large, outside
 the root, binary) are asserted without a model call.

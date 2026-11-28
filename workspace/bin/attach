@@ -1,0 +1,4 @@
+#!/bin/sh
+# Workspace tools. NAN's shell verb puts this directory on PATH, so an
+# agent can run `attach ...` by bare name.
+exec python3 "$(dirname "$0")/../services/attach/attach_cli.py" "$@"

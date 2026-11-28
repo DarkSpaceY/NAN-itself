@@ -1,20 +1,21 @@
 """
-`reader`: send one file and one request to the read service.
+`attach`: send one file and one request to the attach service.
 
-    reader notes/paper.txt "extract the method in three sentences"
+    attach notes/paper.txt "extract the method in three sentences"
+    attach shots/plot.png "what does the y-axis measure?"
 
-Only for a large text that actually has to be read: a small file, a
-known line range or a grep hit is cheaper through the shell.
+Text and images take the same form. Only for content that actually has
+to be read: a small file, a known line range or a grep hit is cheaper
+through the shell.
 
-The file must sit inside the workspace and hold at most 128,000
-characters; anything larger is refused with `too_large` rather than
-truncated. The answer is printed as plain text (`--json` keeps the
-envelope: path, chars, model, elapsed_s).
-
-The command is `reader`, not `read`: `read` is a shell builtin in zsh.
+The file must sit inside the workspace. A text file holds at most
+128,000 characters and an image at most 8 MB; anything larger is
+refused with `too_large` rather than truncated. The answer is printed
+as plain text (`--json` keeps the envelope: kind, path, model,
+elapsed_s, plus chars for text or mime/bytes for an image).
 
 Exit codes: 0 success, 2 usage error, 3 file too large, 4 service or
-model error.
+model error, 5 the file's capability is not configured.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import urllib.request
 from typing import Any
 
 DEFAULT_URL = "http://127.0.0.1:9006"
-URL_ENV = "READ_URL"
+URL_ENV = "ATTACH_URL"
 
 
 def _post(url: str, payload: dict[str, Any], timeout: float) -> tuple[int, dict[str, Any]]:
@@ -60,10 +61,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
 
     parser = argparse.ArgumentParser(
-        prog="reader",
+        prog="attach",
         description=(
-            "Read one workspace file through the read service. "
-            "Only for large texts that need reading; a small file or a "
+            "Read one workspace file -- text or image -- through the attach "
+            "service. Only for content that needs reading; a small file or a "
             "line range is cheaper with cat/sed."
         ),
     )
@@ -86,17 +87,17 @@ def main(argv: list[str] | None = None) -> int:
     body = {"path": args.path, "ask": " ".join(args.ask).strip()}
 
     try:
-        status, payload = _post(url + "/read", body, args.timeout)
+        status, payload = _post(url + "/attach", body, args.timeout)
 
     except TimeoutError:
-        print(f"reader: no answer within {args.timeout}s", file=sys.stderr)
+        print(f"attach: no answer within {args.timeout}s", file=sys.stderr)
 
         return 4
 
     except (urllib.error.URLError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
 
-        print(f"reader: cannot reach {url}: {reason}", file=sys.stderr)
+        print(f"attach: cannot reach {url}: {reason}", file=sys.stderr)
 
         return 4
 
@@ -112,17 +113,28 @@ def main(argv: list[str] | None = None) -> int:
     code = str(payload.get("code") or payload.get("status") or status)
 
     if code == "too_large":
+        unit = payload.get("unit") or "characters"
+
         print(
-            f"reader: too_large: {payload.get('chars')} characters > "
+            f"attach: too_large: {payload.get('size')} {unit} > "
             f"{payload.get('limit')} limit ({args.path})",
             file=sys.stderr,
         )
 
         return 3
 
+    if code == "capability_unavailable":
+        print(
+            f"attach: capability_unavailable: set capabilities."
+            f"{payload.get('capability')} in services/attach/config.yaml",
+            file=sys.stderr,
+        )
+
+        return 5
+
     message = payload.get("message") or json.dumps(payload)
 
-    print(f"reader: {code}: {message}", file=sys.stderr)
+    print(f"attach: {code}: {message}", file=sys.stderr)
 
     return 4
 

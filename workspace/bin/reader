@@ -1,5 +1,0 @@
-#!/bin/sh
-# Workspace tools. NAN's shell verb puts this directory on PATH, so an
-# agent can run `reader ...` by bare name. Not `read`: that is a zsh
-# builtin and would never reach this shim.
-exec python3 "$(dirname "$0")/../services/read/read_cli.py" "$@"

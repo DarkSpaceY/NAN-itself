@@ -89,12 +89,12 @@ repos:
         pass_filenames: false
         files: ^workspace/services/plan/
 
-      - id: pytest-read
-        name: pytest (read service)
-        entry: uv run --directory workspace/services/read --frozen pytest -q
+      - id: pytest-attach
+        name: pytest (attach service)
+        entry: uv run --directory workspace/services/attach --frozen pytest -q
         language: system
         pass_filenames: false
-        files: ^workspace/services/read/
+        files: ^workspace/services/attach/
 
       - id: pytest-service-kit
         name: pytest (service kit)

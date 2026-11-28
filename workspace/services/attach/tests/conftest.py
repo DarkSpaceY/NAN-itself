@@ -1,5 +1,5 @@
 """
-Make the service directory importable (`main`, `reader`) while keeping
+Make the service directory importable (`main`, `attach`) while keeping
 the tests in their own folder, matching the other services.
 """
 

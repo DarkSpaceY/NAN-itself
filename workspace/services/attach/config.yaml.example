@@ -1,0 +1,40 @@
+# Attach service configuration. Copy to config.yaml (gitignored) and edit.
+#
+# A pull-only service: it never registers with the injection hub, so
+# `hub_url` is deliberately empty. The agent names one workspace file and
+# one request; only the answer comes back and it never enters the agent's
+# history unless the agent writes it down.
+#
+# A file is routed by its actual bytes, not its extension: png, jpeg,
+# webp and gif go to `image`, everything else goes to `text`. A request
+# whose capability is left blank fails with `capability_unavailable`
+# instead of falling back to the other endpoint.
+
+service_id: "attach"
+host: "127.0.0.1"
+port: 9006
+
+# One request carries one file. A larger file is refused with
+# `too_large`; it is never truncated, because a silently shortened input
+# reads as if it were complete.
+max_chars: 128000
+max_image_bytes: 8000000
+
+# Files resolve against this root; empty means NAN_WORKSPACE at boot
+# (falling back to the workspace that contains services/attach).
+workspace: ""
+
+capabilities:
+  text:                     # OpenAI-compatible chat completions
+    model: "deepseek-flash"
+    base_url: "https://api.deepseek.com"
+    api_key: ""             # this is why config.yaml is not committed
+    temperature: 0.0
+    timeout: 900.0          # one long read may outlive the shell window
+
+  image:                    # a vision model; blank model or base_url = off
+    model: ""
+    base_url: ""
+    api_key: ""
+    temperature: 0.0
+    timeout: 300.0

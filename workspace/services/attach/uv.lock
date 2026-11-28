@@ -147,7 +147,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nan-read-service"
+name = "nan-attach-service"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

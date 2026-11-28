@@ -1,7 +1,7 @@
 [project]
-name = "nan-read-service"
+name = "nan-attach-service"
 version = "0.1.0"
-description = "Stateless reader service: one file plus one request in, one answer out"
+description = "Stateless reader service: one file (text or image) plus one request in, one answer out"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
