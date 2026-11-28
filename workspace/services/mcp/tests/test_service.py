@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 
+import main as service_module
 from fastapi.testclient import TestClient
-from main import MCPServer, MCPService, ServerSpec, build_app, load_config
+from main import MCPServer, MCPService, ServerSpec, _trim_lru, build_app, load_config
 
 
 def test_config_parses_the_shipped_file():
@@ -405,3 +407,50 @@ def test_an_unknown_content_type_becomes_a_warning(tmp_path):
     assert result == {"ok": True, "warnings": ["unsupported content type: hologram"]}
 
     assert not (tmp_path / "data").exists()
+
+
+def test_lru_trim_deletes_the_oldest_files_only(tmp_path):
+    old = tmp_path / "old.bin"
+    new = tmp_path / "new.bin"
+
+    old.write_bytes(b"x" * 100)
+    new.write_bytes(b"x" * 100)
+
+    os.utime(old, (1_000, 1_000))
+    os.utime(new, (2_000, 2_000))
+
+    freed = _trim_lru(tmp_path, budget=150)
+
+    assert freed == 100
+    assert not old.exists()
+    assert new.exists()
+
+
+def test_lru_trim_leaves_a_directory_under_budget_alone(tmp_path):
+    keep = tmp_path / "keep.bin"
+
+    keep.write_bytes(b"x" * 100)
+
+    assert _trim_lru(tmp_path, budget=1_000) == 0
+    assert keep.exists()
+
+
+def test_lru_trim_tolerates_a_missing_directory(tmp_path):
+    assert _trim_lru(tmp_path / "absent", budget=1) == 0
+
+
+def test_artifacts_over_budget_evict_the_oldest(tmp_path, monkeypatch):
+    monkeypatch.setattr(service_module, "ARTIFACT_BUDGET", 15)
+
+    server = _server_with(
+        _BlocksResult([]), artifact_root=tmp_path / "data", workspace=tmp_path
+    )
+
+    first = server._save_artifact("shot", b"x" * 10, "image/png", 1)
+
+    os.utime(tmp_path / first["path"], (1_000, 1_000))
+
+    second = server._save_artifact("shot", b"x" * 10, "image/png", 2)
+
+    assert not (tmp_path / first["path"]).exists()
+    assert (tmp_path / second["path"]).exists()

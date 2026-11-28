@@ -12,6 +12,7 @@ from .jobs import (
     read_output,
     read_slice,
     start_pump,
+    trim_job_logs,
     write_stdin,
 )
 from .sandbox import Sandbox, SandboxUnavailableError
@@ -28,5 +29,6 @@ __all__ = [
     "read_output",
     "read_slice",
     "start_pump",
+    "trim_job_logs",
     "write_stdin",
 ]

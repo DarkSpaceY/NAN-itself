@@ -27,7 +27,7 @@ from nan.agent import Agent
 from nan.boot import restore
 from nan.config import Settings
 from nan.events import sink
-from nan.execution import Sandbox, home_environment
+from nan.execution import Sandbox, home_environment, trim_job_logs
 from nan.gateway import Gateway
 from nan.injection import InjectionHub
 from nan.llm import LLMProvider
@@ -147,6 +147,13 @@ class Core:
         self._hub = InjectionHub(self._settings)
 
         self._settings.paths.workspace.mkdir(parents=True, exist_ok=True)
+
+        # A previous boot's job logs are unreachable now; keep them
+        # bounded before this boot adds its own.
+        freed = await asyncio.to_thread(trim_job_logs, self._settings.paths.workspace)
+
+        if freed:
+            logger.info("job logs trimmed: {} bytes freed", freed)
 
         self._sandbox = Sandbox(self._settings)
 

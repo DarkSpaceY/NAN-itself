@@ -45,6 +45,12 @@ CACHE_DIR = "cache"  # package-manager caches; regenerable, safe to delete
 # under the service's own directory, and reported as workspace paths.
 ARTIFACT_DIR = "data"
 
+# Budgets for regenerable data. Trimming aims below the budget so a full
+# cache does not evict again on the very next write.
+CACHE_BUDGET = 1 << 30  # 1 GiB: npm, uv and playwright caches
+ARTIFACT_BUDGET = 500 << 20  # 500 MiB: saved tool results
+TRIM_TARGET = 0.9
+
 MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -79,6 +85,54 @@ def _safe_name(value: str) -> str:
     cleaned = _SAFE.sub("-", value).strip("-._")
 
     return cleaned[:60] or "tool"
+
+
+def _trim_lru(root: Path, budget: int, target: float = TRIM_TARGET) -> int:
+    """
+    Delete the least recently modified files under `root` until it fits
+    `budget * target`; only when it is over `budget` at all. Returns the
+    bytes freed. Regenerable data only: a deleted file comes back on the
+    next run that needs it.
+    """
+    if not root.is_dir():
+        return 0
+
+    entries: list[tuple[float, Path]] = []
+
+    total = 0
+
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+
+        with contextlib.suppress(OSError):
+            stat = path.stat()
+
+            entries.append((stat.st_mtime, path))
+
+            total += stat.st_size
+
+    if total <= budget:
+        return 0
+
+    goal = int(budget * target)
+
+    freed = 0
+
+    for _, path in sorted(entries):
+        if total <= goal:
+            break
+
+        with contextlib.suppress(OSError):
+            size = path.stat().st_size
+
+            path.unlink()
+
+            total -= size
+
+            freed += size
+
+    return freed
 
 
 # The spec's five content kinds for a tool result. Anything else is a
@@ -415,6 +469,10 @@ class MCPServer:
 
         path.write_bytes(data)
 
+        # One walk per artifact keeps the budget exact even when several
+        # servers share the root; the files are few and the walk is cheap.
+        _trim_lru(self.artifact_root, ARTIFACT_BUDGET)
+
         try:
             shown = str(path.relative_to(self.workspace))
 
@@ -700,6 +758,14 @@ def main() -> None:
     config = load_config()
 
     setup_logging(config)
+
+    # Shrink the regenerable caches before any server can be using them;
+    # a later `npx`/`uvx` simply refetches what was evicted. Kept out of
+    # the app lifespan so tests never touch a real cache.
+    freed = _trim_lru(config.home / CACHE_DIR, CACHE_BUDGET)
+
+    if freed:
+        logger.info("cache trimmed: {} bytes freed", freed)
 
     service = MCPService(config)
 

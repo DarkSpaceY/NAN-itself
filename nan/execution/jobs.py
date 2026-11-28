@@ -27,6 +27,7 @@ import contextlib
 import json
 import os
 import secrets
+import shutil
 import signal
 import time
 from dataclasses import dataclass, field
@@ -47,6 +48,12 @@ _KEEP_FINISHED = 20
 # run's, and an old log is never truncated by a fresh j1.
 _BOOT_ID = secrets.token_hex(3)
 
+# Budget for logs of finished boots. Nothing reads a previous boot's
+# directory -- the registry is in memory -- so whole directories go.
+JOB_LOG_BUDGET = 200 << 20
+TRIM_TARGET = 0.9
+
+
 _TRUNCATED = b"\n[nan: log truncated at the configured limit]\n"
 
 
@@ -60,6 +67,71 @@ def kill_group(pgid: int, sig: int) -> None:
 def job_directory(workspace: Path, agent_id: str) -> Path:
     """This boot's job directory for one agent."""
     return workspace / ".nan" / "jobs" / agent_id / _BOOT_ID
+
+
+def trim_job_logs(
+    workspace: Path,
+    budget: int = JOB_LOG_BUDGET,
+    target: float = TRIM_TARGET,
+) -> int:
+    """
+    Delete whole log directories of previous boots until they fit the
+    budget, oldest first. Nothing reads them: the job registry lives in
+    memory, so a restart orphans every earlier boot. The current boot is
+    never touched. Returns the bytes freed.
+    """
+    root = workspace / ".nan" / "jobs"
+
+    if not root.is_dir():
+        return 0
+
+    boots: list[tuple[float, int, Path]] = []
+
+    for agent_dir in root.iterdir():
+        if not agent_dir.is_dir():
+            continue
+
+        for boot_dir in agent_dir.iterdir():
+            if not boot_dir.is_dir() or boot_dir.name == _BOOT_ID:
+                continue
+
+            size = 0
+            newest = 0.0
+
+            for path in boot_dir.rglob("*"):
+                if not path.is_file():
+                    continue
+
+                with contextlib.suppress(OSError):
+                    stat = path.stat()
+
+                    size += stat.st_size
+
+                    newest = max(newest, stat.st_mtime)
+
+            boots.append((newest, size, boot_dir))
+
+    total = sum(size for _, size, _ in boots)
+
+    if total <= budget:
+        return 0
+
+    goal = int(budget * target)
+
+    freed = 0
+
+    for _, size, boot_dir in sorted(boots, key=lambda item: item[0]):
+        if total <= goal:
+            break
+
+        with contextlib.suppress(OSError):
+            shutil.rmtree(boot_dir)
+
+            total -= size
+
+            freed += size
+
+    return freed
 
 
 @dataclass
