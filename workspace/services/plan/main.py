@@ -73,13 +73,6 @@ class PlanService:
 
         origin = str(turn.get("origin") or "normal")
 
-        goals = tree.load(self.path)
-
-        if not goals:
-            self._states.pop(agent_id, None)
-
-            return ""
-
         state = self._states.get(agent_id)
 
         # The hub re-injects a parked turn with the same started_at;
@@ -87,11 +80,18 @@ class PlanService:
         if state is not None and state.turn_started_at == started:
             return state.last_text
 
+        goals = tree.load(self.path)
+
         full = state is None or state.epoch != epoch or origin in ("first", "context_cleared")
 
-        text = (
-            HINT + "\n" + tree.render_full(goals) if full else tree.render_delta(state.seen, goals)
-        )
+        if not goals:
+            # An empty tree still announces the tool: without this the agent
+            # never learns `plan` exists, and so never opens one.
+            text = HINT if full else ""
+        elif full:
+            text = HINT + "\n" + tree.render_full(goals)
+        else:
+            text = tree.render_delta(state.seen, goals)
 
         self._states[agent_id] = _State(
             epoch=epoch,

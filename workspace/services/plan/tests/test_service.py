@@ -38,8 +38,22 @@ def _turn(**overrides) -> dict[str, object]:
     return turn
 
 
-def test_no_plan_injects_nothing(tmp_path):
-    assert _service(tmp_path).contribution(_turn(origin="first")) == ""
+def test_no_plan_still_announces_the_tool_once(tmp_path):
+    service = _service(tmp_path)
+
+    assert service.contribution(_turn(origin="first")) == HINT
+
+    assert service.contribution(_turn(started_at=20.0)) == ""
+
+
+def test_the_first_goal_after_the_hint_arrives_as_a_delta(tmp_path):
+    service = _service(tmp_path)
+
+    service.contribution(_turn(origin="first"))
+
+    tree.save(service.path, [tree.Goal(id="g1", text="page renders")])
+
+    assert service.contribution(_turn(started_at=20.0)) == "- g1 new: page renders"
 
 
 def test_a_new_epoch_gets_the_whole_tree(tmp_path):
