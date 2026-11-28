@@ -17,6 +17,8 @@
 //                  be until its marked turn would leave the view,
 //                  then the view follows it.
 
+import { GUTTER, laneSvg, layoutLanes } from "./lanes.js";
+
 const $ = (sel, root = document) => root.querySelector(sel);
 
 // A scroll the page caused (reload, reveal) is not a scroll the reader
@@ -27,13 +29,13 @@ const settle = (ms = 120) => {
   settleUntil = performance.now() + ms;
 };
 
+// The grid track for the gutter comes from the same constant the lanes
+// are drawn with, so widening the cap cannot desynchronise the two.
+document.documentElement.style.setProperty("--gutter", `${GUTTER}px`);
+
 const ROW_H = 30;
 const GAP_H = 26;
 const GAP_SECONDS = 300; // idle longer than this earns a divider
-const LANE_GAP = 10;
-const LANE_COLS = 8;
-const LANE_X0 = 6;
-const GUTTER = LANE_X0 + LANE_COLS * LANE_GAP;
 const OVERSCAN = 10; // rows rendered beyond the viewport, each way
 const PAGE = 300;
 const MIN_SPAN = 4; // seconds; tighter than this is not worth showing
@@ -468,7 +470,14 @@ function rebuild() {
   state.items = items;
   state.rowItem = rowItem;
   state.height = top;
-  state.lanes = layoutLanes();
+  // Filtered-out rows still hold their lane: the branch is real whether
+  // or not the current filter shows it.
+  state.lanes = layoutLanes({
+    rows: state.rows,
+    agents: state.agents,
+    winFrom: state.win.from,
+    isHidden: (row) => Boolean(state.filter) && !matchFilter(row),
+  });
 
   settle();
 
@@ -510,115 +519,6 @@ function matchFilter(row) {
   );
 }
 
-// The lineage gutter.
-//
-// Rows are in global time order, so this is a git graph, not a tree:
-// a branch is open from the row that first shows the agent until the
-// row that carries its last recorded turn. An agent that was born
-// before the window is drawn as a lane already in flight, and one
-// whose last turn is still ahead simply runs off the bottom --
-// nothing is marked dead until the archive says so.
-function layoutLanes() {
-  const open = []; // [{ agent, col }] keeping column order
-  const lanes = new Array(state.rows.length);
-
-  const free = (col) => !open.some((entry) => entry.col === col);
-
-  const firstFree = (from) => {
-    for (let col = Math.max(0, from); col < LANE_COLS; col += 1) if (free(col)) return col;
-    for (let col = 0; col < LANE_COLS; col += 1) if (free(col)) return col;
-    return -1;
-  };
-
-  for (let i = 0; i < state.rows.length; i += 1) {
-    // Filtered-out rows still hold their lane: the branch is real
-    // whether or not the current filter shows it.
-    const hidden = state.filter && !matchFilter(state.rows[i]);
-    const row = state.rows[i];
-    const meta = state.agents.get(row.agent_id);
-    const before = open.map((entry) => ({ ...entry }));
-
-    let entry = open.find((c) => c.agent === row.agent_id);
-    let birth = null;
-    let elbow = null;
-
-    if (!entry) {
-      const parent = open.find((c) => c.agent === row.parent_id) || null;
-      const depth = meta ? meta.depth || 0 : row.depth || 0;
-      const preferred = parent ? parent.col + 1 : Math.min(depth, LANE_COLS - 1);
-      const col = free(preferred) ? preferred : Math.max(0, firstFree(0));
-
-      entry = { agent: row.agent_id, col };
-      open.push(entry);
-      open.sort((a, b) => a.col - b.col);
-
-      // Born inside the window: branch off the parent's lane. Born
-      // before it: the lane was already running when this window
-      // opened, so it enters from the top edge instead.
-      const older = meta && meta.first != null && meta.first < state.win.from - 0.5;
-      birth = older ? "carried" : "born";
-      elbow = parent ? parent.col : null;
-    }
-
-    const count = meta ? meta.count : row.seq + 1;
-    const closes = row.seq >= count - 1;
-    const dead = closes && (!meta || meta.last_death);
-    const col = entry.col;
-
-    if (closes) open.splice(open.indexOf(entry), 1);
-
-    lanes[i] = {
-      agent: row.agent_id,
-      hidden,
-      col,
-      birth,
-      elbow,
-      dead,
-      before,
-      after: open.map((c) => ({ ...c })),
-    };
-  }
-
-  return lanes;
-}
-
-function laneSvg(lane) {
-  if (!lane) return "";
-
-  const mid = ROW_H / 2;
-  const x = (col) => LANE_X0 + col * LANE_GAP;
-  const parts = [];
-
-  const line = (col, y1, y2, agent) => {
-    const hot = state.path.has(agent) ? " hot" : "";
-    parts.push(`<path class="lane${hot}" d="M${x(col)} ${y1} L${x(col)} ${y2}"/>`);
-  };
-
-  for (const entry of lane.before) line(entry.col, 0, mid, entry.agent);
-
-  if (lane.birth === "carried") {
-    line(lane.col, 0, mid, lane.agent);
-  } else if (lane.birth === "born") {
-    if (lane.elbow == null) {
-      line(lane.col, 0, mid, lane.agent);
-    } else {
-      const px = x(lane.elbow);
-      const nx = x(lane.col);
-      const hot = state.path.has(lane.agent) ? " hot" : "";
-      parts.push(
-        `<path class="lane${hot}" d="M${px} 0 L${px} ${mid - 5} Q${px} ${mid} ${px + 5} ${mid} L${nx - 4} ${mid}"/>`,
-      );
-    }
-  }
-
-  const nodeClass = lane.dead ? "node dead" : "node";
-  parts.push(`<circle class="${nodeClass}" cx="${x(lane.col)}" cy="${mid}" r="${lane.dead ? 3.2 : 3.4}"/>`);
-
-  for (const entry of lane.after) line(entry.col, mid, ROW_H, entry.agent);
-
-  return `<svg width="${GUTTER}" height="${ROW_H}" viewBox="0 0 ${GUTTER} ${ROW_H}" aria-hidden="true">${parts.join("")}</svg>`;
-}
-
 // The row's own outcome, kept tiny: the ledger is a log, so only the
 // unusual characteristics earn a mark and the ordinary run of turns
 // stays silent.
@@ -643,7 +543,7 @@ function rowHtml(item) {
   return (
     `<div class="row${selected}${marked}${danger}" data-key="${esc(key)}" data-ri="${item.ri}" ` +
     `style="top:${item.top}px;--h:${hueOf(row.agent_id)}">` +
-    `<span class="c-gut">${laneSvg(lane)}</span>` +
+    `<span class="c-gut">${laneSvg(lane, state.path, ROW_H)}</span>` +
     `<span class="t">${clock(row.started_at)}</span>` +
     `<span class="a">${stateMark(row)}<span class="nm">${esc(row.agent_id)}</span><span class="sq">${row.seq}</span></span>` +
     `<span class="sum" title="${esc(row.summary)}">${esc(row.summary)}</span>` +

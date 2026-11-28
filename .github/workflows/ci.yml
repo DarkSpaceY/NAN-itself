@@ -114,5 +114,11 @@ jobs:
       - name: Tests
         run: npm run test
 
+      # The ledger's lane geometry is plain JS with no DOM; keep it
+      # covered without adding a package just for one test file.
+      - name: Ledger web tests
+        working-directory: ${{ github.workspace }}
+        run: node --test workspace/services/segv/web/tests/lanes.test.js
+
       - name: Build
         run: npm run build

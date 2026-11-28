@@ -120,6 +120,13 @@ repos:
         pass_filenames: false
         files: ^electron/renderer/.*\.(ts|tsx)$
 
+      - id: node-test-segv-web
+        name: node test (segv web lanes)
+        entry: node --test workspace/services/segv/web/tests/lanes.test.js
+        language: system
+        pass_filenames: false
+        files: ^workspace/services/segv/web/.*\.js$
+
       # CI runs the production build; a CSS import or vite config
       # mistake is invisible to tsc and vitest alone.
       - id: build
