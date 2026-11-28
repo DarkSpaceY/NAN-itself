@@ -337,7 +337,7 @@ class FactLayer:
         top_k: int = 20,
         pool: int | None = None,
         mode: str = "hybrid",
-        rerank: bool | None = None,
+        rerank: bool = False,
         exclude: set[tuple[int, int]] | None = None,
     ) -> list[dict[str, Any]]:
         """Fuse the routes `mode` selects, dropping already-injected chunks.
@@ -386,9 +386,9 @@ class FactLayer:
         weights = dict(self.config.fusion.weights)
         order = [name for name in self.config.fusion.order if name in routes]
         k = self.config.fusion.k
-        use_rerank = (
-            self.config.rerank.enabled if rerank is None else bool(rerank)
-        ) and self.config.rerank.enabled
+        # `enabled` is only the master switch: the CE runs when a caller
+        # explicitly asks for it, and never just because the service boots.
+        use_rerank = bool(rerank) and self.config.rerank.enabled
 
         if use_rerank:
             pre = fuse_rrf(

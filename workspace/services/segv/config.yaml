@@ -51,7 +51,7 @@ fact:                       # segv-fact: chunks + two int8 vectors + BM25/HNSW
     query_prefix: "task: search result | query: "
 
   rerank:                   # BAAI/bge-reranker-base, in-process torch fp16
-    enabled: true
+    enabled: true            # master switch; each search opts in with rerank=true
     model: "BAAI/bge-reranker-base"
     device: "auto"
     fp16: true

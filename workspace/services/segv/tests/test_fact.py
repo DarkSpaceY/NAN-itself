@@ -59,7 +59,12 @@ class FakeEmbedder:
 
 
 class FakeReranker:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
     def score(self, query: str, texts: list[str]) -> list[float]:
+        self.calls.append(query)
+
         words = set(query.lower().split())
 
         return [float(len(words & set(text.lower().split()))) for text in texts]
@@ -115,13 +120,19 @@ def _fact_config(**chunk: Any) -> FactConfig:
     )
 
 
-def _layer(l0: Store, config: FactConfig, *, slm: FakeSlm | None = None) -> FactLayer:
+def _layer(
+    l0: Store,
+    config: FactConfig,
+    *,
+    slm: FakeSlm | None = None,
+    reranker: FakeReranker | None = None,
+) -> FactLayer:
     return FactLayer(
         l0,
         config,
         slm=slm or FakeSlm(),
         embedder=FakeEmbedder(),
-        reranker=FakeReranker(),
+        reranker=reranker or FakeReranker(),
     )
 
 
@@ -205,6 +216,30 @@ def test_ingest_stores_two_texts_two_vectors_and_pointer(tmp_path: Path) -> None
     assert hits[0]["chunk_id"].endswith("#c0")
 
     layer.close()
+    l0.close()
+
+
+def test_rerank_runs_only_when_the_search_opts_in(tmp_path: Path) -> None:
+    l0 = Store(tmp_path / "data")
+
+    l0.append(_record(1_700_000_000.0, _rendered()))
+
+    reranker = FakeReranker()
+
+    layer = _layer(l0, _fact_config(), reranker=reranker)
+
+    layer.ingest("root", 0)
+
+    layer.search("root", "alpha", top_k=5, pool=10)
+
+    assert reranker.calls == []
+
+    layer.search("root", "alpha", top_k=5, pool=10, rerank=True)
+
+    assert reranker.calls == ["alpha"]
+
+    layer.close()
+
     l0.close()
 
 
