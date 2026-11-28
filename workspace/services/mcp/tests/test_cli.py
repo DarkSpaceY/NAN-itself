@@ -135,6 +135,45 @@ def test_call_prints_plain_text(monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "hello"
 
 
+def test_call_prints_saved_file_paths(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_cli,
+        "_post",
+        lambda path, body: {
+            "ok": True,
+            "files": [
+                {"path": "services/mcp/data/playwright/a.png", "mime": "image/png", "bytes": 70}
+            ],
+        },
+    )
+
+    assert mcp_cli.main(["call", "playwright", "browser_take_screenshot", "{}"]) == 0
+
+    out = capsys.readouterr().out
+
+    assert "file services/mcp/data/playwright/a.png" in out
+    assert "image/png" in out
+
+
+def test_call_prints_links_and_warnings(monkeypatch, capsys):
+    monkeypatch.setattr(
+        mcp_cli,
+        "_post",
+        lambda path, body: {
+            "ok": True,
+            "links": [{"uri": "file:///a.pdf", "name": "a.pdf", "size": 10}],
+            "warnings": ["unsupported content type: hologram"],
+        },
+    )
+
+    assert mcp_cli.main(["call", "calc", "find", "{}"]) == 0
+
+    captured = capsys.readouterr()
+
+    assert "link a.pdf file:///a.pdf (10)" in captured.out
+    assert "warning: unsupported content type: hologram" in captured.err
+
+
 def test_call_maps_unknown_tool_to_exit_3(monkeypatch, capsys):
     monkeypatch.setattr(
         mcp_cli,

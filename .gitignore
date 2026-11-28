@@ -41,6 +41,8 @@ turns.*/
 workspace/services/segv/data/
 # plan service state: the agent's goal tree
 workspace/services/plan/data/
+# mcp service artifacts: non-text tool results (images, PDFs, ...)
+workspace/services/mcp/data/
 *.log
 *.log.*
 workspace/*.pid

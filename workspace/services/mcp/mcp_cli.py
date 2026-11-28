@@ -319,13 +319,37 @@ def _render_call(data: Any) -> None:
 
     result = data.get("result")
 
+    links = data.get("links") or []
+
+    files = data.get("files") or []
+
+    warnings = data.get("warnings") or []
+
     if isinstance(result, str):
         if result:
             print(result)
 
-        return
+    elif result is not None:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    # A resource_link is a reference, not content: print the handle.
+    for item in links:
+        if isinstance(item, dict):
+            detail = ", ".join(
+                str(item[key]) for key in ("mimeType", "size") if item.get(key) is not None
+            )
+
+            print(f"link {item.get('name')} {item.get('uri')}" + (f" ({detail})" if detail else ""))
+
+    # Non-text blocks were written to disk by the gateway; the path is the
+    # handle, and it is the only part of the payload worth printing.
+    for item in files:
+        if isinstance(item, dict):
+            print(f"file {item.get('path')} ({item.get('mime')}, {item.get('bytes')} bytes)")
+
+    # Ignored content is never silent: the warning names the type.
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
 
 
 def _parser() -> Parser:

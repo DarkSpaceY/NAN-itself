@@ -15,9 +15,14 @@ are restarted, added ones are spawned, removed ones are stopped.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import json
 import os
+import re
+import secrets
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +40,111 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = HERE / "config.yaml"
 
 CACHE_DIR = "cache"  # package-manager caches; regenerable, safe to delete
+
+# Non-text tool results (images, audio, PDFs, 3D assets) are written here,
+# under the service's own directory, and reported as workspace paths.
+ARTIFACT_DIR = "data"
+
+MIME_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
+    "audio/ogg": ".ogg",
+    "video/mp4": ".mp4",
+    "application/pdf": ".pdf",
+    "model/gltf+json": ".gltf",
+    "model/gltf-binary": ".glb",
+}
+
+_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _extension_for(mime: str) -> str:
+    base = mime.split(";", 1)[0].strip().lower()
+
+    if base in MIME_EXTENSIONS:
+        return MIME_EXTENSIONS[base]
+
+    if base.startswith("image/"):
+        return "." + base.split("/", 1)[1].replace("+xml", "")
+
+    return ".bin"
+
+
+def _safe_name(value: str) -> str:
+    cleaned = _SAFE.sub("-", value).strip("-._")
+
+    return cleaned[:60] or "tool"
+
+
+# The spec's five content kinds for a tool result. Anything else is a
+# warning, not a guess: the union is closed and has no extension clause.
+_KIND_BY_CLASS = {
+    "TextContent": "text",
+    "ImageContent": "image",
+    "AudioContent": "audio",
+    "EmbeddedResource": "resource",
+    "ResourceLink": "resource_link",
+}
+
+
+def _content_kind(block: Any) -> str:
+    """The spec's `type` field; the class name is a fallback for stubs."""
+    kind = getattr(block, "type", None)
+
+    if isinstance(kind, str) and kind:
+        return kind
+
+    return _KIND_BY_CLASS.get(type(block).__name__, "")
+
+
+def _decode(raw: Any) -> bytes | None:
+    """A base64 payload, as the spec requires for image/audio/blob; None
+    when it is missing or not decodable."""
+    if not isinstance(raw, str) or not raw:
+        return None
+
+    try:
+        return base64.b64decode(raw)
+
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _text_of(block: Any) -> str | None:
+    """Text the block carries: a text block, or a resource's text body."""
+    kind = _content_kind(block)
+
+    if kind == "text":
+        text = getattr(block, "text", None)
+
+        return text if isinstance(text, str) else None
+
+    if kind == "resource":
+        text = getattr(getattr(block, "resource", None), "text", None)
+
+        return text if isinstance(text, str) else None
+
+    return None
+
+
+def _link_of(block: Any) -> dict[str, Any]:
+    """A resource_link: a reference only, so there is nothing to save."""
+    link = {
+        key: value
+        for key in ("uri", "name", "title", "description", "mimeType", "size")
+        if (value := getattr(block, key, None)) is not None
+    }
+
+    # The model may hand back a URL object rather than a plain string.
+    if "uri" in link:
+        link["uri"] = str(link["uri"])
+
+    return link
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
@@ -108,10 +218,23 @@ class MCPServer:
     stdio plus its tool snapshot.
     """
 
-    def __init__(self, spec: ServerSpec, config: Config) -> None:
+    def __init__(
+        self,
+        spec: ServerSpec,
+        config: Config,
+        *,
+        artifact_root: Path | None = None,
+        workspace: Path | None = None,
+    ) -> None:
         self.spec = spec
 
         self.config = config
+
+        self.artifact_root = artifact_root or config.home / ARTIFACT_DIR
+
+        self.workspace = (
+            workspace or Path(os.environ.get("NAN_WORKSPACE", str(config.home.parents[1])))
+        ).resolve()
 
         self.tools: list[dict[str, Any]] = []
 
@@ -198,20 +321,107 @@ class MCPServer:
             except Exception as exc:
                 return _error("tool_error", str(exc))
 
-        texts = [block.text for block in result.content if type(block).__name__ == "TextContent"]
+        texts = [text for block in result.content if (text := _text_of(block)) is not None]
 
         text = "\n".join(texts).strip()
 
         if result.is_error:
             return _error("tool_error", text or f"{self.spec.name}.{tool} returned an error")
 
+        files: list[dict[str, Any]] = []
+
+        links: list[dict[str, Any]] = []
+
+        warnings: list[str] = []
+
+        for block in result.content:
+            kind = _content_kind(block)
+
+            # Text blocks, and resources whose body is text, were read above.
+            if _text_of(block) is not None:
+                continue
+
+            if kind in ("image", "audio"):
+                mime = str(getattr(block, "mimeType", None) or "application/octet-stream")
+
+                data = _decode(getattr(block, "data", None))
+
+                if data is None:
+                    warnings.append(f"{kind} content without valid base64 data")
+
+                else:
+                    files.append(self._save_artifact(tool, data, mime, len(files) + 1))
+
+                continue
+
+            if kind == "resource":
+                resource = getattr(block, "resource", None)
+
+                mime = str(getattr(resource, "mimeType", None) or "application/octet-stream")
+
+                data = _decode(getattr(resource, "blob", None))
+
+                if data is None:
+                    warnings.append("resource content without a text or blob body")
+
+                else:
+                    files.append(self._save_artifact(tool, data, mime, len(files) + 1))
+
+                continue
+
+            if kind == "resource_link":
+                links.append(_link_of(block))
+
+                continue
+
+            warnings.append(f"unsupported content type: {kind or type(block).__name__}")
+
+        if not (texts or files or links or warnings):
+            if getattr(result, "data", None) is not None:
+                return {"ok": True, "result": result.data}
+
+            return {"ok": True, "result": ""}
+
+        reply: dict[str, Any] = {"ok": True}
+
         if texts:
-            return {"ok": True, "result": _maybe_json(text)}
+            reply["result"] = _maybe_json(text)
 
-        if getattr(result, "data", None) is not None:
-            return {"ok": True, "result": result.data}
+        if files:
+            reply["files"] = files
 
-        return {"ok": True, "result": ""}
+        if links:
+            reply["links"] = links
+
+        if warnings:
+            reply["warnings"] = warnings
+
+        return reply
+
+    def _save_artifact(self, tool: str, data: bytes, mime: str, index: int) -> dict[str, Any]:
+        """
+        Write one non-text block under the service's data dir and report
+        it as a workspace-relative path, so `attach` can read it next.
+        """
+        directory = self.artifact_root / _safe_name(self.spec.name)
+
+        directory.mkdir(parents=True, exist_ok=True)
+
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+
+        name = f"{stamp}-{_safe_name(tool)}-{index}-{secrets.token_hex(3)}{_extension_for(mime)}"
+
+        path = directory / name
+
+        path.write_bytes(data)
+
+        try:
+            shown = str(path.relative_to(self.workspace))
+
+        except ValueError:
+            shown = str(path)
+
+        return {"path": shown, "mime": mime, "bytes": len(data)}
 
 
 class MCPService:
@@ -363,6 +573,10 @@ class MCPService:
             "`mcp list` shows connected tools, queued and starting servers, and unavailable ones, "
             "`mcp schema <server> <tool>` shows the arguments, "
             "and `mcp call <server> <tool> '<json>'` prints the tool result. "
+            "A non-text result (image, audio, PDF, 3D asset) is saved under "
+            "`services/mcp/data/` and printed as a workspace path, so `attach` can read it; "
+            "a resource link is printed as a reference, and an unknown content type is "
+            "reported as a warning and skipped. "
             "On failure the call exits non-zero and writes a JSON error to stderr."
         )
 
